@@ -233,7 +233,7 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
     def news(seat: int) -> str:
         events = table.act(seat, "get_log", {"since": seen[seat]})["events"]
         lines = [f"[{e['step']}] " + " ".join(e["text"]) + (" (to you: " + " ".join(e["private"]) + ")" if e.get("private") else "")
-                 for e in events if (e["text"] or e.get("private")) and e["tool"] != "pass_priority"][-40:]  # passes are noise
+                 for e in events if (e["text"] and e["tool"] != "pass_priority") or e.get("private")][-40:]  # passes are noise
         return "Since your last wake:\n" + "\n".join(lines) if lines else "Nothing has happened since your last wake."
 
     def triage(seats: list[int]) -> dict[int, bool]:

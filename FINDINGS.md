@@ -49,7 +49,7 @@ one to three minutes. Busy turns are still six to fifteen, which is what S3 and 
 | F5 | Politics appears by itself once there are threats. | No talk in rounds 1-2; by round 3 all four seats argued about who the threat was, and Zuko changed its removal target | Good. **Open**: reply wakes, so a direct question gets an answer before the decision |
 | F6 | The table read the threat correctly and still lost to it. | All three opponents named Miirym's engine in round 3; it killed two of them on turn 5 | A deck-balance result, not a harness one: see below |
 | F7 | Round caps count eliminated seats. | `--cycles` multiplies by the number of seats at the start | **Fixed**: a game is capped in rounds; on a resume the turn in progress is the first of the new rounds |
-| F8 | No narrative or rubric score at the end. | Only `report.md` standings and each player's own account | **Open**: PLAN §11.1 and §12.1 |
+| F8 | No narrative or rubric score at the end. | Only `report.md` standings and each player's own account | **Partly built**: `fcsim summarize <game_dir>` condenses each round with full information (the log, private draws, each player's own account, audit findings) into `narrative/round-NN.md`, then writes `narrative.md` with a closing section that judges the game against the group's rubric. Finished rounds are reused, so another style costs two calls. Building it showed that the turn's own draw was recorded nowhere: every draw is now told privately to its seat. **Open**: computed rubric scores |
 
 ## What the pod says about the decks
 

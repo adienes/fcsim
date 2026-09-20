@@ -184,6 +184,9 @@ class Table:
             raise
         told = outcome if isinstance(outcome, ops.Told) else outcome[0]
         lints = [] if isinstance(outcome, ops.Told) else outcome[1]
+        for whispered_to, sentence in game.whispers:
+            told.secretly([whispered_to], sentence)
+        game.whispers = []
         turn.repair_after_elimination(game)
         game.ledger[:] = [e for e in game.ledger if e.get("source") is None or e["source"] in game.objects]
         self.game, self.rev = game, self.rev + 1

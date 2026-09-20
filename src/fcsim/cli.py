@@ -12,6 +12,7 @@ from .audit import render as render_report
 from .cards import CardDatabase, CardsError
 from .cards.edhrec import average_deck
 from .play import goldfish, play_pod
+from .play.narrative import STYLES, summarize
 from .play.status import render as render_status
 from .play.status import status
 from .rules import RulesError, RulesReference
@@ -122,6 +123,12 @@ def main(argv: list[str] | None = None) -> int:
     fish.add_argument("--max-calls", type=int, default=30, help="Hard limit on model calls for this run")
     fish.add_argument("--out", default="games", help="Directory to create the game directory in")
 
+    story = commands.add_parser("summarize", help="Write narrative.md, the story of a game, from its directory (uses the model)")
+    story.add_argument("game_dir")
+    story.add_argument("--style", choices=sorted(STYLES), default="story")
+    story.add_argument("--max-calls", type=int, default=30, help="Hard limit on model calls for this run")
+    _model_options(story, audited=False, cost_default=5.0)
+
     where = commands.add_parser("status", help="Where a game stands and where its time went; works while it is being played")
     where.add_argument("game_dir")
     where.add_argument("--json", action="store_true")
@@ -140,9 +147,9 @@ def main(argv: list[str] | None = None) -> int:
     pod.add_argument("--out", default="games")
 
     args = parser.parse_args(argv)
-    if args.command in ("cards", "deck", "audit", "goldfish", "pod", "status"):
+    if args.command in ("cards", "deck", "audit", "goldfish", "pod", "status", "summarize"):
         try:
-            return {"cards": _cards, "deck": _deck, "audit": _audit, "goldfish": _goldfish, "pod": _pod, "status": _status}[args.command](args)
+            return {"cards": _cards, "deck": _deck, "audit": _audit, "goldfish": _goldfish, "pod": _pod, "status": _status, "summarize": _summarize}[args.command](args)
         except (CardsError, RunnerError, ValueError, OSError) as exc:
             print(json.dumps({"error": {"code": "cards_error", "message": str(exc)}}), file=sys.stderr)
             return 2
@@ -272,4 +279,13 @@ def _pod(args: argparse.Namespace) -> int:
 def _status(args: argparse.Namespace) -> int:
     report = status(args.game_dir)
     print(json.dumps(report, indent=2, ensure_ascii=False) if args.json else render_status(report))
+    return 0
+
+
+def _summarize(args: argparse.Namespace) -> int:
+    runner = make_runner(args.backend, model=args.model, effort=args.effort, budget=_budget(args))
+    result = summarize(args.game_dir, runner, CardDatabase(), style=args.style)
+    with open(result["narrative"], encoding="utf-8") as text:
+        print("\n" + text.read())
+    print(f"Written to {result['narrative']}; round accounts are in {result['directory']}/narrative/")
     return 0

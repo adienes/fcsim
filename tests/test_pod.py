@@ -233,3 +233,39 @@ def test_a_standing_policy_stops_the_respond_or_pass_questions(database, tmp_pat
         table.act(seat, {"priority": "pass_priority", "resolution": "finish_resolution", "declare_attackers": "declare_attackers",
                          "discard": "finish_step"}[kind])
     assert table.game.seats[1].response_policy == "ask" and table.game.seats[2].response_policy == "pass_always"   # reset on one's own turn only
+
+
+def test_summarize_condenses_each_round_once_and_writes_the_story(database, tmp_path):
+    from fcsim.play.narrative import summarize
+
+    class Writer:
+        """Stands in for the model: answers with text and records what it was asked."""
+        model, backend = "scripted", "fake"
+
+        def __init__(self):
+            self.asked, self.budget = [], Budget(max_calls=50)
+
+        def ask(self, system, prompt, **_):
+            self.budget.begin()
+            self.asked.append((system, prompt))
+            return Reply(data=None, text=f"An account ({len(self.asked)}).", cost_usd=0.01, seconds=0.1, model=self.model)
+
+    budget = Budget(max_calls=300)
+    game = play_pod(decks(tmp_path), [ScriptedSeat(budget) for _ in range(3)], FakeRunner([OK] * 60, budget), database,
+                    cycles=2, seed=4, out_root=tmp_path / "games", echo=lambda *_: None)
+    writer = Writer()
+    result = summarize(game["directory"], writer, database, style="recap", echo=lambda *_: None)
+    directory = Path(game["directory"])
+    assert result["rounds"] == 2 and (directory / "narrative.md").read_text() == "An account (3).\n"   # two rounds, then the story
+    assert (directory / "narrative" / "round-01.md").read_text() == "An account (1).\n"
+    first = writer.asked[0][1]
+    assert first.startswith("ROUND 1 (table turns 1 to 3)") and "Pir plays Forest" in first and "[private to Pir: Drew" in first
+    assert "passes priority" not in first and "THE PLAYERS' OWN ACCOUNTS" in first and "- Pir (turn 1, priority): Played a land" in first
+    story_system, story_prompt = writer.asked[-1]
+    assert "A clear recap" in story_system and "4 to 10 rounds" in story_system
+    assert "THE POD" in story_prompt and "- Talrand: alive, 40 life; commander: Talrand, Sky Summoner" in story_prompt and "ROUND 2\nAn account (2)." in story_prompt
+    again = Writer()
+    summarize(game["directory"], again, database, style="analysis", echo=lambda *_: None)
+    assert len(again.asked) == 2          # round 1 is reused; the last round of an unfinished game and the story are rewritten
+    with pytest.raises(ValueError, match="style"):
+        summarize(game["directory"], again, database, style="epic")

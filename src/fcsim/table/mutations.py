@@ -121,6 +121,8 @@ def draw(game: Game, seat: int, count: int = 1) -> list[Obj]:
             game.seats[seat].drew_from_empty = True
             break
         drawn.append(move(game, game.objects[library[0]], "hand"))
+    if drawn:  # every draw, the turn's own included, is told to its seat and so reaches the full-information journal
+        game.whispers.append([seat, "Drew " + ", ".join(obj.name for obj in drawn) + "."])
     return drawn
 
 

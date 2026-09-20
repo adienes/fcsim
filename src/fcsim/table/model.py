@@ -170,6 +170,7 @@ class Game:
     winner: int | None = None
     next_id: int = 1
     facts: list[dict] = field(default_factory=list)  # what has happened since triggers were last collected
+    whispers: list[list] = field(default_factory=list)  # [seat, sentence] to tell one seat privately with the next event
     audit_pending: bool = False   # something auditable has happened since the last checkpoint was released
     gated: bool = False           # stop at audit checkpoints, and at the end of every turn
 

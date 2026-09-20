@@ -159,8 +159,6 @@ def apply_op(game: Game, dice: Dice, actor: int, op: dict, told: Told) -> None:
             drawn = mutations.draw(game, seat, _count(op))
             told.public.append(f"{_who(game, seat)} draws {len(drawn)} card(s){because}."
                                + (" Their library is empty." if game.seats[seat].drew_from_empty else ""))
-            if drawn:
-                told.secretly([seat], "Drew " + ", ".join(o.name for o in drawn) + ".")
             told.show += [o.id for o in drawn if seat == actor]
         case "mill":
             seat = _seat(game, op.get("seat", actor))
