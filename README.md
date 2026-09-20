@@ -84,6 +84,41 @@ the parser also accepts Moxfield, Archidekt and Arena exports. Card data lives i
 exit status is 0 for a legal deck, 1 for an illegal one, and 2 for an error.
 This is deliberately shallow: what a deck is really like comes from playing it.
 
+## The table
+
+`fcsim.table` is the game table that agents will play at (PLAN.md §4 to §6). It
+knows zones, turns and priority, and no card text: seats carry out the rules
+through calls, and a later auditor checks them. There is no command for it yet;
+it is driven from Python, and by written scripts in the tests.
+
+```python
+from fcsim.table import ScriptedRunner, Table
+
+table = Table([{"name": "Ann", "commanders": ["Talrand, Sky Summoner"], "library": [...]}, ...], seed=1)
+table.expected()                       # [(0, "mulligan"), (1, "mulligan"), ...]: who must act, and how
+table.act(0, "keep")                   # every call returns a result or {"error": {code, message}}
+table.view(0)                          # what seat 0 may see; table.view(None) is the public view
+Table.replay(table.config, table.events)   # the event log rebuilds the same game
+```
+
+- **Hidden information.** Internal ids never leave the table. Each seat has its
+  own handles, only for things it can tell apart; another seat's hand or library
+  is a count. A handle dies when its card changes zones or is shuffled away. A
+  property test plays pairs of games that differ only in cards one seat cannot
+  see, and requires everything that seat observes to be identical.
+- **The pen.** Exactly the seats in `expected()` may change the table. A caster
+  keeps priority; after a resolution the active player gets it; waiting triggers
+  go on the stack before anyone receives priority.
+- **Resolutions are state.** An effect is carried out in as many batches as it
+  needs ("draw two", then choose the discard), can stop to ask other seats a
+  question in APNAP order, and ends with `finish_resolution`.
+- **Mechanical steps** (untap, draw, cleanup) run by themselves unless a hook in
+  the ledger holds them for a seat, as when a draw is replaced.
+- **The log** records each call with handles resolved and every random outcome.
+  `rewind` returns to an earlier event and reshuffles what nobody knew; `patch`
+  repairs the state going forward. Both kill open wakes, and a repeated call id
+  inside a wake acts once.
+
 ```sh
 uv run pytest
 uv build

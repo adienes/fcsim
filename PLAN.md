@@ -1,8 +1,8 @@
 # fcsim — playtest and tune Commander decks with LLM agents
 
 Status: design, 2026-09-20, revised once after an outside review. Built so far:
-the rules reference (`fcsim rules`) and M0 (`fcsim cards`, `fcsim deck check`);
-see README.md.
+the rules reference (`fcsim rules`), M0 (`fcsim cards`, `fcsim deck check`) and M1
+(the table, `fcsim.table`); see README.md.
 
 ## 1. Goal
 
@@ -904,9 +904,10 @@ model for opponents than for the deck under test.
 
 ## 15. Stack and layout
 
-Python 3.12 with `uv`. `pydantic` models are the single source for state,
-events and tool schemas, exported both as MCP tools and as API tool
-definitions. `anthropic` for the default runner, the official `mcp` package for
+Python 3.12 with `uv`, and so far the standard library only: state and events
+are dataclasses, matching the rules reference that was already in the
+repository. Tool schemas will be written once and exported both as MCP tools
+and as API tool definitions. `anthropic` for the default runner, the official `mcp` package for
 the HTTP server, `claude-agent-sdk` only if `SdkRunner` is wanted, `httpx` for
 Scryfall and EDHREC, `pytest` plus property tests.
 
