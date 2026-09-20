@@ -146,7 +146,10 @@ def goldfish(deck_path: str | Path, runner, auditor_runner, database: CardDataba
             return result
         return tools.definitions, call
 
-    report: dict = {"directory": str(directory), "seed": seed, "turns": [], "stopped": None}
+    report: dict = {"directory": str(directory), "seed": seed, "turns": [], "stopped": None,
+                    "deck_issues": [issue.message for issue in issues]}
+    for issue in issues:  # a playtest may use a list that is not tournament-legal, such as 104 cards mid-cut
+        echo(f"note: {issue.message} Playing it as it is.")
     with McpServer(tools_for) as server:
         try:
             while table.expected() and table.game.turn.number <= 2 * turns - 1:
@@ -243,6 +246,7 @@ def render(report: dict, deck) -> str:
     lines = [f"# Goldfish: {' + '.join(c.name for c in deck.commanders)}", "",
              f"Seed {report['seed']}. Mulligans: {m['mulligans']}. After the last turn: Goldfish at {m['goldfish_life']} life, "
              f"{m['permanents']} permanents, {m['cards_in_hand']} cards in hand. Commander casts: {m['commander_casts'] or 'none'}.",
+             *[f"\nPlayed as listed although: {message}" for message in report.get("deck_issues", [])],
              "", "| Turn | Lands | Spells cast | Attacked | Audit | Pilot's summary |", "| --- | --- | --- | --- | --- | --- |"]
     for entry in report["turns"]:
         if entry["kind"] == "mulligan":

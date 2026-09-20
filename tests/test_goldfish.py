@@ -108,8 +108,9 @@ def test_a_goldfish_run_plays_audits_and_writes_a_game_directory(database, tmp_p
 
 def test_a_goldfish_run_stops_cleanly_at_its_budget(database, tmp_path):
     deck = tmp_path / "talrand.txt"
-    deck.write_text(DECK, encoding="utf-8")
+    deck.write_text(DECK.replace("96 Island", "100 Island"), encoding="utf-8")   # 104 cards: still playable
     budget = Budget(max_calls=2)
     report = goldfish(deck, ScriptedPilot(budget), FakeRunner([{"verdict": "ok", "findings": [], "hooks": []}] * 5, budget),
                       database, turns=5, seed=11, out_root=tmp_path / "games", echo=lambda *_: None)
-    assert "limit of 2 model calls" in report["stopped"] and (Path(report["directory"]) / "report.md").exists()
+    assert "limit of 2 model calls" in report["stopped"]
+    assert "Played as listed although: The deck has 104 cards" in (Path(report["directory"]) / "report.md").read_text()
