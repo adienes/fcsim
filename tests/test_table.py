@@ -305,3 +305,30 @@ def test_scripts_fail_loudly():
         runner.step(0, "play_land", {"card": "@Black Lotus"})
     with pytest.raises(ScriptError, match="expected success"):
         runner.step(1, "pass_priority")
+
+
+def test_auditor_hooks_hold_a_step_until_their_source_leaves():
+    table, runner = started()
+    pass_until(table, runner, "main1")
+    vault = spell_in_hand(table, 0)
+    runner.step(0, "cast", {"card": f"@{vault}", "resolves": "auto_permanent"})
+    for seat in (0, 1, 2):
+        runner.step(seat, "pass_priority")
+    hook = {"kind": "hold", "source": vault, "step": "untap", "text": "does not untap during its controller's untap step"}
+    assert table.apply_hooks([hook, hook])["log"] == [f"Ledger: {vault}: {hook['text']}"]   # a repeat adds nothing
+    assert table.view(1)["ledger"][0]["seat"] == 0 and table.view(1)["ledger"][0]["source"].startswith("c")
+    with pytest.raises(Exception, match="source on the battlefield"):
+        table.apply_hooks([{"kind": "hold", "source": "Not Here", "step": "draw"}])
+    runner.step(0, "act", {"mutations": [{"op": "tap", "objs": [f"@{vault}"]}], "because": "for mana"})
+    for _ in range(3):   # round the table to Ann's next untap step
+        pass_until(table, runner, "end")
+        for seat in table.game.turn_order_from(table.game.turn.active):
+            runner.step(seat, "pass_priority")
+        if table.expected()[0][1] == "discard":
+            runner.step(table.expected()[0][0], "finish_step")
+    assert table.expected() == [(0, "held_step")] and table.view(0)["pen"]["step"] == "untap"
+    assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()
+    runner.step(0, "finish_step")                      # Ann untaps nothing: the vault stays tapped
+    assert table.view(0)["battlefield"][0]["tapped"] and table.game.turn.step == "upkeep"
+    runner.step(0, "act", {"mutations": [{"op": "move", "obj": f"@{vault}", "to": "graveyard"}], "because": "sacrificed"})
+    assert table.view(0)["ledger"] == []               # the hook left with its source

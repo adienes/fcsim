@@ -168,6 +168,7 @@ class Table:
         told = outcome if isinstance(outcome, ops.Told) else outcome[0]
         lints = [] if isinstance(outcome, ops.Told) else outcome[1]
         turn.repair_after_elimination(game)
+        game.ledger[:] = [e for e in game.ledger if e.get("source") is None or e["source"] in game.objects]
         self.game, self.rev = game, self.rev + 1
         event = {"n": len(self.events), "rev": self.rev, "seat": seat, "tool": tool, "args": args,
                  "turn": before.number, "step": before.step,  # when the call was made, not where it led
@@ -441,7 +442,30 @@ class Table:
         self.notes[seat] = str(args.get("text", ""))
         return ops.Told(private={seat: ["Notes saved."]})
 
-    # ---- host and judge actions: not available to seats --------------------------------------
+    # ---- host, auditor and judge actions: not available to seats -----------------------------
+
+    def apply_hooks(self, hooks: list[dict]) -> dict:
+        """Write an auditor's hooks into the ledger. A hook lasts until its source leaves the battlefield."""
+        return self._execute(None, "hooks", {"hooks": hooks})
+
+    def _do_hooks(self, game: Game, seat: None, args: dict):
+        told = ops.Told()
+        for hook in args["hooks"]:
+            source = next((game.objects[i] for i in reversed(game.battlefield)
+                           if game.objects[i].name == hook.get("source") and game.objects[i].public), None)
+            if hook.get("kind") not in ("hold", "step_trigger", "event_trigger") or source is None:
+                raise TableError("bad_hook", f"A hook needs a kind and a source on the battlefield: {hook!r}")
+            entry = {"kind": hook["kind"], "text": str(hook.get("text", "")), "source": source.id,
+                     "controller": hook.get("controller", source.controller)}
+            if hook["kind"] == "hold":
+                entry |= {"step": hook.get("step"), "seat": hook.get("seat", source.controller)}
+            elif hook["kind"] == "step_trigger":
+                entry |= {"step": hook.get("step"), "whose": hook.get("whose", "each")}
+            if not any({k: v for k, v in e.items() if k != "text"} == {k: v for k, v in entry.items() if k != "text"}
+                       for e in game.ledger):
+                game.ledger.append(entry)
+                told.public.append(f"Ledger: {source.name}: {entry['text']}")
+        return told
 
     def patch(self, batch: list[dict], because: str, *, _recorded: list | None = None) -> dict:
         """Repair the state going forward (a judge's remedy). Kills every open wake."""

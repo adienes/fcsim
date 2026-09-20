@@ -119,6 +119,39 @@ Table.replay(table.config, table.events)   # the event log rebuilds the same gam
   repairs the state going forward. Both kill open wakes, and a repeated call id
   inside a wake acts once.
 
+## The auditor
+
+Players carry out the rules themselves, so a non-playing auditor checks each
+stretch of play (PLAN.md §8). It is shown public information only: the board
+before and after, the record of what was done and in which step, and oracle text
+and official rulings for the cards involved. It answers with findings (`illegal`,
+`misresolved`, `sba`, `trigger`, or a non-blocking `note`), each naming the text
+or rule it rests on, and with the hooks the card-blind table needs for permanents
+that just arrived, such as "Mana Vault does not untap".
+
+Model calls go through the Claude Code command line in headless mode, on whatever
+account your local `claude` is logged in with, so a subscription works and there
+is no API key. Each call is a fresh session with every built-in tool off.
+
+```sh
+uv run fcsim audit list                        # the scenarios
+uv run fcsim audit show blood-moon-beats-urborg   # exactly what the auditor is shown; no model call
+uv run fcsim audit suite --tier weird --max-calls 20 --out report.json
+uv run fcsim audit suite --model claude-sonnet-5 --only first-strike-ignored
+```
+
+The suite is how the auditor is measured. Each scenario sets up a board, plays a
+short script, and knows the right answer: a planted error, or a legal play that
+looks wrong. Misses and false alarms both count, because a false alarm stalls a
+game as surely as a miss corrupts one. The ordinary tier covers summoning
+sickness, land drops, timing, costs, commander tax, a missed trigger, state-based
+actions, a replaced draw and hooks. The weird tier covers fizzling and partial
+fizzling, combat-trick timing, a removed blocker, Humility with Opalescence,
+Blood Moon with Urborg, what a blinked creature forgets, last known information,
+split second, first strike, and trample with deathtouch. Every run has a hard
+limit on calls and on Claude Code's cost estimate; on a subscription that
+estimate is plan usage at list prices, not a charge.
+
 ```sh
 uv run pytest
 uv build
