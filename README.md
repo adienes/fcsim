@@ -202,8 +202,12 @@ table with the seat's handles, its hand and the cards in play with their text, a
 its notes), so an agent can act without first fetching any of it. When something is
 on the stack, every seat still to act is asked at once, with one tool-less question,
 whether it wants to respond; a no is passed for mechanically and only a yes gets a
-wake. `fcsim pod --resume <game_dir> --cycles N` plays N more rounds of a saved game
-by replaying its journal. Not built yet: disputes and a judge,
+wake. When a seat passes and nobody responds, its session is not ended: the call
+returns the table as it now stands and the same wake carries on, so a turn is a few
+sessions rather than twenty. `fcsim pod --resume <game_dir> --cycles N` plays N more
+rounds of a saved game by replaying its journal, and `fcsim status <game_dir>` shows
+where a game stands and where its time went. `FINDINGS.md` logs what real games have
+shown about the harness. Not built yet: disputes and a judge,
 rewinds, reply wakes for table talk, narrower watches and triage, and the
 postgame narrative. It has been tested with scripted seats only, not yet with
 models.

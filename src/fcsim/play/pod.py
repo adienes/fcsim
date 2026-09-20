@@ -54,7 +54,9 @@ memory between wakes. Every wake begins with a briefing: the table as it stands,
 you need; your hand and the cards in play, with their text; and your notes. Act on it directly. \
 Call get_view only after you have changed the table and need fresh handles, and lookup_card only \
 for a card the briefing does not show. Update your notes with write_notes when your plans or your \
-read of the table change. A wake ends when the table stops waiting for you. Then stop calling \
+read of the table change. When you pass priority and nobody responds, the same wake carries on: \
+the result says `carry_on` and shows the table again. A wake ends when the table stops waiting \
+for you: the result then says `wake`. Then stop calling \
 tools and reply with one or two sentences on what you did and why; only you will see them."""
 
 _TRIAGE = {"type": "object", "additionalProperties": False, "required": ["respond", "why"],
@@ -157,9 +159,25 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
 
         def call(request_id: str, name: str, arguments: dict) -> dict:
             result = tools.call(request_id, name, arguments)
-            if not holds_pen(current["seat"]):  # the pen has moved on, or the table has stopped for an audit
-                table.close_wake(current["wake"])
-                current["ended"] = True
+            me = current["seat"]
+            if not holds_pen(me) and not current["ended"]:
+                # The pen has left this seat. A new session costs seconds of start-up and a fresh read of
+                # everything, so first do what needs no other player's full attention: if nobody responds
+                # and the pen comes straight back, this wake simply carries on.
+                try:
+                    back = settle(me) == "yours"
+                except RunnerError:
+                    back = False  # a failed respond-or-pass question; the main loop will meet it again and report it
+                if back:
+                    control = table.game.control
+                    why = control.detail.get("action", control.kind)
+                    result = {**result, "pen": {"kind": why, "seats": control.seats},
+                              "carry_on": f"Nobody else acted and the table is waiting for you again: {_WHY.get(why, why)} "
+                                          "Here is the table as it now stands.", "news": news(me), "table": briefing(me)}
+                    seen[me] = len(table.events)
+                else:
+                    table.close_wake(current["wake"])
+                    current["ended"] = True
             if isinstance(result, dict) and "pen" in result and current["ended"]:
                 result["wake"] = "The table is no longer waiting for you. Stop calling tools and give your summary."
             return result
@@ -287,46 +305,64 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
             if table.game.control.kind == "correction":
                 table.act(seat, "finish_step")
 
+    def settle(me: int | None = None) -> str:
+        """Do everything that needs no full wake: release mid-turn checkpoints, pass for seats with
+        nothing to respond to, ask the rest whether they respond. Returns why it stopped: "over",
+        "stuck", "audit" (the table waits for one), "wake" (some seat must decide), or "yours" when
+        called from inside seat `me`'s wake and the pen has come back to it."""
+        while True:
+            game = table.game
+            if game.control.kind == "over" or game.turn.number > last_turn:
+                return "over"
+            if table.awaiting_audit:
+                # By default a turn is audited whole, before the next one begins: that is when its
+                # hooks must exist. Checkpoints inside the turn are released at once.
+                if audit_every == "checkpoint" or game.control.detail["resume"]["do"] == "next_turn":
+                    return "audit"
+                table.release()
+                continue
+            expected = table.expected()
+            if not expected:
+                return "stuck"
+            seat, kind = expected[0]
+            if seat == me:
+                return "yours"
+            if kind == "priority" and not game.stack and (seat != game.turn.active or game.turn.step in ("upkeep", "draw")):
+                # Nothing to respond to on someone else's turn; and nothing waiting in one's own
+                # upkeep or draw step, or the table would be asking for a trigger, not priority.
+                table.act(seat, "pass_priority")
+                continue
+            if kind in ("priority", "declare_blockers") and _cannot_act(table, seat, kind):
+                table.act(seat, _DEFAULTS[kind])  # an empty hand and nothing untapped; or nothing that could block
+                continue
+            if kind == "priority" and game.stack:
+                # A chance to respond. Ask everyone still to act at once, and remember the answers
+                # for as long as the stack stays as it is.
+                signature = tuple(item.id for item in game.stack)
+                if decisions.get("stack") != signature:
+                    waiting = [s for s in game.turn_order_from(seat) if s not in game.turn.passed and s != me]
+                    decisions.clear()
+                    decisions.update(stack=signature, **{str(s): a for s, a in triage(waiting).items()})
+                if not decisions.get(str(seat), True):
+                    table.act(seat, "pass_priority")
+                    seen[seat] = len(table.events)
+                    continue
+            return "wake"
+
     with McpServer(tools_for) as server:
         try:
             snapshot = auditor.snapshot(table)
-            while table.game.control.kind != "over" and table.game.turn.number <= last_turn:
-                if table.awaiting_audit:
-                    # By default a turn is audited whole, before the next one begins: that is when its
-                    # hooks must exist. Checkpoints inside the turn are released at once.
-                    if audit_every == "checkpoint" or table.game.control.detail["resume"]["do"] == "next_turn":
-                        audit(server, snapshot)
-                        table.release()
-                        snapshot = auditor.snapshot(table)
-                        directory.write("state.json", table.game.to_dict())
-                    else:
-                        table.release()
-                    continue
-                expected = table.expected()
-                if not expected:
+            while True:
+                why = settle()
+                if why in ("over", "stuck"):
                     break
-                seat, kind = expected[0]
-                if kind == "priority" and not table.game.stack and (seat != table.game.turn.active
-                                                                     or table.game.turn.step in ("upkeep", "draw")):
-                    # Nothing to respond to on someone else's turn; and nothing waiting in one's own
-                    # upkeep or draw step, or the table would be asking for a trigger, not priority.
-                    table.act(seat, "pass_priority")
+                if why == "audit":
+                    audit(server, snapshot)
+                    table.release()
+                    snapshot = auditor.snapshot(table)
+                    directory.write("state.json", table.game.to_dict())
                     continue
-                if kind in ("priority", "declare_blockers") and _cannot_act(table, seat, kind):
-                    table.act(seat, _DEFAULTS[kind])  # an empty hand and nothing untapped; or nothing that could block
-                    continue
-                if kind == "priority" and table.game.stack:
-                    # A chance to respond. Ask everyone still to act at once, and remember the answers
-                    # for as long as the stack stays as it is.
-                    signature = tuple(item.id for item in table.game.stack)
-                    if decisions.get("stack") != signature:
-                        waiting = [s for s in table.game.turn_order_from(seat) if s not in table.game.turn.passed]
-                        decisions.clear()
-                        decisions.update(stack=signature, **{str(s): a for s, a in triage(waiting).items()})
-                    if not decisions.get(str(seat), True):
-                        table.act(seat, "pass_priority")
-                        seen[seat] = len(table.events)
-                        continue
+                seat, kind = table.expected()[0]
                 before = len(table.events)
                 wake(server, seat, kind)
                 if len(table.events) == before and table.expected() and table.expected()[0] == (seat, kind):

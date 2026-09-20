@@ -169,8 +169,15 @@ def test_a_wake_starts_with_a_briefing_and_responses_are_triaged_in_parallel(dat
     assert "THE TABLE (the codes in brackets are your handles" in briefed and "YOUR HAND\n- [c" in briefed
     assert "[Basic Land — Forest]" in briefed and "YOUR NOTES\n(none yet)" in briefed and "CARDS IN PLAY" in briefed
     assert "ruling " not in briefed                                        # card text, not rulings: a briefing stays short
-    again = next(p for p in seats[1].prompts if "WHAT YOU HAVE ALREADY DONE THIS TURN" in p and "- [main1] Pir plays Forest" in p)
-    assert again.index("ALREADY DONE") < again.index("THE TABLE (")        # a later wake in the same turn is told what it did
+    assert briefed.index("WHAT YOU HAVE ALREADY DONE THIS TURN") < briefed.index("THE TABLE (")
+    # A player's whole turn is one session: when it passes and nobody responds, the same wake carries on.
+    own_turn_wakes = {}
+    for w in report["wakes"]:
+        if w["kind"] == "priority":
+            own_turn_wakes[(w["seat"], w["turn"])] = own_turn_wakes.get((w["seat"], w["turn"]), 0) + 1
+    assert own_turn_wakes and set(own_turn_wakes.values()) == {1}
+    cast_turn = next(w for w in report["wakes"] if w["seat"] == 0 and w["kind"] == "priority" and w["tool_calls"] > 8)
+    assert cast_turn["tool_errors"] == []                                  # land, commander, responses checked, and on to the end: one wake
     asked = [t for t in report["triage"] if t["about"] == "Talrand, Sky Summoner"]
     assert sorted(t["seat"] for t in asked) == [1, 2] and not any(t["respond"] for t in asked)   # both other seats, in one round
     events = [json.loads(line) for line in (Path(report["directory"]) / "events.jsonl").read_text().splitlines()]
