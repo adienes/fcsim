@@ -208,7 +208,10 @@ sessions rather than twenty. `fcsim pod --resume <game_dir> --cycles N` plays N 
 rounds of a saved game by replaying its journal, and `fcsim status <game_dir>` shows
 where a game stands and where its time went, and `fcsim summarize <game_dir>` writes
 one file, `narrative.md`: the story of the game told with full information, then the
-round-by-round accounts it was written from. `FINDINGS.md` logs what real games have
+round-by-round accounts it was written from. `fcsim rubric <game_dir>` scores a game
+against the table-quality rubric from its log alone (length, participation, sitting
+out, interaction, threat rotation, turn weight, the ending); the same scores close
+every pod's `report.md`. `FINDINGS.md` logs what real games have
 shown about the harness. Not built yet: disputes and a judge, rewinds, and reply
 wakes for table talk.
 

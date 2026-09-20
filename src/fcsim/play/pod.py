@@ -21,6 +21,7 @@ from ..mcp import McpServer
 from ..rules import RulesReference
 from ..table import Table
 from ..tools import SeatTools
+from . import rubric
 from .gamedir import GameDirectory
 from .goldfish import _deck_reference
 
@@ -454,6 +455,11 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
     directory.write("usage.json", report["usage"])
     directory.write("report.json", report)
     directory.write("report.md", render(report))
+    if count > 1:  # after the report is safe on disk: the scores need a replay of the whole journal
+        report["rubric"] = rubric.measure(directory.path)
+        directory.write("rubric.json", report["rubric"])
+        directory.write("report.json", report)
+        directory.write("report.md", render(report))
     return report
 
 
@@ -544,6 +550,8 @@ def render(report: dict) -> str:
               f"{sum(len(w['tool_errors']) for w in report['wakes'])} rejected tool call(s); "
               f"{sum(1 for w in report['wakes'] if w['forced'])} wake(s) the driver had to finish."]
     lines += [f"- Turn {turn}, {f['kind']}: {f['summary']}" for turn, f in serious]
+    if report.get("rubric"):
+        lines += ["", rubric.render_markdown(report["rubric"]).rstrip()]
     usage = report["usage"]
     lines += ["", "## Usage", "", f"{usage['calls']} model calls, {usage['seconds']:.0f} seconds of model time, "
               f"{cost_summary(usage)}.",

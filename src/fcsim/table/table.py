@@ -637,13 +637,16 @@ class Table:
             wake["alive"] = False
 
     @classmethod
-    def replay(cls, config: dict, events: list[dict], *, card_lookup=None) -> Table:
-        """Rebuild a table from its configuration and event log."""
+    def replay(cls, config: dict, events: list[dict], *, card_lookup=None, before=None) -> Table:
+        """Rebuild a table from its configuration and event log. `before(table, event)` is called
+        ahead of each event, for a reader that needs the table as it stood when the event happened."""
         if not events or events[0]["tool"] != "setup":
             raise TableError("bad_log", "An event log starts with the setup event.")
         table = cls(config["seats"], seed=config["seed"], first=config["first"], gated=config.get("gated", False),
                     card_lookup=card_lookup, _setup_random=events[0]["random"])
         for event in events[1:]:
+            if before is not None:
+                before(table, event)
             if event["tool"] == "patch":
                 table.patch(event["args"]["mutations"], event["args"]["because"], _recorded=event["random"])
             elif event["tool"] == "rewind":

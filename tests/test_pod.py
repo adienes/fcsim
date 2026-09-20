@@ -279,6 +279,7 @@ def test_summarize_condenses_each_round_once_and_writes_the_story(database, tmp_
     story_system, story_prompt = writer.asked[-1]
     assert "A clear recap" in story_system and "4 to 10 rounds" in story_system
     assert "THE POD" in story_prompt and "- Talrand: alive, 40 life; commander: Talrand, Sky Summoner" in story_prompt and "ROUND 2\nAn account (2)." in story_prompt
+    assert "MEASURED FROM THE LOG" in story_prompt and "unfinished    length" in story_prompt       # the judgement starts from numbers
     again = Writer()
     summarize(game["directory"], again, database, style="analysis", echo=lambda *_: None)
     assert len(again.asked) == 2          # round 1 is reused; the last round of an unfinished game and the story are rewritten
@@ -356,7 +357,9 @@ def test_a_triage_answer_can_set_a_standing_policy(database, tmp_path):
     assert [t["seat"] for t in report["triage"]].count(1) == 1 and [t["seat"] for t in report["triage"]].count(2) == 2
 
 
-def test_power_and_toughness_are_worked_out_again_before_blocks(database, tmp_path):
+@pytest.fixture(scope="module")
+def combat_game(database, tmp_path_factory):
+    """Talrand and Pir cast their commanders; Talrand then attacks Pir on each of its turns."""
     import re
 
     class Auditing(FakeRunner):
@@ -366,10 +369,16 @@ def test_power_and_toughness_are_worked_out_again_before_blocks(database, tmp_pa
                 self.answers.insert(0, {"computed": [{"handle": handle, "power": "4", "toughness": "4", "because": "a test anthem"}]})
             return super().ask(system, prompt, schema=schema)
 
+    tmp_path = tmp_path_factory.mktemp("combat")
     budget = Budget(max_calls=500)
     seats = [ScriptedSeat(budget, cast_commander=True, attack=1), ScriptedSeat(budget, cast_commander=True), ScriptedSeat(budget)]
     auditor = Auditing([OK] * 150, budget)
     report = play_pod(decks(tmp_path), seats, auditor, database, cycles=6, seed=4, out_root=tmp_path / "games", echo=lambda *_: None)
+    return report, seats, auditor
+
+
+def test_power_and_toughness_are_worked_out_again_before_blocks(combat_game):
+    report, seats, auditor = combat_game
     assert report["stopped"] is None and report["standings"][1]["commander_damage"]
     # Talrand attacks Pir, who has a creature to block with, on two turns. The battlefield changed before the
     # first (nobody had worked anything out yet) and before the second (a land), so both are worked out afresh.
@@ -378,3 +387,24 @@ def test_power_and_toughness_are_worked_out_again_before_blocks(database, tmp_pa
     assert "THIS TURN SO FAR" in asked[0]["prompt"] and "Talrand attacks" not in asked[0]["system"]
     blocking = next(p for p in seats[1].prompts if "declare blockers" in p)
     assert "NOW 4/4 (a test anthem" in blocking                                # the blocker reads the fresh numbers
+
+
+def test_a_game_is_scored_against_the_rubric_from_its_log(combat_game, capsys):
+    from fcsim.cli import main
+    from fcsim.play.rubric import measure
+
+    report = combat_game[0]
+    directory = Path(report["directory"])
+    scored = measure(directory)
+    assert scored == report["rubric"] == json.loads((directory / "rubric.json").read_text())
+    talrand, pir, thrasios = scored["seats"]
+    assert (talrand["attackers"], talrand["damage_to_players"], talrand["spells"], talrand["idle_turns"]) == (2, 4, 1, 1)
+    assert pir["attacked_by_others"] == 2 and pir["blockers"] == 0 and thrasios["spells"] == 0
+    assert (thrasios["turns"], thrasios["turns_from_third"], thrasios["idle_turns"]) == (6, 4, 4)   # lands and passes, all game
+    verdicts = {s["measure"]: s["verdict"] for s in scored["scores"]}
+    assert verdicts["length"] == "unfinished" and verdicts["participation"] == "bad" and verdicts["interaction"] == "bad"
+    assert verdicts["threat rotation"] == "mixed" and "ending" not in verdicts                    # only Pir was ever leaned on
+    assert "Thrasios" in next(s["finding"] for s in scored["scores"] if s["measure"] == "spotlight")
+    assert "## Against the rubric" in (directory / "report.md").read_text()
+    assert main(["rubric", str(directory)]) == 0
+    assert "Thrasios did nothing on 4 of 4 turns" in capsys.readouterr().out

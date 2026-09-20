@@ -16,6 +16,8 @@ from ..cards import CardDatabase
 from ..table import Table
 from .gamedir import GameDirectory
 from .pod import _lookup
+from .rubric import measure
+from .rubric import render as render_rubric
 
 STYLES = {
     "recap": "A clear recap a player could skim in two minutes: plain, chronological, no flourish.",
@@ -36,7 +38,8 @@ paragraphs only, with no headings."""
 STORY_SYSTEM = """\
 You are writing up a multiplayer game of Magic: The Gathering (Commander) played by AI agents, for \
 the person who built one of the decks. You are given the pod, the result, and a faithful account \
-of each round written with full information. Write the narrative in Markdown with these sections:
+of each round written with full information, and what was measured from the log. Write the \
+narrative in Markdown with these sections:
 
 # <a short title for this game>
 ## The pod and the result
@@ -127,6 +130,8 @@ def summarize(game_dir: str | Path, runner, database: CardDatabase, *, style: st
     echo(f"writing the narrative ({style}) from {len(accounts)} round accounts ...")
     reply = runner.ask(STORY_SYSTEM.format(style=STYLES[style]),
                        f"THE POD\n{standings}\n\nTHE RESULT\n{result} {len(accounts)} rounds were played.\n\n"
+                       f"MEASURED FROM THE LOG (start the last section from these; say where the story of the game disagrees)\n"
+                       f"{render_rubric(measure(directory.path))}\n\n"
                        + "\n\n".join(f"ROUND {number}\n{text}" for number, text in accounts))
     directory.write("narrative.md", reply.text.strip() + "\n\n" + _APPENDIX + "\n\n"
                     + "\n\n".join(f"### Round {number}\n\n{text}" for number, text in accounts) + "\n")
