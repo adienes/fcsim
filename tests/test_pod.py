@@ -131,6 +131,8 @@ def test_a_pod_game_schedules_seats_audits_and_acts_on_findings(database, tmp_pa
     kinds = {(w["seat"], w["kind"]) for w in report["wakes"]}
     assert {(0, "mulligan"), (1, "mulligan"), (2, "mulligan"), (2, "triggers"), (0, "correction")} <= kinds
     assert not any(w["forced"] for w in report["wakes"]) and report["standings"][0]["life"] == 39
+    # The last player to keep is not handed priority in its own upkeep by the same session: it keeps, and its wake ends.
+    assert [w["tool_calls"] for w in report["wakes"] if w["kind"] == "mulligan"] == [2, 2, 2]
     assert [s["permanents"] for s in report["standings"]] == [2, 2, 2]          # a land on each of two turns, for every seat
     # A seat is not woken to pass on someone else's turn when nothing is on the stack ...
     priority_wakes = [w for w in report["wakes"] if w["kind"] == "priority"]

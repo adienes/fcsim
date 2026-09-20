@@ -675,3 +675,17 @@ def test_a_contested_finding_waits_for_the_judge_and_the_ruling_is_kept():
     with pytest.raises(ValueError, match="No contested finding"):
         table.rule("uphold", "nothing to rule on")
     assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()
+
+
+def test_a_land_is_played_only_in_ones_own_main_phase_but_an_old_journal_still_replays():
+    table, runner = started()
+    assert table.game.turn.step == "upkeep"
+    land = next(c["handle"] for c in table.view(0)["seats"][0]["hand"]["cards"] if c["name"] == "Island")
+    refused = table.act(0, "play_land", {"card": land})
+    assert refused["error"]["code"] == "not_now" and 'pass priority until "main1"' in refused["error"]["message"]
+    # A journal written before the table checked this holds such a play, and must still rebuild its game.
+    table._replaying = True
+    assert "error" not in table.act(0, "play_land", {"card": land})
+    table._replaying = False
+    assert table.events[-1]["lints"] == ["A land is normally played in your own main phase with an empty stack."]
+    assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()

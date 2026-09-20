@@ -421,13 +421,16 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
             if not expected:
                 return "stuck"
             seat, kind = expected[0]
-            if seat == me:
-                return "yours"
-            if kind == "priority" and not game.stack and (seat != game.turn.active or game.turn.step in ("upkeep", "draw")):
+            quiet_step = seat == game.turn.active and game.turn.step in ("upkeep", "draw")
+            if kind == "priority" and not game.stack and (quiet_step or seat != game.turn.active):
                 # Nothing to respond to on someone else's turn; and nothing waiting in one's own
-                # upkeep or draw step, or the table would be asking for a trigger, not priority.
+                # upkeep or draw step, or the table would be asking for a trigger, not priority. That
+                # holds for the seat whose wake this is too: in the second real game the last player
+                # to keep was told it had priority, in its upkeep, and played a land there.
                 table.act(seat, "pass_priority")
                 continue
+            if seat == me:
+                return "yours"
             if kind in ("priority", "declare_blockers") and _cannot_act(table, seat, kind):
                 table.act(seat, _DEFAULTS[kind])  # an empty hand and nothing untapped; or nothing that could block
                 continue

@@ -56,6 +56,7 @@ class Table:
         self.notes = {index: "" for index in range(len(seats))}
         self.handles: dict[int | None, Handles] = {viewer: Handles() for viewer in (None, *range(len(seats)))}
         self._wakes: dict[str, dict] = {}
+        self._replaying = False  # a journal holds calls that were accepted: checks added since must not refuse them
         game = Game(seats=[Seat(index, seat["name"]) for index, seat in enumerate(seats)], gated=gated)
         for index, seat in enumerate(seats):
             for zone, names, commander in (("command", seat.get("commanders", []), True),
@@ -291,8 +292,14 @@ class Table:
         lints = []
         if game.turn.land_plays >= 1:
             lints.append(f"This is land number {game.turn.land_plays + 1} this turn.")
-        if game.turn.active != seat or game.turn.step not in ("main1", "main2") or game.stack:
+        if self._replaying and (game.turn.active != seat or game.turn.step not in ("main1", "main2") or game.stack):
             lints.append("A land is normally played in your own main phase with an empty stack.")
+        elif game.turn.active != seat or game.turn.step not in ("main1", "main2") or game.stack:
+            # The table knows the turn, so this much of rule 305 it can hold: no effect lets a land be
+            # played, as a land play, at another time. An effect that puts a land onto the battlefield is a move.
+            raise TableError("not_now", "A land can be played only in your own main phase while the stack is empty (rule 305.1). "
+                             + (f"It is your {game.turn.step} step: pass priority until \"main1\"." if game.turn.active == seat and not game.stack
+                                else "If an effect is putting this land onto the battlefield, move it there as part of resolving that effect."))
         origin = ops._where(game, obj)
         land = mutations.move(game, obj, "battlefield", controller=seat, enters=args.get("enters"))
         game.turn.land_plays += 1
@@ -700,6 +707,7 @@ class Table:
             raise TableError("bad_log", "An event log starts with the setup event.")
         table = cls(config["seats"], seed=config["seed"], first=config["first"], gated=config.get("gated", False),
                     card_lookup=card_lookup, _setup_random=events[0]["random"])
+        table._replaying = True
         for event in events[1:]:
             if before is not None:
                 before(table, event)
@@ -709,4 +717,5 @@ class Table:
                 table.rewind(event["args"]["to"], event["args"]["because"], _recorded=event["random"])
             else:
                 table._execute(event["seat"], event["tool"], event["args"], event["random"])
+        table._replaying = False
         return table
