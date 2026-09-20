@@ -826,7 +826,8 @@
    "hooks": [
     {
      "kind": "step_trigger",
-     "mentions": "upkeep"
+     "mentions": "Phyrexian Arena",
+     "step": "upkeep"
     }
    ]
   }
@@ -872,7 +873,19 @@
    "hooks": [
     {
      "kind": "hold",
-     "mentions": "untap"
+     "mentions": "Mana Vault",
+     "step": "untap",
+     "seat": 0
+    },
+    {
+     "kind": "step_trigger",
+     "mentions": "Mana Vault",
+     "step": "upkeep"
+    },
+    {
+     "kind": "step_trigger",
+     "mentions": "Mana Vault",
+     "step": "draw"
     }
    ]
   }

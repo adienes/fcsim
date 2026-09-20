@@ -317,7 +317,7 @@ def test_auditor_hooks_hold_a_step_until_their_source_leaves():
     hook = {"kind": "hold", "source": vault, "step": "untap", "text": "does not untap during its controller's untap step"}
     assert table.apply_hooks([hook, hook])["log"] == [f"Ledger: {vault}: {hook['text']}"]   # a repeat adds nothing
     assert table.view(1)["ledger"][0]["seat"] == 0 and table.view(1)["ledger"][0]["source"].startswith("c")
-    with pytest.raises(Exception, match="source on the battlefield"):
+    with pytest.raises(Exception, match="0 permanents on the battlefield are called 'Not Here'"):
         table.apply_hooks([{"kind": "hold", "source": "Not Here", "step": "draw"}])
     runner.step(0, "act", {"mutations": [{"op": "tap", "objs": [f"@{vault}"]}], "because": "for mana"})
     for _ in range(3):   # round the table to Ann's next untap step
@@ -449,3 +449,21 @@ def test_the_turn_goes_on_without_its_active_player():
         runner.step(table.expected()[0][0], "pass_priority")
     assert table.game.turn.number == 2 and table.game.turn.active == 1 and table.game.turn.step == "upkeep"
     assert all(obj.zone != "stack" for obj in table.game.objects.values())
+
+
+def test_a_hook_binds_to_one_permanent_even_when_two_share_a_name():
+    table, runner = started()
+    pass_until(table, runner, "main1")
+    for seat in (0, 1):
+        table.patch([{"op": "create_token", "controller": seat, "token": {"name": "Howling Mine"}}], "set up")
+    anns, bobs = [c["handle"] for c in table.view(None)["battlefield"]]
+    hook = {"kind": "step_trigger", "source": "Howling Mine", "step": "draw", "whose": "each", "text": "draws an additional card"}
+    with pytest.raises(Exception, match="2 permanents"):
+        table.apply_hooks([hook])                                   # the name alone is ambiguous
+    with pytest.raises(Exception, match="is not Sol Ring"):
+        table.apply_hooks([{**hook, "handle": anns, "source": "Sol Ring"}])
+    table.apply_hooks([{**hook, "handle": anns}])
+    assert [e["controller"] for e in table.game.ledger] == [0]
+    table.patch([{"op": "move", "obj": table.handles[None].resolve("c", bobs), "to": "graveyard"}], "Bob's is destroyed")
+    assert len(table.game.ledger) == 1                              # Ann's hook does not leave with Bob's permanent
+    assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()

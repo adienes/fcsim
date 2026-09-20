@@ -59,7 +59,9 @@ report style, and do not report the table's bookkeeping conventions as errors. I
 is correct, the verdict is "ok" with no findings.
 
 Hooks. For each permanent that entered the battlefield during the record, write the hooks \
-the card-blind table needs in order to act correctly later when no agent is looking:
+the card-blind table needs in order to act correctly later when no agent is looking. Name the \
+permanent by its handle, the code in brackets after its name under THE TABLE NOW, because two \
+permanents can share a name:
 - hold: a mechanical step the table must not perform by itself. step is "draw", "untap" or \
 "cleanup"; seat is the player whose step it is. Example: a permanent that replaces draws.
 - step_trigger: an ability that triggers at the beginning of a step. step is one of upkeep, \
@@ -84,9 +86,10 @@ VERDICT_SCHEMA = {
                 "fix": {"type": "string", "description": "What should happen instead, concretely."},
                 "confidence": {"type": "string", "enum": ["high", "medium", "low"]}}}},
         "hooks": {"type": "array", "items": {
-            "type": "object", "additionalProperties": False, "required": ["kind", "source", "text"],
+            "type": "object", "additionalProperties": False, "required": ["kind", "handle", "source", "text"],
             "properties": {
                 "kind": {"type": "string", "enum": ["hold", "step_trigger", "event_trigger"]},
+                "handle": {"type": "string", "description": "The permanent's handle, such as c12."},
                 "source": {"type": "string", "description": "The card's name."},
                 "text": {"type": "string", "description": "What happens, in a sentence."},
                 "step": {"type": "string"},

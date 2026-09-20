@@ -465,14 +465,34 @@ class Table:
     # ---- host, auditor and judge actions: not available to seats -----------------------------
 
     def apply_hooks(self, hooks: list[dict]) -> dict:
-        """Write an auditor's hooks into the ledger. A hook lasts until its source leaves the battlefield."""
-        return self._execute(None, "hooks", {"hooks": hooks})
+        """Write an auditor's hooks into the ledger. A hook lasts until its source leaves the battlefield.
+
+        A hook names its permanent by the public handle the auditor was shown. A name alone is
+        accepted only while exactly one permanent on the battlefield has it (with the hook's
+        controller, if it gives one): two players can each have a Howling Mine."""
+        resolved = []
+        for hook in hooks:
+            game, source = self.game, None
+            if hook.get("handle"):
+                source = game.objects.get(self.handles[None].resolve("c", hook["handle"]) or -1)
+                if source is None or source.zone != "battlefield" or (hook.get("source") and source.public
+                                                                      and source.name != hook["source"]):
+                    raise TableError("bad_hook", f"{hook['handle']!r} is not {hook.get('source') or 'a permanent'} on the battlefield.")
+            else:
+                named = [game.objects[i] for i in game.battlefield if game.objects[i].public
+                         and game.objects[i].name == hook.get("source")
+                         and hook.get("controller") in (None, game.objects[i].controller)]
+                if len(named) != 1:
+                    raise TableError("bad_hook", f"A hook needs the handle of its permanent: {len(named)} permanents "
+                                                 f"on the battlefield are called {hook.get('source')!r}.")
+                source = named[0]
+            resolved.append({**{k: v for k, v in hook.items() if k != "handle"}, "source_id": source.id})
+        return self._execute(None, "hooks", {"hooks": resolved})
 
     def _do_hooks(self, game: Game, seat: None, args: dict):
         told = ops.Told()
         for hook in args["hooks"]:
-            source = next((game.objects[i] for i in reversed(game.battlefield)
-                           if game.objects[i].name == hook.get("source") and game.objects[i].public), None)
+            source = game.objects.get(hook.get("source_id"))
             if hook.get("kind") not in ("hold", "step_trigger", "event_trigger") or source is None:
                 raise TableError("bad_hook", f"A hook needs a kind and a source on the battlefield: {hook!r}")
             entry = {"kind": hook["kind"], "text": str(hook.get("text", "")), "source": source.id,

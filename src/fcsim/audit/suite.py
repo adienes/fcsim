@@ -112,13 +112,21 @@ def score(scenario: dict, verdict: dict) -> dict:
     missed = [e["mentions"] for e in wanted if not any(_matches(f, e) for f in serious)]
     extra = [f for f in serious if not any(_matches(f, e) for e in wanted)
              and not any(re.search(p, f.get("summary", ""), flags=re.IGNORECASE) for p in expect.get("tolerate", []))]
-    hooks = verdict.get("hooks", [])
-    hook_misses = [e["mentions"] for e in expect.get("hooks", [])
-                   if not any(h.get("kind") == e["kind"] and re.search(e["mentions"], json.dumps(h), flags=re.IGNORECASE)
-                              for h in hooks)]
-    return {"passed": not missed and not extra and not hook_misses, "expected_findings": len(wanted),
-            "missed": missed, "false_alarms": [f["summary"] for f in extra], "hooks_expected": len(expect.get("hooks", [])),
-            "hooks_missed": hook_misses}
+    hooks, wanted_hooks = verdict.get("hooks", []), expect.get("hooks", [])
+
+    def hook_matches(hook: dict, expected: dict) -> bool:
+        """The kind, the words, and every behavioural field the scenario pins down (step, seat, whose)."""
+        return hook.get("kind") == expected["kind"] and re.search(expected["mentions"], json.dumps(hook), flags=re.IGNORECASE) \
+            and all(hook.get(key) == expected[key] for key in ("step", "seat", "whose") if key in expected)
+
+    hook_misses = [e["mentions"] for e in wanted_hooks if not any(hook_matches(h, e) for h in hooks)]
+    # A scenario lists every hook its new permanents need, so any other hook is a false alarm:
+    # a bogus "hold" would hand a step to a player for no reason.
+    hook_extras = [f"{h.get('kind')} {h.get('step', '')} {h.get('source')}: {h.get('text', '')}".replace("  ", " ")
+                   for h in hooks if not any(hook_matches(h, e) for e in wanted_hooks)]
+    return {"passed": not missed and not extra and not hook_misses and not hook_extras, "expected_findings": len(wanted),
+            "missed": missed, "false_alarms": [f["summary"] for f in extra], "hooks_expected": len(wanted_hooks),
+            "hooks_missed": hook_misses, "hooks_unexpected": hook_extras}
 
 
 def run_suite(auditor: Auditor, scenarios: list[dict], *, progress=None) -> dict:
@@ -150,6 +158,7 @@ def run_suite(auditor: Auditor, scenarios: list[dict], *, progress=None) -> dict
         "false_alarm_scenarios": sum(bool(r["false_alarms"]) for r in done),
         "clean_plays_flagged": f"{sum(bool(r['false_alarms']) for r in clean)} of {len(clean)}",
         "hook_accuracy": round(1 - sum(len(r["hooks_missed"]) for r in done) / hooks, 3) if hooks else None,
+        "unexpected_hooks": sum(len(r.get("hooks_unexpected", [])) for r in done),
         "seconds_per_audit": round(sum(r["seconds"] for r in done) / len(done), 1) if done else None,
         "budget": auditor.runner.budget.to_dict(),
     }
@@ -169,12 +178,14 @@ def render(report: dict) -> str:
         lines += [f"          missed: {m}" for m in r["missed"]]
         lines += [f"          false alarm: {f}" for f in r["false_alarms"]]
         lines += [f"          hook missed: {h}" for h in r["hooks_missed"]]
+        lines += [f"          unexpected hook: {h}" for h in r.get("hooks_unexpected", [])]
     s = report["summary"]
     if s is None:
         return "\n".join(lines)
     lines += ["", f"{s['model']}: {s['passed']} of {s['scenarios']} scenarios passed. "
                   f"Catch rate {s['catch_rate']}, false alarms in {s['false_alarm_scenarios']} scenario(s) "
-                  f"(clean plays flagged: {s['clean_plays_flagged']}), hook accuracy {s['hook_accuracy']}.",
+                  f"(clean plays flagged: {s['clean_plays_flagged']}), hook accuracy {s['hook_accuracy']}, "
+                  f"{s['unexpected_hooks']} unexpected hook(s).",
               f"{s['seconds_per_audit']}s per audit; {s['budget']['calls']} calls, "
               f"${s['budget']['estimated_cost_usd']:.2f} estimated at list prices."]
     return "\n".join(lines)

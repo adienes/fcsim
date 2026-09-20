@@ -75,9 +75,15 @@ def test_scoring_counts_misses_false_alarms_and_hooks():
     wrong = score(clean, caught)
     assert not wrong["passed"] and wrong["false_alarms"] == ["Grizzly Bears has summoning sickness and no haste."]
     assert score(clean, {"findings": [finding("note", "unsure about haste")], "hooks": []})["passed"]  # notes never block
-    assert score(hooked, {"findings": [], "hooks": []})["hooks_missed"] == ["untap"]
-    assert score(hooked, {"findings": [], "hooks": [{"kind": "hold", "source": "Mana Vault", "step": "untap",
-                                                     "text": "does not untap", "seat": 0}]})["passed"]
+    vault = [{"kind": "hold", "source": "Mana Vault", "step": "untap", "text": "does not untap", "seat": 0},
+             {"kind": "step_trigger", "source": "Mana Vault", "step": "upkeep", "text": "may pay {4} to untap"},
+             {"kind": "step_trigger", "source": "Mana Vault", "step": "draw", "text": "1 damage if tapped"}]
+    assert score(hooked, {"findings": [], "hooks": []})["hooks_missed"] == ["Mana Vault"] * 3
+    assert score(hooked, {"findings": [], "hooks": vault})["passed"]
+    wrong_seat = score(hooked, {"findings": [], "hooks": [{**vault[0], "seat": 1}, *vault[1:]]})
+    assert not wrong_seat["passed"] and wrong_seat["hooks_missed"] == ["Mana Vault"] and len(wrong_seat["hooks_unexpected"]) == 1
+    bogus = score(clean, {"findings": [], "hooks": [{"kind": "hold", "source": "Raging Goblin", "step": "untap", "text": "x"}]})
+    assert not bogus["passed"] and bogus["hooks_unexpected"] == ["hold untap Raging Goblin: x"]   # a harmful extra hook fails a clean play
 
 
 def test_a_suite_run_reports_rates_and_stops_at_the_budget(database):
