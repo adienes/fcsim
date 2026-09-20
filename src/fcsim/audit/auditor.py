@@ -201,6 +201,8 @@ def materials(table: Table, before: str, since_event: int, database: CardDatabas
     after_view = table.view(None)
     record = []
     for event in table.events[since_event:until_event]:
+        if not event["public"] and not event["lints"]:
+            continue  # the table's own bookkeeping, such as releasing a checkpoint
         actor = table.game.seats[event["seat"]].name if event["seat"] is not None else "the table"
         record.append(f"event {event['n']} ({actor}, {event['tool']}, during {event['step']}): " + " ".join(event["public"]))
         record += [f"    table warning: {lint}" for lint in event["lints"]]

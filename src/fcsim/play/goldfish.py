@@ -6,10 +6,8 @@ first end-to-end run of everything: deck, table, tools over MCP, agent, auditor,
 
 from __future__ import annotations
 
-import json
 import re
 import secrets
-from datetime import datetime
 from pathlib import Path
 
 from ..agents import Budget, BudgetExceeded, RunnerError
@@ -19,6 +17,7 @@ from ..mcp import McpServer
 from ..rules import RulesReference
 from ..table import Table
 from ..tools import SeatTools
+from .gamedir import GameDirectory
 
 PILOT, GOLDFISH = 0, 1
 
@@ -61,11 +60,12 @@ def _deck_reference(deck, database: CardDatabase) -> str:
     return "\n".join(lines)
 
 
-def _slug(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:40]
+_MECHANICAL = {"priority": "pass_priority", "mulligan": "keep", "declare_attackers": "declare_attackers",
+               "declare_blockers": "declare_blockers", "combat_damage": "combat_damage", "discard": "finish_step",
+               "held_step": "finish_step", "resolution": "finish_resolution"}
 
 
-def goldfish(deck_path: str | Path, runner, auditor_runner, database: CardDatabase, *, turns: int = 10,
+def goldfish(deck_path: str | Path, runner, auditor_runner, database: CardDatabase, *, turns: int = 5,
              seed: int | None = None, out_root: str | Path = "games", rules: RulesReference | None = None,
              echo=print) -> dict:
     """Play `turns` pilot turns. `runner` plays the pilot and `auditor_runner` audits; give both the
@@ -76,60 +76,58 @@ def goldfish(deck_path: str | Path, runner, auditor_runner, database: CardDataba
     if deck.unknown or not deck.commanders:
         raise ValueError("The deck has unrecognized cards or no commander; run `fcsim deck check` first.")
     seed = seed if seed is not None else secrets.randbelow(2 ** 31)
+    directory = GameDirectory(out_root, f"goldfish_{deck.commanders[0].name}", seed)
     seats = [{"name": "Pilot", "commanders": [c.name for c in deck.commanders], "library": [c.name for c in deck.library()]},
              {"name": "Goldfish", "commanders": [], "library": ["Wastes"] * 60}]
-    table = Table(seats, seed=seed, first=PILOT,
+    table = Table(seats, seed=seed, first=PILOT, gated=True, on_event=directory.journal,
                   card_lookup=lambda n: (c := database.find(n)) and {"mana_value": c.mana_value})
-    directory = Path(out_root) / f"{datetime.now():%Y-%m-%d_%H%M}_goldfish_{_slug(deck.commanders[0].name)}_{seed % 10000:04d}"
-    (directory / "decks").mkdir(parents=True)
-    (directory / "decks" / "seat-0.txt").write_text(decklist.to_mtgo(), encoding="utf-8")
-    names = {c.name for c in deck.commanders} | {c.name for c, _ in deck.cards}
-    (directory / "cards.json").write_text(json.dumps({n: database.get(n).to_dict() for n in sorted(names)}, indent=1), encoding="utf-8")
-    config = {"mode": "goldfish", "deck": str(deck_path), "turns": turns, "table": table.config, "pilot_model": runner.model,
-              "auditor_model": auditor_runner.model, "deck_issues": [i.to_dict() for i in issues]}
-    (directory / "config.json").write_text(json.dumps(config, indent=1), encoding="utf-8")
-
+    directory.write("decks/seat-0.txt", decklist.to_mtgo())
+    directory.pin_cards({c.name for c in deck.commanders} | {c.name for c, _ in deck.cards}, database)
+    directory.pin_rules(rules)
+    directory.write("config.json", {"mode": "goldfish", "deck": str(deck_path), "turns": turns, "table": table.config,
+                                    "pilot_model": runner.model, "auditor_model": auditor_runner.model,
+                                    "deck_issues": [i.to_dict() for i in issues]})
     auditor = Auditor(auditor_runner, database, context=(
         "A solo test of Pilot's deck that stands in for a four-player Commander game, so multiplayer rules "
         "apply: the player who goes first draws on their first turn. Goldfish is a stand-in opponent that "
         "never acts; the driver passes and declares no blocks for it."))
     system = SYSTEM + "\n\nYOUR DECK (count, name, cost, type, text)\n" + _deck_reference(deck, database)
     current: dict = {}
-    written = 0
-    wakes: list[dict] = []
 
-    def save() -> None:
-        nonlocal written
-        with (directory / "events.jsonl").open("a", encoding="utf-8") as out:
-            for event in table.events[written:]:
-                out.write(json.dumps(event, ensure_ascii=False) + "\n")
-        with (directory / "log.md").open("a", encoding="utf-8") as out:
-            for event in table.events[written:]:
-                out.write(f"- `{event['n']}` turn {event['turn']} {event['step']}: " + " ".join(event["public"]) + "\n")
-                out.writelines(f"  - table warning: {lint}\n" for lint in event["lints"])
-        written = len(table.events)
-        (directory / "state.json").write_text(json.dumps(table.game.to_dict(), indent=1), encoding="utf-8")
-        (directory / "notes-seat-0.md").write_text(table.notes[PILOT], encoding="utf-8")
+    def needs_pilot(seat: int, kind: str) -> bool:
+        """Dispatch by seat and by decision, whoever's turn it is. On Goldfish's turn the pilot's
+        priority is passed for it (a goldfish plays nothing at instant speed), but a trigger, a
+        question or a resolution of its own is a real decision."""
+        return seat == PILOT and (kind == "mulligan" or table.game.turn.active == PILOT or kind != "priority")
+
+    def at_end_of_turn() -> bool:
+        control = table.game.control
+        return control.kind == "audit" and control.detail["resume"]["do"] == "next_turn"
+
+    def wake_is_over() -> bool:
+        if current["mode"] == "decision":  # a decision outside the pilot's turn ends once it is made
+            expected = table.expected()
+            return table.awaiting_audit or not expected or not needs_pilot(*expected[0])
+        return table.game.turn.number != current["turn"] or at_end_of_turn()
 
     def settle(full: bool) -> None:
-        """Goldfish acts instantly. Inside a wake (`full` false) this stops at the end of the pilot's
-        turn, so the turn can be audited and its hooks applied before any later step runs. Between
-        wakes (`full` true) both seats pass through Goldfish's turn up to the pilot's next decision."""
-        for _ in range(400):
+        """Do everything that needs no model. Inside a wake (`full` false) this stops where the wake
+        ends, leaving the table at its checkpoint so the pilot's actions are audited and their hooks
+        applied before any later step runs. Between wakes it runs on to the pilot's next decision."""
+        for _ in range(600):
+            if current.get("wake") and wake_is_over():
+                table.close_wake(current["wake"])
+                current["ended_at"] = current["ended_at"] or len(table.events)
+                if not full:
+                    return
+            if table.awaiting_audit:  # a checkpoint inside the pilot's turn, or after Goldfish acted: the turn is audited whole
+                table.release()
+                continue
             expected = table.expected()
-            if not expected:
+            if not expected or needs_pilot(*expected[0]):
                 return
             seat, kind = expected[0]
-            if current.get("wake") and table.game.turn.number != current.get("turn"):
-                table.close_wake(current["wake"])
-                current["ended_at"] = current.get("ended_at") or len(table.events)
-            pilots_turn = table.game.turn.active == PILOT or kind == "mulligan"
-            if (pilots_turn and seat == PILOT) or (not pilots_turn and not full):
-                return
-            action = {"priority": "pass_priority", "mulligan": "keep", "declare_attackers": "declare_attackers",
-                      "declare_blockers": "declare_blockers", "combat_damage": "combat_damage",
-                      "discard": "finish_step", "held_step": "finish_step"}.get(kind)
-            if action is None or "error" in table.act(seat, action):
+            if kind not in _MECHANICAL or "error" in table.act(seat, _MECHANICAL[kind]):
                 return
 
     def tools_for(token: str):
@@ -144,75 +142,89 @@ def goldfish(deck_path: str | Path, runner, auditor_runner, database: CardDataba
                 control = table.game.control
                 result["pen"] = {"kind": control.detail.get("action", control.kind), "seats": control.seats}
                 result["turn"] = {"number": table.game.turn.number, "step": table.game.turn.step}
-                if table.game.turn.number != current["turn"]:
-                    result["wake"] = "Your turn is over and this wake has ended. Stop calling tools and give your summary."
+                if current["ended_at"]:
+                    result["wake"] = "This wake has ended. Stop calling tools and give your summary."
             return result
         return tools.definitions, call
 
-    report: dict = {"directory": str(directory), "seed": seed, "turns": [], "stopped": None,
+    report: dict = {"directory": str(directory.path), "seed": seed, "turns": [], "stopped": None,
                     "deck_issues": [issue.message for issue in issues]}
     for issue in issues:  # a playtest may use a list that is not tournament-legal, such as 104 cards mid-cut
         echo(f"note: {issue.message} Playing it as it is.")
     with McpServer(tools_for) as server:
         try:
-            while table.expected() and table.game.turn.number <= 2 * turns - 1:
-                seat, kind = table.expected()[0]
-                if seat != PILOT or (table.game.turn.active != PILOT and kind != "mulligan"):
-                    settle(full=True)
+            while table.game.control.kind != "over" and table.game.turn.number <= 2 * turns - 1:
+                if table.awaiting_audit:
+                    table.release()
                     continue
-                turn_number = table.game.turn.number
-                token = secrets.token_hex(16)
-                wake = table.open_wake(PILOT, kind)
+                expected = table.expected()
+                if not expected:
+                    break
+                seat, kind = expected[0]
+                if not needs_pilot(seat, kind):
+                    before = len(table.events)
+                    settle(full=True)
+                    if len(table.events) == before:  # never spin: a decision nobody can make ends the run
+                        report["stopped"] = f"the driver cannot act for seat {seat} ({kind})"
+                        break
+                    continue
+                turn_number, own_turn = table.game.turn.number, table.game.turn.active == PILOT or kind == "mulligan"
+                token, wake = secrets.token_hex(16), table.open_wake(PILOT, kind)
                 current.update(tools=SeatTools(table, PILOT, wake, database=database, rules=rules), token=token, wake=wake,
-                               turn=turn_number, ended_at=None)
+                               turn=turn_number, ended_at=None, mode="turn" if own_turn else "decision")
                 snapshot = auditor.snapshot(table)
+                label = 0 if kind == "mulligan" else (turn_number + 1) // 2
                 if kind == "mulligan":
                     prompt = "Your opening hand has been dealt. Look at it with get_view, then keep or mulligan."
-                else:
-                    prompt = (f"It is your turn {(turn_number + 1) // 2} (table turn {turn_number}). "
+                elif own_turn:
+                    prompt = (f"It is your turn {label} (table turn {turn_number}). "
                               "Play it. Your turn ends when you have passed priority through your end step.")
-                echo(f"turn {(turn_number + 1) // 2 if kind != 'mulligan' else 0}: pilot is playing ({kind}) ...")
+                else:
+                    prompt = (f"It is Goldfish's turn (table turn {turn_number}) and the table is waiting for you: {kind}. "
+                              "Look with get_view, do what is needed, and stop.")
+                echo(f"turn {label}: pilot is playing ({kind}{'' if own_turn else ', during Goldfish turn'}) ...")
                 reply = runner.ask(system, prompt, mcp_config=server.config(token),
                                    allowed_tools=tuple(f"mcp__{server.name}__{t['name']}" for t in current["tools"].definitions))
                 table.close_wake(wake)
-                if kind != "mulligan" and table.game.turn.number == turn_number:  # it stopped early: finish the turn for it
-                    current["forced"] = True
-                    for _ in range(60):
-                        if table.game.turn.number != turn_number or not table.expected():
-                            break
+                forced = False
+                for _ in range(80):  # it stopped early: finish its turn, or its decision, for it
+                    if wake_is_over() or not table.expected() and not table.awaiting_audit:
+                        break
+                    forced = True
+                    if table.awaiting_audit:
+                        table.release()
+                    else:
                         s, k = table.expected()[0]
-                        table.act(s, {"priority": "pass_priority", "declare_attackers": "declare_attackers",
-                                      "combat_damage": "combat_damage", "resolution": "finish_resolution"}.get(k, "finish_step"))
-                ended = current.get("ended_at") or len(table.events)
-                entry = {"turn": (turn_number + 1) // 2 if kind != "mulligan" else 0, "kind": kind, "summary": reply.text,
+                        if "error" in table.act(s, _MECHANICAL.get(k, "finish_step")):
+                            break
+                ended = current["ended_at"] or len(table.events)
+                entry = {"turn": label, "table_turn": turn_number, "kind": kind, "summary": reply.text,
                          "tool_calls": len(current["tools"].calls),
                          "tool_errors": [c for c in current["tools"].calls if c["error"]],
-                         "forced_to_end": bool(current.pop("forced", False)), "seconds": round(reply.seconds, 1),
+                         "forced_to_end": forced, "seconds": round(reply.seconds, 1),
                          "estimated_cost_usd": round(reply.cost_usd, 4), "events": [snapshot[2], ended]}
-                if kind != "mulligan" and ended > snapshot[2]:
+                directory.append("transcript-seat-0.jsonl", {**entry, "calls": current["tools"].calls})
+                report["turns"].append(entry)
+                if kind != "mulligan" and any(e["public"] for e in table.events[snapshot[2]:ended]):
                     echo(f"         auditing {ended - snapshot[2]} events ...")
                     verdict, audit_reply = auditor.audit(table, snapshot, ended)
                     entry["audit"] = {**verdict, "seconds": round(audit_reply.seconds, 1)}
                     if verdict.get("hooks"):
                         entry["hooks_applied"] = "error" not in _apply(table, verdict["hooks"])
-                    with (directory / "audits.jsonl").open("a", encoding="utf-8") as out:
-                        out.write(json.dumps({"turn": entry["turn"], "events": entry["events"], **verdict}, ensure_ascii=False) + "\n")
-                wakes.append(entry)
-                report["turns"].append(entry)
-                with (directory / "transcript-seat-0.jsonl").open("a", encoding="utf-8") as out:
-                    out.write(json.dumps({**entry, "calls": current["tools"].calls}, ensure_ascii=False) + "\n")
-                save()
+                    directory.append("audits.jsonl", {"turn": label, "events": entry["events"], **verdict})
+                directory.write("state.json", table.game.to_dict())
+                directory.write("notes-seat-0.md", table.notes[PILOT])
                 current.update(tools=None, token=None, wake=None)
         except BudgetExceeded as stop:
             report["stopped"] = str(stop)
         except RunnerError as error:
             report["stopped"] = f"model error: {error}"
-    save()
     report["metrics"] = metrics(table)
     report["usage"] = runner.budget.to_dict()
-    (directory / "usage.json").write_text(json.dumps(report["usage"], indent=1), encoding="utf-8")
-    (directory / "report.json").write_text(json.dumps(report, indent=1, ensure_ascii=False), encoding="utf-8")
-    (directory / "report.md").write_text(render(report, deck), encoding="utf-8")
+    directory.write("state.json", table.game.to_dict())
+    directory.write("usage.json", report["usage"])
+    directory.write("report.json", report)
+    directory.write("report.md", render(report, deck))
     return report
 
 

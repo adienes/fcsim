@@ -29,21 +29,29 @@ _ALLOWED = {
     "declare_attackers": ("turn_action",), "declare_blockers": ("turn_action",), "combat_damage": ("turn_action",),
 }
 _READ_ONLY = frozenset({"get_view", "get_log", "get_notes"})
+# Calls that change nothing an auditor could judge. Every other seat call marks the table as unaudited.
+_NOT_AUDITABLE = frozenset({"pass_priority", "say", "write_notes", "mulligan", "keep", "concede", "answer", "finish_step"})
 
 
 class Table:
-    def __init__(self, seats: list[dict], *, seed: int | None = None, first: int | None = None,
-                 card_lookup: Callable[[str], dict | None] | None = None, _setup_random: list | None = None):
-        """`seats` is a list of {name, commanders: [card names], library: [card names]}."""
-        self.config = {"seats": copy.deepcopy(seats), "seed": seed, "first": first}
-        self.card_lookup = card_lookup
+    def __init__(self, seats: list[dict], *, seed: int | None = None, first: int | None = None, gated: bool = False,
+                 card_lookup: Callable[[str], dict | None] | None = None, on_event: Callable[[dict], None] | None = None,
+                 _setup_random: list | None = None):
+        """`seats` is a list of {name, commanders: [card names], library: [card names]}.
+
+        With `gated`, the table stops at an audit checkpoint whenever something auditable has
+        happened and the pen would move on or a mechanical step would run; the driver calls
+        `release` when it is satisfied. `on_event` receives each event as it is committed, so a
+        journal on disk never lags the game."""
+        self.config = {"seats": copy.deepcopy(seats), "seed": seed, "first": first, "gated": gated}
+        self.card_lookup, self.gated, self.on_event = card_lookup, gated, on_event
         self.dice = Dice(seed)
         self.events: list[dict] = []
         self.rev = 0
         self.notes = {index: "" for index in range(len(seats))}
         self.handles: dict[int | None, Handles] = {viewer: Handles() for viewer in (None, *range(len(seats)))}
         self._wakes: dict[str, dict] = {}
-        game = Game(seats=[Seat(index, seat["name"]) for index, seat in enumerate(seats)])
+        game = Game(seats=[Seat(index, seat["name"]) for index, seat in enumerate(seats)], gated=gated)
         for index, seat in enumerate(seats):
             for zone, names, commander in (("command", seat.get("commanders", []), True),
                                            ("library", seat.get("library", []), False)):
@@ -157,6 +165,8 @@ class Table:
                     holders = ", ".join(game.seats[s].name for s in control.seats) or "nobody"
                     raise TableError("not_your_pen", f"`{tool}` is not available to you now. The table is waiting "
                                                      f"for {holders} ({control.detail.get('action', control.kind)}).")
+            if self.gated and seat is not None and tool not in _NOT_AUDITABLE:
+                game.audit_pending = True
             return handler(game, seat, args)
 
         return self._commit(seat, tool, args, run, recorded)
@@ -179,6 +189,8 @@ class Table:
                  "random": list(self.dice.recorded), "public": told.public,
                  "private": {str(s): lines for s, lines in told.private.items()}, "lints": lints}
         self.events.append(event)
+        if self.on_event:
+            self.on_event(event)
         control = game.control
         result = {"ok": True, "rev": self.rev, "log": told.public,
                   "pen": {"kind": control.detail.get("action", control.kind), "seats": control.seats}}
@@ -464,6 +476,17 @@ class Table:
 
     # ---- host, auditor and judge actions: not available to seats -----------------------------
 
+    @property
+    def awaiting_audit(self) -> bool:
+        return self.game.control.kind == "audit"
+
+    def release(self) -> dict:
+        """Let the game go on from an audit checkpoint."""
+        return self._execute(None, "release", {})
+
+    def _do_release(self, game: Game, seat: None, args: dict):
+        turn.release(game)
+
     def apply_hooks(self, hooks: list[dict]) -> dict:
         """Write an auditor's hooks into the ledger. A hook lasts until its source leaves the battlefield.
 
@@ -545,8 +568,8 @@ class Table:
         """Rebuild a table from its configuration and event log."""
         if not events or events[0]["tool"] != "setup":
             raise TableError("bad_log", "An event log starts with the setup event.")
-        table = cls(config["seats"], seed=config["seed"], first=config["first"], card_lookup=card_lookup,
-                    _setup_random=events[0]["random"])
+        table = cls(config["seats"], seed=config["seed"], first=config["first"], gated=config.get("gated", False),
+                    card_lookup=card_lookup, _setup_random=events[0]["random"])
         for event in events[1:]:
             if event["tool"] == "patch":
                 table.patch(event["args"]["mutations"], event["args"]["because"], _recorded=event["random"])

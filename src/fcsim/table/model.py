@@ -165,6 +165,8 @@ class Game:
     designations: dict[str, int | str | None] = field(default_factory=dict)
     winner: int | None = None
     next_id: int = 1
+    audit_pending: bool = False   # something auditable has happened since the last checkpoint was released
+    gated: bool = False           # stop at audit checkpoints, and at the end of every turn
 
     def new_id(self) -> int:
         self.next_id += 1

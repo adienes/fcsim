@@ -60,8 +60,13 @@ class ScriptedPilot:
             island = next((c["handle"] for c in view["seats"][0]["hand"]["cards"] if c["name"] == "Island"), None)
             for _ in range(40):
                 waiting_for = view["pen"].get("action") or view["pen"]["kind"]
-                result = tool("play_land", card=island) if island and view["turn"]["step"] == "main1" else \
-                    tool({"priority": "pass_priority", "discard": "finish_step", "held_step": "finish_step"}.get(waiting_for, waiting_for))
+                if waiting_for == "triggers":
+                    result = tool("add_trigger", pending=view["waiting_triggers"][0]["handle"])
+                elif island and view["turn"]["step"] == "main1" and waiting_for == "priority":
+                    result = tool("play_land", card=island)
+                else:
+                    result = tool({"priority": "pass_priority", "discard": "finish_step", "held_step": "finish_step",
+                                   "resolution": "finish_resolution"}.get(waiting_for, waiting_for))
                 island = None if "ok" in result and result["log"][0].startswith("Pilot plays") else island
                 if "wake" in result or "error" in result:
                     assert tool("pass_priority")["error"]["code"] == "stale_wake" if "wake" in result else True
@@ -94,10 +99,12 @@ def test_a_goldfish_run_plays_audits_and_writes_a_game_directory(database, tmp_p
     assert budget.calls == 7   # four pilot wakes and three audits
 
     directory = Path(report["directory"])
-    assert "_goldfish_talrand-sky-summoner_" in directory.name
+    assert "_goldfish-talrand-sky-summoner_" in directory.name
     files = {p.name for p in directory.iterdir()}
     assert {"config.json", "cards.json", "events.jsonl", "log.md", "state.json", "audits.jsonl", "report.md",
             "report.json", "usage.json", "transcript-seat-0.jsonl", "decks"} <= files
+    assert not [name for name in files if name.endswith(".partial")]
+    assert "rulings" in json.loads((directory / "cards.json").read_text())["Opt"]
     events = [json.loads(line) for line in (directory / "events.jsonl").read_text().splitlines()]
     assert [e["n"] for e in events] == list(range(len(events))) and "Pilot plays Island" in (directory / "log.md").read_text()
     goldfish_turns = {e["turn"] for e in events if e["seat"] == GOLDFISH and e["turn"] > 0}
@@ -114,3 +121,19 @@ def test_a_goldfish_run_stops_cleanly_at_its_budget(database, tmp_path):
                       database, turns=5, seed=11, out_root=tmp_path / "games", echo=lambda *_: None)
     assert "limit of 2 model calls" in report["stopped"]
     assert "Played as listed although: The deck has 104 cards" in (Path(report["directory"]) / "report.md").read_text()
+
+
+def test_a_pilot_trigger_on_goldfishs_turn_gets_its_own_wake_instead_of_a_loop(database, tmp_path):
+    deck = tmp_path / "talrand.txt"
+    deck.write_text(DECK, encoding="utf-8")
+    budget = Budget(max_calls=60)
+    hook = {"kind": "step_trigger", "source": "Island", "step": "upkeep", "whose": "each", "text": "an upkeep trigger"}
+    verdicts = [{"verdict": "ok", "findings": [], "hooks": [hook] if n == 0 else []} for n in range(30)]
+    report = goldfish(deck, ScriptedPilot(budget), FakeRunner(verdicts, budget), database, turns=2, seed=11,
+                      out_root=tmp_path / "games", echo=lambda *_: None)
+    assert report["stopped"] is None and not any(t["forced_to_end"] for t in report["turns"])
+    kinds = [(t["table_turn"], t["kind"]) for t in report["turns"]]
+    assert (2, "triggers") in kinds and (2, "resolution") in kinds     # decisions on Goldfish's turn, each a short wake
+    assert kinds[-1][0] == 3 and budget.calls < 20
+    log = (Path(report["directory"]) / "log.md").read_text()
+    assert log.count("puts a trigger on the stack") == 2 and "turn 2 upkeep: Pilot puts a trigger" in log

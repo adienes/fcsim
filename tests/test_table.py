@@ -467,3 +467,40 @@ def test_a_hook_binds_to_one_permanent_even_when_two_share_a_name():
     table.patch([{"op": "move", "obj": table.handles[None].resolve("c", bobs), "to": "graveyard"}], "Bob's is destroyed")
     assert len(table.game.ledger) == 1                              # Ann's hook does not leave with Bob's permanent
     assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()
+
+
+def test_a_gated_table_stops_for_an_audit_before_the_pen_moves_or_a_step_runs():
+    journal = []
+    table = Table(seats(), seed=5, first=0, gated=True, on_event=journal.append)
+    runner = ScriptedRunner(table)
+    for seat in range(3):
+        runner.step(seat, "keep")
+    for _ in range(12):                                     # passing is not auditable: no checkpoint on the way to main 1
+        if table.game.turn.step == "main1":
+            break
+        runner.step(table.expected()[0][0], "pass_priority")
+    assert not table.awaiting_audit and journal == table.events
+    runner.step(0, "play_land", {"card": "@Island"})
+    assert table.expected() == [(0, "priority")]            # the actor keeps the pen: nothing to stop yet
+    runner.step(0, "pass_priority")
+    assert table.awaiting_audit and table.expected() == [] and table.view(1)["pen"]["kind"] == "audit"
+    assert table.act(1, "pass_priority")["error"]["code"] == "not_your_pen"
+    table.apply_hooks([{"kind": "hold", "source": "Island", "step": "untap", "text": "a test hook"}])
+    table.release()
+    assert table.expected() == [(1, "priority")] and not table.game.audit_pending
+    with pytest.raises(Exception, match="not waiting"):
+        table.release()
+    runner.step(1, "pass_priority"), runner.step(2, "pass_priority")
+    assert table.game.turn.step == "begin_combat" and not table.awaiting_audit
+    for _ in range(40):                                     # however little happens, the turn still ends at a checkpoint
+        if table.awaiting_audit and table.game.control.detail["resume"]["do"] == "next_turn":
+            break
+        if table.awaiting_audit:                            # declaring no attackers is an action too
+            table.release()
+            continue
+        seat, kind = table.expected()[0]
+        runner.step(seat, {"priority": "pass_priority", "declare_attackers": "declare_attackers", "discard": "finish_step"}[kind])
+    assert table.game.control.detail == {"resume": {"do": "next_turn"}} and table.game.turn.number == 1
+    table.release()
+    assert table.game.turn.number == 2 and table.expected() == [(1, "held_step")] or table.expected() == [(1, "priority")]
+    assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()

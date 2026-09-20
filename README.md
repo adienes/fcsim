@@ -1,8 +1,12 @@
 # fcsim
 
-Commander playtesting is still in design. The first implemented component is an
-offline, versioned Comprehensive Rules reference. It has no runtime dependencies
-outside Python 3.12+ and its SQLite FTS5 support.
+Playtest and tune Commander decks with LLM agents; `PLAN.md` is the design. Built
+so far, each described below: an offline Comprehensive Rules reference, a deck
+check, the game table, a rules auditor with a scenario suite that measures it, and
+an audited solo goldfish in which an agent pilots a deck through tools served over
+MCP. Multiplayer games, corrections and the deck workshop are not built yet. There
+are no runtime dependencies outside Python 3.12+ and its SQLite FTS5 support; model
+calls go through your local Claude Code login.
 
 ```sh
 uv sync
@@ -43,7 +47,7 @@ rules.search_rules("replacement effects drawing cards", limit=5)
 
 Construct the reference in the host and bind only its read methods as agent
 tools. Choosing a source directory/version and exporting files are host actions.
-An HTTP MCP server and the rest of the simulator are not implemented yet.
+Players already get `lookup_rule` this way, over the MCP server in `fcsim.mcp`.
 
 To give a game its own self-contained reference:
 
@@ -114,6 +118,10 @@ Table.replay(table.config, table.events)   # the event log rebuilds the same gam
   question in APNAP order, and ends with `finish_resolution`.
 - **Mechanical steps** (untap, draw, cleanup) run by themselves unless a hook in
   the ledger holds them for a seat, as when a draw is replaced.
+- **Audit checkpoints.** A `gated` table stops whenever something auditable has
+  happened and the pen would move on or a mechanical step would run, and at the
+  end of every turn; the driver audits what it wants and calls `release`. So a
+  turn's hooks exist before the next untap and upkeep.
 - **The log** records each call with handles resolved and every random outcome.
   `rewind` returns to an earlier event and reshuffles what nobody knew; `patch`
   repairs the state going forward. Both kill open wakes, and a repeated call id

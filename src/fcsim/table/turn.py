@@ -65,11 +65,40 @@ def _hold(game: Game, step: str) -> dict | None:
                  and e.get("seat") == game.turn.active), None)
 
 
+def _gate(game: Game, resume: dict) -> bool:
+    """The audit checkpoint. If anything auditable has happened since the last one, stop here,
+    before the next seat receives priority and before any mechanical step runs, and remember
+    what to do when the driver releases the table. The driver decides what to audit and when."""
+    if not game.audit_pending:
+        return False
+    game.control = Control("audit", [], {"resume": resume})
+    return True
+
+
+def release(game: Game) -> None:
+    if game.control.kind != "audit":
+        raise TableError("not_waiting", "The table is not waiting at an audit checkpoint.")
+    resume, game.audit_pending = game.control.detail["resume"], False
+    if resume["do"] == "next_turn":
+        _next_turn(game)
+    elif resume["do"] == "advance":
+        advance(game)
+    elif resume["do"] == "give":
+        _give_priority(game, resume["seat"])
+    else:
+        grant_priority(game, resume["seat"])
+
+
 def advance(game: Game) -> None:
     """Run mechanical steps until some seat has to act."""
     while game.control.kind != "over":
+        if _gate(game, {"do": "advance"}):
+            return
         turn = game.turn
         if not turn.remaining:
+            if game.gated:  # always stop between turns: hooks from this turn must exist before the next untap and upkeep
+                game.control = Control("audit", [], {"resume": {"do": "next_turn"}})
+                return
             return _next_turn(game)
         step = turn.step = turn.remaining.pop(0)
         turn.passed = []
@@ -156,7 +185,7 @@ def _queue_step_triggers(game: Game, step: str) -> None:
 def grant_priority(game: Game, seat: int) -> None:
     """The priority checkpoint: waiting triggers go on the stack, in APNAP order, before anyone
     receives priority. (The audit of what just happened gates this too, once there is an auditor.)"""
-    if game.control.kind == "over":
+    if game.control.kind == "over" or _gate(game, {"do": "grant", "seat": seat}):
         return
     owed = {t["seat"] for t in game.pending_triggers}
     for candidate in game.turn_order_from(game.turn.active):
@@ -178,6 +207,8 @@ def _yielding(game: Game, seat: int) -> bool:
 
 
 def _give_priority(game: Game, seat: int) -> None:
+    if _gate(game, {"do": "give", "seat": seat}):
+        return
     game.control = Control("priority", [seat])
     if _yielding(game, seat):
         pass_priority(game, seat)
