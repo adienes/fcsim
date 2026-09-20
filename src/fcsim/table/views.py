@@ -113,6 +113,7 @@ def view(game: Game, viewer: int | None, handles: Handles, rev: int) -> dict:
             "seat": seat.index, "name": seat.name, "status": seat.status, "life": seat.life,
             "counters": seat.counters, "commander_damage": seat.commander_damage,
             "commander_casts": seat.commander_casts, "mulligans": seat.mulligans,
+            **({"response_policy": seat.response_policy} if viewer == seat.index else {}),  # whether one holds up interaction is private
             "hand": _hidden_zone(game, seat.index, "hand", viewer, handles),
             "library": _hidden_zone(game, seat.index, "library", viewer, handles),
             "graveyard": _zone(game, seat.graveyard, viewer, handles),

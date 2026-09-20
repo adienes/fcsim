@@ -30,7 +30,8 @@ _ALLOWED = {
 }
 _READ_ONLY = frozenset({"get_view", "get_log", "get_notes"})
 # Calls that change nothing an auditor could judge. Every other seat call marks the table as unaudited.
-_NOT_AUDITABLE = frozenset({"pass_priority", "say", "write_notes", "mulligan", "keep", "concede", "answer", "finish_step"})
+_NOT_AUDITABLE = frozenset({"pass_priority", "say", "write_notes", "mulligan", "keep", "concede", "answer", "finish_step",
+                            "set_response_policy"})
 
 
 class Table:
@@ -127,7 +128,8 @@ class Table:
                             "text": e["public"],
                             **({"private": e["private"][str(seat)]} if str(seat) in e["private"] else {}),
                             **({"lints": e["lints"]} if e["lints"] else {})}
-                           for e in self.events[since:]], "next": len(self.events)}
+                           for e in self.events[since:] if e["public"] or str(seat) in e["private"] or e["lints"]],
+                "next": len(self.events)}  # an event with nothing for this viewer is not shown, tool name included
 
     def _get_notes(self, seat: int, args: dict) -> dict:
         return {"notes": self.notes[seat]}
@@ -486,6 +488,13 @@ class Table:
         to = [ops._seat(game, s) for s in args.get("to", [])]
         address = f" (to {', '.join(game.seats[s].name for s in to)})" if to else ""
         return ops.Told(public=[f"{self._name(seat)}{address}: {text}"])
+
+    def _do_set_response_policy(self, game: Game, seat: int, args: dict):
+        policy = args.get("policy")
+        if policy not in ("ask", "pass_unless_targeted", "pass_always"):
+            raise TableError("bad_policy", "The policy is \"ask\", \"pass_unless_targeted\" or \"pass_always\".")
+        game.seats[seat].response_policy = policy
+        return ops.Told(private={seat: [f"Until your next turn, when others put something on the stack: {policy.replace('_', ' ')}."]})
 
     def _do_write_notes(self, game: Game, seat: int, args: dict):
         self.notes[seat] = str(args.get("text", ""))

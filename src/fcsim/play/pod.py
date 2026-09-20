@@ -56,7 +56,8 @@ Call get_view only after you have changed the table and need fresh handles, and 
 for a card the briefing does not show. Update your notes with write_notes when your plans or your \
 read of the table change. When you pass priority and nobody responds, the same wake carries on: \
 the result says `carry_on` and shows the table again. A wake ends when the table stops waiting \
-for you: the result then says `wake`. Then stop calling \
+for you: the result then says `wake`. When you end your turn tapped out, or hold nothing you would \
+respond with, call set_response_policy so the table stops asking you until your next turn. Then stop calling \
 tools and reply with one or two sentences on what you did and why; only you will see them."""
 
 _TRIAGE = {"type": "object", "additionalProperties": False, "required": ["respond", "why"],
@@ -355,8 +356,10 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
                 signature = tuple(item.id for item in game.stack)
                 if decisions.get("stack") != signature:
                     waiting = [s for s in game.turn_order_from(seat) if s not in game.turn.passed and s != me]
+                    asked = [s for s in waiting if _wants_asking(table, s)]  # the rest have a standing "pass for me"
+                    answers = triage(asked) if asked else {}
                     decisions.clear()
-                    decisions.update(stack=signature, **{str(s): a for s, a in triage(waiting).items()})
+                    decisions.update(stack=signature, **{str(s): answers.get(s, False) for s in waiting})
                 if not decisions.get(str(seat), True):
                     table.act(seat, "pass_priority")
                     seen[seat] = len(table.events)
@@ -399,6 +402,16 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
     directory.write("report.json", report)
     directory.write("report.md", render(report))
     return report
+
+
+def _wants_asking(table: Table, seat: int) -> bool:
+    """Whether to ask this seat if it responds to the top of the stack, given its standing policy."""
+    game = table.game
+    policy = game.seats[seat].response_policy
+    if policy == "pass_unless_targeted":
+        return any(t.get("seat") == seat or (t.get("obj") in game.objects and game.objects[t["obj"]].controller == seat)
+                   for t in game.stack[-1].targets)
+    return policy != "pass_always"
 
 
 def _cannot_act(table: Table, seat: int, kind: str) -> bool:

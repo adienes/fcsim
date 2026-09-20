@@ -206,3 +206,30 @@ def test_status_reads_a_game_directory_while_it_is_being_written(database, tmp_p
     text = render(seen)
     assert "BY TABLE TURN" in text and "respond-or-pass questions (0 said respond)" in text and "Talrand" in text
     assert main(["status", report["directory"]]) == 0 and main(["status", str(tmp_path)]) == 2
+
+
+def test_a_standing_policy_stops_the_respond_or_pass_questions(database, tmp_path):
+    from fcsim.play import pod
+    from fcsim.table import Table
+    table = Table([{"name": n, "commanders": [], "library": ["Island"] * 40} for n in ("Ann", "Bob", "Cat")], seed=1, first=0)
+    for seat in range(3):
+        table.act(seat, "keep")
+    assert table.act(1, "set_response_policy", {"policy": "sometimes"})["error"]["code"] == "bad_policy"
+    assert table.act(1, "set_response_policy", {"policy": "pass_unless_targeted"})["ok"]
+    assert table.act(2, "set_response_policy", {"policy": "pass_always"})["ok"]
+    assert table.view(1)["seats"][1]["response_policy"] == "pass_unless_targeted"
+    assert "response_policy" not in table.view(0)["seats"][1] and "policy" not in json.dumps(table.act(0, "get_log"))   # private
+    for _ in range(3):
+        table.act(table.expected()[0][0], "pass_priority")
+    while table.game.turn.step != "main1":
+        table.act(table.expected()[0][0], "pass_priority")
+    hand = table.view(0)["seats"][0]["hand"]["cards"]
+    table.act(0, "cast", {"card": hand[0]["handle"], "targets": [{"seat": 2}]})
+    assert [pod._wants_asking(table, seat) for seat in (1, 2)] == [False, False]      # not aimed at Bob; Cat never wants asking
+    table.act(0, "cast", {"card": hand[1]["handle"], "targets": [{"seat": 1}]})
+    assert [pod._wants_asking(table, seat) for seat in (1, 2)] == [True, False]       # now Bob is the target
+    while table.game.turn.active == 0:
+        seat, kind = table.expected()[0]
+        table.act(seat, {"priority": "pass_priority", "resolution": "finish_resolution", "declare_attackers": "declare_attackers",
+                         "discard": "finish_step"}[kind])
+    assert table.game.seats[1].response_policy == "ask" and table.game.seats[2].response_policy == "pass_always"   # reset on one's own turn only

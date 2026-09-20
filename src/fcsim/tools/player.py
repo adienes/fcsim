@@ -110,6 +110,12 @@ PLAYER_TOOLS = [
           {"request": {"type": "string"}, "answer": {}}, ("request", "answer")),
     _tool("say", "Say something to the table. Everyone sees it. Deals are not binding.",
           {"text": {"type": "string"}, "to": {"type": "array", "items": {"type": "integer"}, "description": "Seats addressed."}}, ("text",)),
+    _tool("set_response_policy", "Tell the table, privately, whether to ask you each time another player puts something "
+          "on the stack. \"pass_always\" passes for you every time; \"pass_unless_targeted\" passes unless the spell or "
+          "ability targets you or something you control; \"ask\" (the default) asks every time. It lasts until your next "
+          "turn begins. Use it when you are tapped out or hold nothing to respond with: being asked costs time and "
+          "changes nothing. Blocks, triggers and questions still come to you.",
+          {"policy": {"type": "string", "enum": ["ask", "pass_unless_targeted", "pass_always"]}}, ("policy",)),
     _tool("get_notes", "Your private notes. They are your only memory between turns."),
     _tool("write_notes", "Replace your private notes: plans, threats, deals, what opponents have shown.",
           {"text": {"type": "string"}}, ("text",)),

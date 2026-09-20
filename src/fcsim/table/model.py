@@ -126,6 +126,7 @@ class Seat:
     command: list[int] = field(default_factory=list)
     mulligans: int = 0
     turns_taken: int = 0       # this seat's own turn count: the "round" a player means by "turn five"
+    response_policy: str = "ask"   # ask, pass_unless_targeted or pass_always; private, and reset on the seat's own turn
     kept: bool = False
     drew_from_empty: bool = False
     yield_to: dict | None = None   # {"turn", "step"}: pass by itself until that step, while the stack stays empty
