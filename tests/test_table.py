@@ -366,3 +366,14 @@ def test_a_mutation_written_with_its_name_as_the_key_is_understood():
     pass_until(table, runner, "main1")
     result = runner.step(0, "act", {"mutations": [{"life": {"seat": 1, "delta": -3}}], "because": "test"})
     assert result["log"][-1] == "Bob is at 37 life."
+
+
+def test_a_wrong_commander_damage_total_can_be_corrected():
+    table, runner = started()
+    pass_until(table, runner, "main1")
+    commander = "@Ann's Commander"
+    runner.step(0, "act", {"because": "test", "mutations": [{"op": "commander_damage", "seat": 1, "commander": commander, "amount": 16}]})
+    runner.step(0, "act", {"because": "double-counted", "mutations": [{"op": "commander_damage", "seat": 1, "commander": commander, "set": 8}]})
+    assert table.view(2)["seats"][1]["commander_damage"] == {"Ann's Commander (Ann)": 8}
+    runner.step(0, "act", {"because": "x", "mutations": [{"op": "commander_damage", "seat": 1, "commander": commander, "amount": -8}]},
+                error="bad_count")

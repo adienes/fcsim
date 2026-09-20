@@ -210,8 +210,9 @@ def materials(table: Table, before: str, since_event: int, database: CardDatabas
 
 
 class Auditor:
-    def __init__(self, runner, database: CardDatabase):
-        self.runner, self.database = runner, database
+    def __init__(self, runner, database: CardDatabase, *, context: str = ""):
+        """`context` says what kind of game this is, where that changes a ruling."""
+        self.runner, self.database, self.context = runner, database, context
 
     def snapshot(self, table: Table) -> tuple[str, list[str], int]:
         """Take this before the actions to be audited: the board, its card names, the next event number."""
@@ -220,7 +221,8 @@ class Auditor:
 
     def audit(self, table: Table, snapshot: tuple[str, list[str], int], until_event: int | None = None) -> tuple[dict, Reply]:
         before, names, since = snapshot
-        reply = self.runner.ask(SYSTEM, materials(table, before, since, self.database, names, until_event),
+        prompt = materials(table, before, since, self.database, names, until_event)
+        reply = self.runner.ask(SYSTEM, (f"ABOUT THIS GAME\n{self.context}\n\n" if self.context else "") + prompt,
                                 schema=VERDICT_SCHEMA)
         verdict = reply.data
         serious = [f for f in verdict.get("findings", []) if f.get("kind") in SERIOUS]

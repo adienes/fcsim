@@ -58,6 +58,10 @@ def test_materials_show_the_board_the_record_with_steps_and_the_cards(database):
     assert "Wastes" not in text  # nothing hidden: libraries and hands are counts
     verdict, reply = auditor.audit(table, snapshot)
     assert verdict == OK and auditor.runner.asked[0]["schema"] is VERDICT_SCHEMA
+    assert auditor.runner.asked[0]["prompt"].startswith("THE TABLE BEFORE")
+    told = Auditor(FakeRunner([OK]), database, context="Multiplayer rules apply.")
+    told.audit(table, snapshot)
+    assert told.runner.asked[0]["prompt"].startswith("ABOUT THIS GAME\nMultiplayer rules apply.\n\nTHE TABLE BEFORE")
 
 
 def test_scoring_counts_misses_false_alarms_and_hooks():

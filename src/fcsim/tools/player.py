@@ -30,7 +30,8 @@ draw {seat?, count} · mill {seat?, count} · shuffle {seat?} · discard_random 
 look {from | seat (a whole hand), viewers?: [seats], because?} - the viewers, by default you, learn the cards
 reveal {obj | objs | from | seat (a whole hand)} - everyone learns the cards
 roll {sides, count} · flip_coin {count} · designate {key: "monarch" and the like, seat | null}
-commander_damage {seat, commander: handle, amount} · eliminate {seat, reason}
+commander_damage {seat, commander: handle, amount | set} - only for damage the table did not count itself, or \
+with `set` to correct a wrong total · eliminate {seat, reason}
 extra_turn {seat?} · extra_combat · end_turn · skip_step {step} · remove_from_stack {item: handle}
 request_choice {seats, prompt, options?} - asks other players something an effect makes them choose. It must be \
 last in its list; your wake then ends and you are woken again with the answers.
@@ -98,8 +99,9 @@ PLAYER_TOOLS = [
     _tool("declare_blockers", "Declare blockers; an empty list blocks nothing.",
           {"blocks": {"type": "array", "items": {"type": "object"}, "description": "Each is {\"blocker\": handle, \"attacker\": handle}."}}),
     _tool("combat_damage", "As the attacking player, deal this combat damage step's damage for every creature in "
-          "combat. Life totals, marked damage and commander damage are updated. Put what follows in `then` "
-          "(creatures that died, lifelink, poison). Set `another_step` after a first-strike step.",
+          "combat. The table itself updates life totals, damage marked on creatures and commander damage from these "
+          "assignments, so never repeat them as mutations. `then` is only for what follows (creatures that died, "
+          "lifelink, poison counters). Set `another_step` after a first-strike step.",
           {"assignments": {"type": "array", "items": {"type": "object"},
                            "description": "Each is {\"source\": handle, \"target\": {\"seat\": n} or {\"object\": handle}, \"amount\": n}."},
            "then": _BATCH, "another_step": {"type": "boolean"}}),

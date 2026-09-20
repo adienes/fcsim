@@ -213,7 +213,8 @@ def apply_op(game: Game, dice: Dice, actor: int, op: dict, told: Told) -> None:
         case "commander_damage":
             player, source = game.seats[_seat(game, op.get("seat"))], mutations.get(game, op["commander"])
             key = f"{source.name} ({_who(game, source.owner)})"
-            player.commander_damage[key] = player.commander_damage.get(key, 0) + _count(op, "amount")
+            player.commander_damage[key] = _count(op, "set") if "set" in op else \
+                player.commander_damage.get(key, 0) + _count(op, "amount")
             told.public.append(f"{player.name} has taken {player.commander_damage[key]} commander damage from {key}.")
         case "eliminate":
             seat = _seat(game, op.get("seat"))

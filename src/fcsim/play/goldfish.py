@@ -89,7 +89,10 @@ def goldfish(deck_path: str | Path, runner, auditor_runner, database: CardDataba
               "auditor_model": auditor_runner.model, "deck_issues": [i.to_dict() for i in issues]}
     (directory / "config.json").write_text(json.dumps(config, indent=1), encoding="utf-8")
 
-    auditor = Auditor(auditor_runner, database)
+    auditor = Auditor(auditor_runner, database, context=(
+        "A solo test of Pilot's deck that stands in for a four-player Commander game, so multiplayer rules "
+        "apply: the player who goes first draws on their first turn. Goldfish is a stand-in opponent that "
+        "never acts; the driver passes and declares no blocks for it."))
     system = SYSTEM + "\n\nYOUR DECK (count, name, cost, type, text)\n" + _deck_reference(deck, database)
     current: dict = {}
     written = 0
