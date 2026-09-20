@@ -123,7 +123,7 @@ def score(scenario: dict, verdict: dict) -> dict:
     # A scenario lists every hook its new permanents need, so any other hook is a false alarm:
     # a bogus "hold" would hand a step to a player for no reason.
     hook_extras = [f"{h.get('kind')} {h.get('step', '')} {h.get('source')}: {h.get('text', '')}".replace("  ", " ")
-                   for h in hooks if not any(hook_matches(h, e) for e in wanted_hooks)]
+                   for h in hooks if h.get("kind") != "static" and not any(hook_matches(h, e) for e in wanted_hooks)]
     return {"passed": not missed and not extra and not hook_misses and not hook_extras, "expected_findings": len(wanted),
             "missed": missed, "false_alarms": [f["summary"] for f in extra], "hooks_expected": len(wanted_hooks),
             "hooks_missed": hook_misses, "hooks_unexpected": hook_extras}

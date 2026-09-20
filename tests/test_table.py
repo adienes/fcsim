@@ -532,3 +532,26 @@ def test_at_a_checkpoint_a_trigger_can_be_queued_and_a_finding_corrected():
     table.release()
     assert table.expected() == [(1, "priority")]
     assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()
+
+
+def test_the_auditors_computed_characteristics_and_static_effects_are_written_on_the_board():
+    from fcsim.audit import describe
+    table, runner = started()
+    pass_until(table, runner, "main1")
+    for name in ("Lord of the Undead", "Zombie"):
+        table.patch([{"op": "create_token", "controller": 0, "token": {"name": name}}], "set up")
+    lord, zombie = [c["handle"] for c in table.view(None)["battlefield"]]
+    table.apply_hooks([{"kind": "static", "handle": lord, "source": "Lord of the Undead", "text": "Other Zombie creatures get +1/+1."}])
+    table.apply_computed([{"handle": zombie, "power": "3", "toughness": "3", "because": "Lord of the Undead"},
+                          {"handle": "c999", "power": "9", "toughness": "9", "because": "no such permanent"}])
+    seen = table.view(2)["battlefield"][1]["computed"]
+    assert seen == {"power": "3", "toughness": "3", "because": "Lord of the Undead", "as_of": "turn 1, main1"}
+    text = describe(table.view(2))
+    assert text.startswith("CONTINUOUS EFFECTS IN PLAY") and "Ann (seat 0): Other Zombie creatures get +1/+1." in text
+    assert "NOW 3/3 (Lord of the Undead; worked out turn 1, main1)" in text
+    table.apply_computed([])                                   # each list replaces the last
+    assert "computed" not in table.view(2)["battlefield"][1]
+    table.apply_computed([{"handle": zombie, "power": "3", "toughness": "3", "because": "Lord of the Undead"}])
+    runner.step(0, "act", {"because": "bounced", "mutations": [{"op": "move", "obj": "@Lord of the Undead", "to": "graveyard"}]})
+    assert "CONTINUOUS EFFECTS" not in describe(table.view(2))  # the effect leaves with its source
+    assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()

@@ -188,7 +188,9 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
                 and e["tool"] not in ("pass_priority", "write_notes")][-25:]
         return "\n".join(["WHAT YOU HAVE ALREADY DONE THIS TURN (do not repeat it: each ability triggers once per event)",
                           *(done or ["(nothing yet)"]), "",
-                          "THE TABLE (the codes in brackets are your handles)", describe(view), "", "YOUR HAND", *(hand or ["(empty)"]),
+                          "THE TABLE (the codes in brackets are your handles; NOW is a creature's current power and toughness as "
+                          "the auditor last worked it out: trust it unless the board has changed since)",
+                          describe(view, database), "", "YOUR HAND", *(hand or ["(empty)"]),
                           *(["", "YOUR TRIGGERS WAITING TO GO ON THE STACK", *waiting] if waiting else []),
                           *(["", "QUESTIONS FOR YOU", *asked] if asked else []),
                           "", "CARDS IN PLAY", card_reference([n for n in in_play if n], database, rulings_per_card=0) or "(none)",
@@ -265,6 +267,7 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
                 table.apply_hooks(verdict["hooks"])
             except ValueError as error:
                 record["hooks_error"] = str(error)
+        table.apply_computed(verdict.get("computed") or [])
         actors = [e["seat"] for e in unit if e["seat"] is not None]
         at_fault: dict[int, list[str]] = {}
         for finding in verdict.get("findings", []):

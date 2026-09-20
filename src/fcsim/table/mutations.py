@@ -61,7 +61,7 @@ def move(game: Game, obj: Obj, to: str, *, position: str | int = "top", controll
 
     obj.zone = to
     obj.tapped = obj.transformed = obj.phased_out = False
-    obj.counters, obj.annotations, obj.damage, obj.attached_to = {}, [], 0, None
+    obj.counters, obj.annotations, obj.damage, obj.attached_to, obj.computed = {}, [], 0, None, None
     obj.controller = obj.owner if to != "battlefield" and to != "stack" else \
         (controller if controller is not None else obj.controller)
     obj.entered_turn = game.turn.number if to == "battlefield" else None

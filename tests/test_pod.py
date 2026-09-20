@@ -166,7 +166,7 @@ def test_a_wake_starts_with_a_briefing_and_responses_are_triaged_in_parallel(dat
                       out_root=tmp_path / "games", echo=lambda *_: None)
     assert report["stopped"] is None
     briefed = seats[1].prompts[1]
-    assert "THE TABLE (the codes in brackets are your handles)" in briefed and "YOUR HAND\n- [c" in briefed
+    assert "THE TABLE (the codes in brackets are your handles" in briefed and "YOUR HAND\n- [c" in briefed
     assert "[Basic Land — Forest]" in briefed and "YOUR NOTES\n(none yet)" in briefed and "CARDS IN PLAY" in briefed
     assert "ruling " not in briefed                                        # card text, not rulings: a briefing stays short
     again = next(p for p in seats[1].prompts if "WHAT YOU HAVE ALREADY DONE THIS TURN" in p and "- [main1] Pir plays Forest" in p)

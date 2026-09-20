@@ -44,6 +44,7 @@ def obj_view(game: Game, obj: Obj, viewer: int | None, handles: Handles) -> dict
         view["entered_this_turn"] = obj.entered_turn == game.turn.number
         attached = game.objects.get(obj.attached_to) if obj.attached_to is not None else None
         for key, value in (("counters", obj.counters), ("damage", obj.damage), ("annotations", obj.annotations),
+                           ("computed", obj.computed),
                            ("transformed", obj.transformed), ("phased_out", obj.phased_out),
                            ("attached_to", handles.of("c", attached.id) if attached else None)):
             if value:

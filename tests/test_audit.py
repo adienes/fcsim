@@ -52,6 +52,7 @@ def test_materials_show_the_board_the_record_with_steps_and_the_cards(database):
     play(scenario, runner)
     text = materials(table, snapshot[0], snapshot[2], database, snapshot[1])
     assert "THE TABLE BEFORE" in text and "Sol Ring [c" in text and "1 cards in hand" in text
+    assert "Sol Ring [c1]; Artifact" in text                                      # the board shows what is printed on each permanent
     assert "(Ann, cast, during main1): Ann casts Hill Giant" in text
     assert "table warning: Hill Giant has mana value 4 and 3 permanent(s) were tapped" not in text  # not in the fixture
     assert "{T}: Add {C}{C}." in text and "ruling 2020-01-01: A ruling about Sol Ring." in text

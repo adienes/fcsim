@@ -80,6 +80,7 @@ class Obj:
     attached_to: int | None = None
     annotations: list[dict] = field(default_factory=list)
     entered_turn: int | None = None
+    computed: dict | None = None                      # current power and toughness as the auditor last worked them out
     public: bool = False                              # everyone knows its face
     known_by: set[int] = field(default_factory=set)   # seats that know its face while it is not public
 

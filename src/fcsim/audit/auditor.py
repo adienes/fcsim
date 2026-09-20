@@ -70,7 +70,16 @@ permanents can share a name:
 - step_trigger: an ability that triggers at the beginning of a step. step is one of upkeep, \
 draw, main1, begin_combat, end_combat, main2, end; whose is "each" or a seat number.
 - event_trigger: an ability that triggers on a game event, described in text.
+- static: a continuous effect that changes other objects, players or the rules while the \
+permanent stays: "other Zombie creatures you control get +1/+1", "spells cost {1} less", \
+"players can't gain life". Players will read it at the top of their view, so state it exactly.
 Write no hook for a permanent that needs none.
+
+Characteristics. Under `computed`, list every creature on the battlefield whose current power or \
+toughness differs from what is printed on it, with the values after all continuous effects, \
+counters and notes, and the reason. List all of them each time: the list replaces the last one. \
+The table stamps these on the permanents, so that players do not each have to work out that a \
+3/3 Zombie beside Lord of the Undead is a 4/4.
 
 Answer in the required JSON form. Seats are numbered from 0 in the order listed."""
 
@@ -93,7 +102,7 @@ VERDICT_SCHEMA = {
         "hooks": {"type": "array", "items": {
             "type": "object", "additionalProperties": False, "required": ["kind", "handle", "source", "text"],
             "properties": {
-                "kind": {"type": "string", "enum": ["hold", "step_trigger", "event_trigger"]},
+                "kind": {"type": "string", "enum": ["hold", "step_trigger", "event_trigger", "static"]},
                 "handle": {"type": "string", "description": "The permanent's handle, such as c12."},
                 "source": {"type": "string", "description": "The card's name."},
                 "text": {"type": "string", "description": "What happens, in a sentence."},
@@ -102,12 +111,24 @@ VERDICT_SCHEMA = {
                 "whose": {"anyOf": [{"type": "string", "enum": ["each"]}, {"type": "integer"}],
                           "description": "For a step_trigger: \"each\" or a seat number."},
                 "controller": {"type": "integer"}}}},
+        "computed": {"type": "array", "items": {
+            "type": "object", "additionalProperties": False, "required": ["handle", "power", "toughness", "because"],
+            "properties": {"handle": {"type": "string", "description": "The creature's handle, such as c12."},
+                           "power": {"type": "string"}, "toughness": {"type": "string"},
+                           "because": {"type": "string", "description": "What changes it, briefly."}}}},
     },
 }
 
 
-def _object_line(obj: dict, names: dict[str, str], combat: dict[str, str]) -> str:
+def _object_line(obj: dict, names: dict[str, str], combat: dict[str, str], database: CardDatabase | None = None) -> str:
     parts = [obj.get("name", "a face-down permanent") + f" [{obj['handle']}]"]
+    card = database.find(obj["name"]) if database is not None and obj.get("name") and not obj.get("token") else None
+    if card is not None:  # what is printed on it, so nobody has to look the card up to read the board
+        face = card.front
+        parts.append(face.type_line + (f" {face.power}/{face.toughness} printed" if face.power is not None else ""))
+    if obj.get("computed"):
+        now = obj["computed"]
+        parts.append(f"NOW {now['power']}/{now['toughness']} ({now['because']}; worked out {now['as_of']})")
     token = obj.get("token")
     if token:
         parts.append("token " + ", ".join(f"{k}: {v}" for k, v in token.items() if k != "name"))
@@ -129,8 +150,9 @@ def _object_line(obj: dict, names: dict[str, str], combat: dict[str, str]) -> st
     return "; ".join(parts)
 
 
-def describe(view: dict) -> str:
-    """A public view as text: shorter than the JSON and easier to read a board from."""
+def describe(view: dict, database: CardDatabase | None = None) -> str:
+    """A public view as text: shorter than the JSON and easier to read a board from. With a card
+    database, each permanent shows its printed type line and power and toughness."""
     seats = {seat["seat"]: seat for seat in view["seats"]}
     who = lambda index: f"{seats[index]['name']} (seat {index})"  # noqa: E731
     names = {obj["handle"]: obj.get("name", "a face-down permanent") for obj in view["battlefield"]}
@@ -170,9 +192,15 @@ def describe(view: dict) -> str:
                 lines.append(f"  revealed in {zone}: " + ", ".join(o.get("name", "?") for o in seat[zone]["known"]))
         mine = [obj for obj in view["battlefield"] if obj.get("controller") == index]
         lines.append("  controls, in order of arrival:" if mine else "  controls nothing.")
-        lines += [f"    - {_object_line(obj, names, combat)}" for obj in mine]
-    if view["ledger"]:
-        lines.append("Ledger: " + "; ".join(f"{e.get('kind')}: {e.get('text', '')}" for e in view["ledger"]))
+        lines += [f"    - {_object_line(obj, names, combat, database)}" for obj in mine]
+    effects = [e for e in view["ledger"] if e.get("kind") == "static"]
+    if effects:
+        lines = ["CONTINUOUS EFFECTS IN PLAY (they change what is printed on other cards)",
+                 *(f"  - {names.get(e.get('source'), 'a permanent')} [{e.get('source')}], {who(e['controller'])}: {e.get('text', '')}"
+                   for e in effects), ""] + lines
+    others = [e for e in view["ledger"] if e.get("kind") != "static"]
+    if others:
+        lines.append("Ledger: " + "; ".join(f"{e.get('kind')}: {e.get('text', '')}" for e in others))
     lines += [f"Table warning: {warning}" for warning in view.get("warnings", [])]
     return "\n".join(lines)
 
@@ -227,7 +255,7 @@ def materials(table: Table, before: str, since_event: int, database: CardDatabas
     return "\n\n".join([
         "THE TABLE BEFORE\n" + before,
         "WHAT WAS DONE\n" + "\n".join(record),
-        "THE TABLE NOW\n" + describe(after_view),
+        "THE TABLE NOW\n" + describe(after_view, database),
         "CARDS\n" + card_reference(before_names + _names(after_view), database),
         "Audit the record. Judge only the events listed under WHAT WAS DONE."])
 
@@ -240,7 +268,7 @@ class Auditor:
     def snapshot(self, table: Table) -> tuple[str, list[str], int]:
         """Take this before the actions to be audited: the board, its card names, the next event number."""
         view = table.view(None)
-        return describe(view), _names(view), len(table.events)
+        return describe(view, self.database), _names(view), len(table.events)
 
     def audit(self, table: Table, snapshot: tuple[str, list[str], int], until_event: int | None = None) -> tuple[dict, Reply]:
         before, names, since = snapshot

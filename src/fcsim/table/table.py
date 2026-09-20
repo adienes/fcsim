@@ -490,6 +490,27 @@ class Table:
     def _do_release(self, game: Game, seat: None, args: dict):
         turn.release(game)
 
+    def apply_computed(self, computed: list[dict]) -> dict:
+        """Stamp permanents with the power and toughness the auditor worked out, replacing every
+        earlier stamp. Each is {handle, power, toughness, because}, by the auditor's public handle.
+        Rules knowledge the card-blind table cannot have, kept where every player will read it."""
+        resolved = []
+        for entry in computed:
+            obj = self.game.objects.get(self.handles[None].resolve("c", entry.get("handle")) or -1)
+            if obj is not None and obj.zone == "battlefield":
+                resolved.append({"id": obj.id, "power": str(entry.get("power", "")), "toughness": str(entry.get("toughness", "")),
+                                 "because": str(entry.get("because", ""))})
+        return self._execute(None, "computed", {"computed": resolved})
+
+    def _do_computed(self, game: Game, seat: None, args: dict):
+        when = f"turn {game.turn.number}, {game.turn.step}"
+        for obj in game.objects.values():
+            obj.computed = None
+        for entry in args["computed"]:
+            if entry["id"] in game.objects:
+                game.objects[entry["id"]].computed = {k: entry[k] for k in ("power", "toughness", "because")} | {"as_of": when}
+        return ops.Told()
+
     def queue_trigger(self, seat: int, text: str) -> dict:
         """An ability the auditor says has triggered: its controller must deal with it before anyone gets priority."""
         return self._execute(None, "queue_trigger", {"seat": seat, "text": text})
@@ -536,7 +557,7 @@ class Table:
         told = ops.Told()
         for hook in args["hooks"]:
             source = game.objects.get(hook.get("source_id"))
-            if hook.get("kind") not in ("hold", "step_trigger", "event_trigger") or source is None:
+            if hook.get("kind") not in ("hold", "step_trigger", "event_trigger", "static") or source is None:
                 raise TableError("bad_hook", f"A hook needs a kind and a source on the battlefield: {hook!r}")
             entry = {"kind": hook["kind"], "text": str(hook.get("text", "")), "source": source.id,
                      "controller": hook.get("controller", source.controller)}
