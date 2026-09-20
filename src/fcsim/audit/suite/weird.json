@@ -1,0 +1,1729 @@
+[
+ {
+  "id": "fizzle-still-gains-life",
+  "about": "Lightning Helix's only target is bounced in response, and its controller gains 3 life anyway.",
+  "battlefield": {
+   "Ann": [
+    "Mountain",
+    "Plains"
+   ],
+   "Bob": [
+    "Grizzly Bears",
+    "Island"
+   ]
+  },
+  "hand": {
+   "Ann": [
+    "Lightning Helix"
+   ],
+   "Bob": [
+    "Unsummon"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "cast",
+    {
+     "card": "@Lightning Helix",
+     "payment": {
+      "tap": [
+       "@Mountain",
+       "@Plains"
+      ]
+     },
+     "targets": [
+      {
+       "object": "@Grizzly Bears"
+      }
+     ],
+     "text": "3 damage to target; gain 3 life."
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "cast",
+    {
+     "card": "@Unsummon",
+     "payment": {
+      "tap": [
+       "@Island"
+      ]
+     },
+     "targets": [
+      {
+       "object": "@Grizzly Bears"
+      }
+     ]
+    }
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "resolve",
+    {
+     "mutations": [
+      {
+       "op": "move",
+       "obj": "@Grizzly Bears",
+       "to": "hand"
+      }
+     ]
+    }
+   ],
+   [
+    1,
+    "finish_resolution"
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "resolve",
+    {
+     "mutations": [
+      {
+       "op": "life",
+       "seat": 0,
+       "delta": 3
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "finish_resolution"
+   ]
+  ],
+  "expect": {
+   "findings": [
+    {
+     "mentions": "target|fizzle|does ?n.t resolve|608|no effect",
+     "kinds": [
+      "misresolved",
+      "illegal"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "id": "partial-fizzle-is-legal",
+  "about": "Electrolyze loses one of two targets and still deals 1 to the other and draws a card.",
+  "battlefield": {
+   "Ann": [
+    "Island",
+    {
+     "card": "Mountain",
+     "count": 2
+    }
+   ],
+   "Bob": [
+    "Grizzly Bears",
+    "Savannah Lions",
+    "Island"
+   ]
+  },
+  "hand": {
+   "Ann": [
+    "Electrolyze"
+   ],
+   "Bob": [
+    "Unsummon"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "cast",
+    {
+     "card": "@Electrolyze",
+     "payment": {
+      "tap": [
+       "@Island",
+       "@Mountain",
+       "@Mountain#2"
+      ]
+     },
+     "targets": [
+      {
+       "object": "@Grizzly Bears"
+      },
+      {
+       "object": "@Savannah Lions"
+      }
+     ],
+     "text": "1 damage to Grizzly Bears and 1 damage to Savannah Lions; draw a card."
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "cast",
+    {
+     "card": "@Unsummon",
+     "payment": {
+      "tap": [
+       "@Island"
+      ]
+     },
+     "targets": [
+      {
+       "object": "@Grizzly Bears"
+      }
+     ]
+    }
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "resolve",
+    {
+     "mutations": [
+      {
+       "op": "move",
+       "obj": "@Grizzly Bears",
+       "to": "hand"
+      }
+     ]
+    }
+   ],
+   [
+    1,
+    "finish_resolution"
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "resolve",
+    {
+     "mutations": [
+      {
+       "op": "damage",
+       "obj": "@Savannah Lions",
+       "amount": 1
+      },
+      {
+       "op": "draw",
+       "count": 1
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "finish_resolution"
+   ],
+   [
+    0,
+    "act",
+    {
+     "mutations": [
+      {
+       "op": "move",
+       "obj": "@Savannah Lions",
+       "to": "graveyard"
+      }
+     ],
+     "because": "state-based action: lethal damage"
+    }
+   ]
+  ],
+  "expect": {
+   "findings": []
+  }
+ },
+ {
+  "id": "pump-after-combat-damage",
+  "about": "Giant Growth is cast on a creature that already has lethal combat damage marked.",
+  "step": "begin_combat",
+  "battlefield": {
+   "Ann": [
+    "Grizzly Bears",
+    "Forest"
+   ],
+   "Bob": [
+    "Hill Giant"
+   ]
+  },
+  "hand": {
+   "Ann": [
+    "Giant Growth"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "declare_attackers",
+    {
+     "attacks": [
+      {
+       "attacker": "@Grizzly Bears",
+       "target": {
+        "seat": 1
+       }
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    1,
+    "declare_blockers",
+    {
+     "blocks": [
+      {
+       "blocker": "@Hill Giant",
+       "attacker": "@Grizzly Bears"
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "combat_damage",
+    {
+     "assignments": [
+      {
+       "source": "@Grizzly Bears",
+       "target": {
+        "object": "@Hill Giant"
+       },
+       "amount": 2
+      },
+      {
+       "source": "@Hill Giant",
+       "target": {
+        "object": "@Grizzly Bears"
+       },
+       "amount": 3
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "cast",
+    {
+     "card": "@Giant Growth",
+     "payment": {
+      "tap": [
+       "@Forest"
+      ]
+     },
+     "targets": [
+      {
+       "object": "@Grizzly Bears"
+      }
+     ]
+    }
+   ]
+  ],
+  "expect": {
+   "findings": [
+    {
+     "mentions": "lethal|destroy|state.based|704",
+     "kinds": [
+      "sba",
+      "illegal",
+      "misresolved"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "id": "pump-after-blocks-is-legal",
+  "about": "Giant Growth after blockers are declared lets a 2/2 kill a 3/3 and survive.",
+  "step": "begin_combat",
+  "battlefield": {
+   "Ann": [
+    "Grizzly Bears",
+    "Forest"
+   ],
+   "Bob": [
+    "Hill Giant"
+   ]
+  },
+  "hand": {
+   "Ann": [
+    "Giant Growth"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "declare_attackers",
+    {
+     "attacks": [
+      {
+       "attacker": "@Grizzly Bears",
+       "target": {
+        "seat": 1
+       }
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    1,
+    "declare_blockers",
+    {
+     "blocks": [
+      {
+       "blocker": "@Hill Giant",
+       "attacker": "@Grizzly Bears"
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "cast",
+    {
+     "card": "@Giant Growth",
+     "payment": {
+      "tap": [
+       "@Forest"
+      ]
+     },
+     "targets": [
+      {
+       "object": "@Grizzly Bears"
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "resolve",
+    {
+     "mutations": [
+      {
+       "op": "annotate",
+       "obj": "@Grizzly Bears",
+       "text": "gets +3/+3 until end of turn",
+       "expires": "eot"
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "finish_resolution"
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "combat_damage",
+    {
+     "assignments": [
+      {
+       "source": "@Grizzly Bears",
+       "target": {
+        "object": "@Hill Giant"
+       },
+       "amount": 5
+      },
+      {
+       "source": "@Hill Giant",
+       "target": {
+        "object": "@Grizzly Bears"
+       },
+       "amount": 3
+      }
+     ],
+     "then": [
+      {
+       "op": "move",
+       "obj": "@Hill Giant",
+       "to": "graveyard"
+      }
+     ]
+    }
+   ]
+  ],
+  "expect": {
+   "findings": []
+  }
+ },
+ {
+  "id": "removed-blocker-still-blocked",
+  "about": "The blocker is killed after blocks, and the attacker's damage is assigned to the player.",
+  "step": "begin_combat",
+  "battlefield": {
+   "Ann": [
+    "Hill Giant",
+    "Mountain"
+   ],
+   "Bob": [
+    "Savannah Lions"
+   ]
+  },
+  "hand": {
+   "Ann": [
+    "Shock"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "declare_attackers",
+    {
+     "attacks": [
+      {
+       "attacker": "@Hill Giant",
+       "target": {
+        "seat": 1
+       }
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    1,
+    "declare_blockers",
+    {
+     "blocks": [
+      {
+       "blocker": "@Savannah Lions",
+       "attacker": "@Hill Giant"
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "cast",
+    {
+     "card": "@Shock",
+     "payment": {
+      "tap": [
+       "@Mountain"
+      ]
+     },
+     "targets": [
+      {
+       "object": "@Savannah Lions"
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "resolve",
+    {
+     "mutations": [
+      {
+       "op": "damage",
+       "obj": "@Savannah Lions",
+       "amount": 2
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "finish_resolution"
+   ],
+   [
+    0,
+    "act",
+    {
+     "mutations": [
+      {
+       "op": "move",
+       "obj": "@Savannah Lions",
+       "to": "graveyard"
+      }
+     ],
+     "because": "state-based action: lethal damage"
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "combat_damage",
+    {
+     "assignments": [
+      {
+       "source": "@Hill Giant",
+       "target": {
+        "seat": 1
+       },
+       "amount": 3
+      }
+     ]
+    }
+   ]
+  ],
+  "expect": {
+   "findings": [
+    {
+     "mentions": "blocked|509|510|no damage|trample",
+     "kinds": [
+      "misresolved",
+      "illegal"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "id": "humility-after-opalescence",
+  "about": "Humility arrived after Opalescence, attacks as a creature, and is given 4 damage instead of 1.",
+  "step": "begin_combat",
+  "battlefield": {
+   "Ann": [
+    "Opalescence",
+    "Humility"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "declare_attackers",
+    {
+     "attacks": [
+      {
+       "attacker": "@Humility",
+       "target": {
+        "seat": 1
+       }
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    1,
+    "declare_blockers",
+    {
+     "blocks": []
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "combat_damage",
+    {
+     "assignments": [
+      {
+       "source": "@Humility",
+       "target": {
+        "seat": 1
+       },
+       "amount": 4
+      }
+     ]
+    }
+   ]
+  ],
+  "expect": {
+   "findings": [
+    {
+     "mentions": "1/1|timestamp|layer|613|1 damage|deals 1",
+     "kinds": [
+      "misresolved",
+      "illegal"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "id": "blood-moon-beats-urborg",
+  "about": "With Blood Moon out, Urborg and Command Tower are tapped for black mana.",
+  "battlefield": {
+   "Bob": [
+    "Blood Moon",
+    "Grizzly Bears"
+   ],
+   "Ann": [
+    "Urborg, Tomb of Yawgmoth",
+    "Command Tower"
+   ]
+  },
+  "hand": {
+   "Ann": [
+    "Doom Blade"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "cast",
+    {
+     "card": "@Doom Blade",
+     "payment": {
+      "tap": [
+       "@Urborg, Tomb of Yawgmoth",
+       "@Command Tower"
+      ]
+     },
+     "targets": [
+      {
+       "object": "@Grizzly Bears"
+      }
+     ]
+    }
+   ]
+  ],
+  "expect": {
+   "findings": [
+    {
+     "mentions": "Blood Moon|Mountain",
+     "kinds": [
+      "illegal"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "id": "blinked-creature-keeps-its-aura",
+  "about": "A creature is blinked with Cloudshift and the opponent's Pacifism is put back on it.",
+  "battlefield": {
+   "Ann": [
+    "Grizzly Bears",
+    "Plains"
+   ],
+   "Bob": [
+    {
+     "card": "Pacifism",
+     "attached_to": "Grizzly Bears"
+    }
+   ]
+  },
+  "hand": {
+   "Ann": [
+    "Cloudshift"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "cast",
+    {
+     "card": "@Cloudshift",
+     "payment": {
+      "tap": [
+       "@Plains"
+      ]
+     },
+     "targets": [
+      {
+       "object": "@Grizzly Bears"
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "resolve",
+    {
+     "mutations": [
+      {
+       "op": "move",
+       "obj": "@Grizzly Bears",
+       "to": "exile"
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "resolve",
+    {
+     "mutations": [
+      {
+       "op": "move",
+       "obj": "@Grizzly Bears",
+       "to": "battlefield",
+       "controller": 0
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "resolve",
+    {
+     "mutations": [
+      {
+       "op": "attach",
+       "obj": "@Pacifism",
+       "host": "@Grizzly Bears"
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "finish_resolution"
+   ],
+   [
+    0,
+    "pass_priority"
+   ]
+  ],
+  "expect": {
+   "findings": [
+    {
+     "mentions": "Pacifism",
+     "kinds": [
+      "misresolved",
+      "sba",
+      "illegal"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "id": "blinked-creature-attacks",
+  "about": "A creature is blinked in the first main phase and attacks the same turn.",
+  "battlefield": {
+   "Ann": [
+    "Grizzly Bears",
+    "Plains"
+   ]
+  },
+  "hand": {
+   "Ann": [
+    "Cloudshift"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "cast",
+    {
+     "card": "@Cloudshift",
+     "payment": {
+      "tap": [
+       "@Plains"
+      ]
+     },
+     "targets": [
+      {
+       "object": "@Grizzly Bears"
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "resolve",
+    {
+     "mutations": [
+      {
+       "op": "move",
+       "obj": "@Grizzly Bears",
+       "to": "exile"
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "resolve",
+    {
+     "mutations": [
+      {
+       "op": "move",
+       "obj": "@Grizzly Bears",
+       "to": "battlefield",
+       "controller": 0
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "finish_resolution"
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "declare_attackers",
+    {
+     "attacks": [
+      {
+       "attacker": "@Grizzly Bears",
+       "target": {
+        "seat": 1
+       }
+      }
+     ]
+    }
+   ]
+  ],
+  "expect": {
+   "findings": [
+    {
+     "mentions": "haste|summoning|new object|continuously|302",
+     "kinds": [
+      "illegal"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "id": "fling-forgets-the-pump",
+  "about": "A pumped 2/2 is sacrificed to Fling, which is resolved for 2 instead of its last known power, 5.",
+  "battlefield": {
+   "Ann": [
+    {
+     "card": "Grizzly Bears",
+     "notes": [
+      "gets +3/+3 until end of turn (Giant Growth)"
+     ]
+    },
+    {
+     "card": "Mountain",
+     "count": 2
+    }
+   ]
+  },
+  "hand": {
+   "Ann": [
+    "Fling"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "cast",
+    {
+     "card": "@Fling",
+     "payment": {
+      "tap": [
+       "@Mountain",
+       "@Mountain#2"
+      ],
+      "note": "sacrificing Grizzly Bears as the additional cost"
+     },
+     "targets": [
+      {
+       "seat": 1
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "act",
+    {
+     "mutations": [
+      {
+       "op": "move",
+       "obj": "@Grizzly Bears",
+       "to": "graveyard"
+      }
+     ],
+     "because": "additional cost of Fling: sacrifice a creature"
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "resolve",
+    {
+     "mutations": [
+      {
+       "op": "life",
+       "seat": 1,
+       "delta": -2
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "finish_resolution"
+   ]
+  ],
+  "expect": {
+   "findings": [
+    {
+     "mentions": "\\b5\\b|last|existed|608",
+     "kinds": [
+      "misresolved"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "id": "commander-dies-and-triggers",
+  "about": "A commander dies, Blood Artist triggers, and the commander then goes to the command zone. All legal.",
+  "commanders": {
+   "Ann": [
+    "Isamaru, Hound of Konda"
+   ]
+  },
+  "commanders_in_play": [
+   "Ann"
+  ],
+  "battlefield": {
+   "Ann": [
+    "Blood Artist",
+    {
+     "card": "Swamp",
+     "count": 2
+    }
+   ]
+  },
+  "hand": {
+   "Ann": [
+    "Doom Blade"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "cast",
+    {
+     "card": "@Doom Blade",
+     "payment": {
+      "tap": [
+       "@Swamp",
+       "@Swamp#2"
+      ]
+     },
+     "targets": [
+      {
+       "object": "@Isamaru, Hound of Konda"
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "resolve",
+    {
+     "mutations": [
+      {
+       "op": "move",
+       "obj": "@Isamaru, Hound of Konda",
+       "to": "graveyard"
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "finish_resolution"
+   ],
+   [
+    0,
+    "act",
+    {
+     "mutations": [
+      {
+       "op": "move",
+       "obj": "@Isamaru, Hound of Konda",
+       "to": "command"
+      }
+     ],
+     "because": "state-based action 903.9a: a commander in a graveyard may go to the command zone"
+    }
+   ],
+   [
+    0,
+    "add_trigger",
+    {
+     "source": "@Blood Artist",
+     "text": "Target player loses 1 life and you gain 1 life.",
+     "targets": [
+      {
+       "seat": 1
+      }
+     ]
+    }
+   ]
+  ],
+  "expect": {
+   "findings": []
+  }
+ },
+ {
+  "id": "response-to-split-second",
+  "about": "Counterspell is cast in response to Krosan Grip.",
+  "battlefield": {
+   "Ann": [
+    {
+     "card": "Forest",
+     "count": 3
+    }
+   ],
+   "Bob": [
+    "Sol Ring",
+    {
+     "card": "Island",
+     "count": 2
+    }
+   ]
+  },
+  "hand": {
+   "Ann": [
+    "Krosan Grip"
+   ],
+   "Bob": [
+    "Counterspell"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "cast",
+    {
+     "card": "@Krosan Grip",
+     "payment": {
+      "tap": [
+       "@Forest",
+       "@Forest#2",
+       "@Forest#3"
+      ]
+     },
+     "targets": [
+      {
+       "object": "@Sol Ring"
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "cast",
+    {
+     "card": "@Counterspell",
+     "payment": {
+      "tap": [
+       "@Island",
+       "@Island#2"
+      ]
+     },
+     "targets": [
+      {
+       "stack_item": "$Krosan Grip"
+      }
+     ]
+    }
+   ]
+  ],
+  "expect": {
+   "findings": [
+    {
+     "mentions": "split second",
+     "kinds": [
+      "illegal"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "id": "hexproof-target",
+  "about": "Doom Blade targets an opponent's creature with hexproof.",
+  "battlefield": {
+   "Ann": [
+    {
+     "card": "Swamp",
+     "count": 2
+    }
+   ],
+   "Bob": [
+    "Gladecover Scout"
+   ]
+  },
+  "hand": {
+   "Ann": [
+    "Doom Blade"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "cast",
+    {
+     "card": "@Doom Blade",
+     "payment": {
+      "tap": [
+       "@Swamp",
+       "@Swamp#2"
+      ]
+     },
+     "targets": [
+      {
+       "object": "@Gladecover Scout"
+      }
+     ]
+    }
+   ]
+  ],
+  "expect": {
+   "findings": [
+    {
+     "mentions": "hexproof",
+     "kinds": [
+      "illegal"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "id": "trample-and-deathtouch-assignment",
+  "about": "A 3/3 with trample and deathtouch assigns 1 to a 3/3 blocker and 2 to the player. Legal.",
+  "step": "begin_combat",
+  "battlefield": {
+   "Ann": [
+    {
+     "card": "Hill Giant",
+     "notes": [
+      "has trample and deathtouch until end of turn"
+     ]
+    }
+   ],
+   "Bob": [
+    "Hill Giant"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "declare_attackers",
+    {
+     "attacks": [
+      {
+       "attacker": "@Hill Giant",
+       "target": {
+        "seat": 1
+       }
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    1,
+    "declare_blockers",
+    {
+     "blocks": [
+      {
+       "blocker": "@Hill Giant",
+       "attacker": "@Hill Giant#2"
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "combat_damage",
+    {
+     "assignments": [
+      {
+       "source": "@Hill Giant",
+       "target": {
+        "object": "@Hill Giant#2"
+       },
+       "amount": 1
+      },
+      {
+       "source": "@Hill Giant",
+       "target": {
+        "seat": 1
+       },
+       "amount": 2
+      },
+      {
+       "source": "@Hill Giant#2",
+       "target": {
+        "object": "@Hill Giant"
+       },
+       "amount": 3
+      }
+     ],
+     "then": [
+      {
+       "op": "move",
+       "objs": [
+        "@Hill Giant",
+        "@Hill Giant#2"
+       ],
+       "to": "graveyard"
+      }
+     ]
+    }
+   ]
+  ],
+  "expect": {
+   "findings": []
+  }
+ },
+ {
+  "id": "first-strike-ignored",
+  "about": "White Knight and its blocker deal damage at the same time and both die.",
+  "step": "begin_combat",
+  "battlefield": {
+   "Ann": [
+    "White Knight"
+   ],
+   "Bob": [
+    "Grizzly Bears"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "declare_attackers",
+    {
+     "attacks": [
+      {
+       "attacker": "@White Knight",
+       "target": {
+        "seat": 1
+       }
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    1,
+    "declare_blockers",
+    {
+     "blocks": [
+      {
+       "blocker": "@Grizzly Bears",
+       "attacker": "@White Knight"
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "combat_damage",
+    {
+     "assignments": [
+      {
+       "source": "@White Knight",
+       "target": {
+        "object": "@Grizzly Bears"
+       },
+       "amount": 2
+      },
+      {
+       "source": "@Grizzly Bears",
+       "target": {
+        "object": "@White Knight"
+       },
+       "amount": 2
+      }
+     ],
+     "then": [
+      {
+       "op": "move",
+       "objs": [
+        "@White Knight",
+        "@Grizzly Bears"
+       ],
+       "to": "graveyard"
+      }
+     ]
+    }
+   ]
+  ],
+  "expect": {
+   "findings": [
+    {
+     "mentions": "first strike",
+     "kinds": [
+      "misresolved",
+      "illegal"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "id": "counterspell-war-is-legal",
+  "about": "Divination, Counterspell on it, Negate on the Counterspell; Divination resolves.",
+  "battlefield": {
+   "Ann": [
+    {
+     "card": "Island",
+     "count": 5
+    }
+   ],
+   "Bob": [
+    {
+     "card": "Island",
+     "count": 2
+    }
+   ]
+  },
+  "hand": {
+   "Ann": [
+    "Divination",
+    "Negate"
+   ],
+   "Bob": [
+    "Counterspell"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "cast",
+    {
+     "card": "@Divination",
+     "payment": {
+      "tap": [
+       "@Island",
+       "@Island#2",
+       "@Island#3"
+      ]
+     },
+     "text": "Draw two cards."
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "cast",
+    {
+     "card": "@Counterspell",
+     "payment": {
+      "tap": [
+       "@Island",
+       "@Island#2"
+      ]
+     },
+     "targets": [
+      {
+       "stack_item": "$Divination"
+      }
+     ]
+    }
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "cast",
+    {
+     "card": "@Negate",
+     "payment": {
+      "tap": [
+       "@Island#4",
+       "@Island#5"
+      ]
+     },
+     "targets": [
+      {
+       "stack_item": "$Counterspell"
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "resolve",
+    {
+     "mutations": [
+      {
+       "op": "move",
+       "obj": "@Counterspell",
+       "to": "graveyard"
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "finish_resolution"
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "resolve",
+    {
+     "mutations": [
+      {
+       "op": "draw",
+       "count": 2
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "finish_resolution"
+   ]
+  ],
+  "expect": {
+   "findings": []
+  }
+ }
+]

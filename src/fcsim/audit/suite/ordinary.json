@@ -1,0 +1,880 @@
+[
+ {
+  "id": "summoning-sick-attack",
+  "about": "A creature cast this turn attacks without haste.",
+  "battlefield": {
+   "Ann": [
+    {
+     "card": "Forest",
+     "count": 2
+    }
+   ]
+  },
+  "hand": {
+   "Ann": [
+    "Grizzly Bears"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "cast",
+    {
+     "card": "@Grizzly Bears",
+     "payment": {
+      "tap": [
+       "@Forest",
+       "@Forest#2"
+      ]
+     },
+     "resolves": "auto_permanent"
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "declare_attackers",
+    {
+     "attacks": [
+      {
+       "attacker": "@Grizzly Bears",
+       "target": {
+        "seat": 1
+       }
+      }
+     ]
+    }
+   ]
+  ],
+  "expect": {
+   "findings": [
+    {
+     "mentions": "haste|summoning|continuously|302",
+     "kinds": [
+      "illegal"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "id": "haste-attack-is-legal",
+  "about": "A creature with haste attacks the turn it was cast; the table warns anyway.",
+  "battlefield": {
+   "Ann": [
+    "Mountain"
+   ]
+  },
+  "hand": {
+   "Ann": [
+    "Raging Goblin"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "cast",
+    {
+     "card": "@Raging Goblin",
+     "payment": {
+      "tap": [
+       "@Mountain"
+      ]
+     },
+     "resolves": "auto_permanent"
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "declare_attackers",
+    {
+     "attacks": [
+      {
+       "attacker": "@Raging Goblin",
+       "target": {
+        "seat": 1
+       }
+      }
+     ]
+    }
+   ]
+  ],
+  "expect": {
+   "findings": []
+  }
+ },
+ {
+  "id": "second-land",
+  "about": "Two lands played in one turn with nothing that allows it.",
+  "hand": {
+   "Ann": [
+    "Forest",
+    "Forest"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "play_land",
+    {
+     "card": "@Forest"
+    }
+   ],
+   [
+    0,
+    "play_land",
+    {
+     "card": "@Forest"
+    }
+   ]
+  ],
+  "expect": {
+   "findings": [
+    {
+     "mentions": "land",
+     "kinds": [
+      "illegal"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "id": "second-land-with-exploration",
+  "about": "Two lands in one turn with Exploration on the battlefield; the table warns anyway.",
+  "battlefield": {
+   "Ann": [
+    "Exploration"
+   ]
+  },
+  "hand": {
+   "Ann": [
+    "Forest",
+    "Forest"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "play_land",
+    {
+     "card": "@Forest"
+    }
+   ],
+   [
+    0,
+    "play_land",
+    {
+     "card": "@Forest"
+    }
+   ]
+  ],
+  "expect": {
+   "findings": []
+  }
+ },
+ {
+  "id": "sorcery-on-opponents-turn",
+  "about": "A sorcery cast during another player's turn.",
+  "battlefield": {
+   "Bob": [
+    {
+     "card": "Island",
+     "count": 3
+    }
+   ]
+  },
+  "hand": {
+   "Bob": [
+    "Divination"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "cast",
+    {
+     "card": "@Divination",
+     "payment": {
+      "tap": [
+       "@Island",
+       "@Island#2",
+       "@Island#3"
+      ]
+     }
+    }
+   ]
+  ],
+  "expect": {
+   "findings": [
+    {
+     "mentions": "sorcery|307|main phase",
+     "kinds": [
+      "illegal"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "id": "flash-on-opponents-turn",
+  "about": "A creature with flash cast during another player's turn.",
+  "battlefield": {
+   "Bob": [
+    {
+     "card": "Forest",
+     "count": 2
+    }
+   ]
+  },
+  "hand": {
+   "Bob": [
+    "Ambush Viper"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "cast",
+    {
+     "card": "@Ambush Viper",
+     "payment": {
+      "tap": [
+       "@Forest",
+       "@Forest#2"
+      ]
+     },
+     "resolves": "auto_permanent"
+    }
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "pass_priority"
+   ]
+  ],
+  "expect": {
+   "findings": []
+  }
+ },
+ {
+  "id": "underpaid-spell",
+  "about": "A five-mana spell paid for with three lands.",
+  "battlefield": {
+   "Ann": [
+    {
+     "card": "Plains",
+     "count": 5
+    }
+   ]
+  },
+  "hand": {
+   "Ann": [
+    "Serra Angel"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "cast",
+    {
+     "card": "@Serra Angel",
+     "payment": {
+      "tap": [
+       "@Plains",
+       "@Plains#2",
+       "@Plains#3"
+      ]
+     },
+     "resolves": "auto_permanent"
+    }
+   ]
+  ],
+  "expect": {
+   "findings": [
+    {
+     "mentions": "cost|mana|pay",
+     "kinds": [
+      "illegal"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "id": "sol-ring-pays-two",
+  "about": "A four-mana spell paid with Sol Ring and two lands; the table warns that three permanents were tapped.",
+  "battlefield": {
+   "Ann": [
+    "Sol Ring",
+    {
+     "card": "Mountain",
+     "count": 2
+    }
+   ]
+  },
+  "hand": {
+   "Ann": [
+    "Hill Giant"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "cast",
+    {
+     "card": "@Hill Giant",
+     "payment": {
+      "tap": [
+       "@Sol Ring",
+       "@Mountain",
+       "@Mountain#2"
+      ]
+     },
+     "resolves": "auto_permanent"
+    }
+   ]
+  ],
+  "expect": {
+   "findings": []
+  }
+ },
+ {
+  "id": "commander-tax-unpaid",
+  "about": "A commander cast a second time for its printed cost.",
+  "commanders": {
+   "Ann": [
+    "Isamaru, Hound of Konda"
+   ]
+  },
+  "commander_casts": {
+   "Ann": {
+    "Isamaru, Hound of Konda": 1
+   }
+  },
+  "battlefield": {
+   "Ann": [
+    {
+     "card": "Plains",
+     "count": 3
+    }
+   ]
+  },
+  "script": [
+   [
+    0,
+    "cast",
+    {
+     "card": "@Isamaru, Hound of Konda",
+     "payment": {
+      "tap": [
+       "@Plains"
+      ]
+     },
+     "resolves": "auto_permanent"
+    }
+   ]
+  ],
+  "expect": {
+   "findings": [
+    {
+     "mentions": "tax|903|additional",
+     "kinds": [
+      "illegal"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "id": "missed-death-trigger",
+  "about": "A creature dies with Blood Artist out and its controller passes priority without the trigger.",
+  "battlefield": {
+   "Ann": [
+    "Blood Artist",
+    {
+     "card": "Swamp",
+     "count": 2
+    }
+   ],
+   "Bob": [
+    "Grizzly Bears"
+   ]
+  },
+  "hand": {
+   "Ann": [
+    "Doom Blade"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "cast",
+    {
+     "card": "@Doom Blade",
+     "payment": {
+      "tap": [
+       "@Swamp",
+       "@Swamp#2"
+      ]
+     },
+     "targets": [
+      {
+       "object": "@Grizzly Bears"
+      }
+     ],
+     "text": "Destroy target nonblack creature."
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "resolve",
+    {
+     "mutations": [
+      {
+       "op": "move",
+       "obj": "@Grizzly Bears",
+       "to": "graveyard"
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "finish_resolution"
+   ],
+   [
+    0,
+    "pass_priority"
+   ]
+  ],
+  "expect": {
+   "findings": [
+    {
+     "mentions": "Blood Artist",
+     "kinds": [
+      "trigger"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "id": "lethal-damage-left-on-battlefield",
+  "about": "A 2/2 takes three combat damage, stays on the battlefield, and priority is passed.",
+  "step": "begin_combat",
+  "battlefield": {
+   "Ann": [
+    "Hill Giant"
+   ],
+   "Bob": [
+    "Grizzly Bears"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "declare_attackers",
+    {
+     "attacks": [
+      {
+       "attacker": "@Hill Giant",
+       "target": {
+        "seat": 1
+       }
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    1,
+    "declare_blockers",
+    {
+     "blocks": [
+      {
+       "blocker": "@Grizzly Bears",
+       "attacker": "@Hill Giant"
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "combat_damage",
+    {
+     "assignments": [
+      {
+       "source": "@Hill Giant",
+       "target": {
+        "object": "@Grizzly Bears"
+       },
+       "amount": 3
+      },
+      {
+       "source": "@Grizzly Bears",
+       "target": {
+        "object": "@Hill Giant"
+       },
+       "amount": 2
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ]
+  ],
+  "expect": {
+   "findings": [
+    {
+     "mentions": "Grizzly Bears|lethal|destroy",
+     "kinds": [
+      "sba",
+      "misresolved"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "id": "legend-rule-ignored",
+  "about": "A second copy of a legendary creature resolves and both stay.",
+  "battlefield": {
+   "Ann": [
+    "Isamaru, Hound of Konda",
+    "Plains"
+   ]
+  },
+  "hand": {
+   "Ann": [
+    "Isamaru, Hound of Konda"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "cast",
+    {
+     "card": "@Isamaru, Hound of Konda",
+     "payment": {
+      "tap": [
+       "@Plains"
+      ]
+     },
+     "resolves": "auto_permanent"
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "pass_priority"
+   ]
+  ],
+  "expect": {
+   "findings": [
+    {
+     "mentions": "legend",
+     "kinds": [
+      "sba",
+      "misresolved"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "id": "tapped-land-played-untapped",
+  "about": "A land that enters tapped is played untapped.",
+  "hand": {
+   "Ann": [
+    "Coastal Tower"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "play_land",
+    {
+     "card": "@Coastal Tower"
+    }
+   ]
+  ],
+  "expect": {
+   "findings": [
+    {
+     "mentions": "tapped",
+     "kinds": [
+      "misresolved",
+      "illegal"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "id": "draw-replacement-ignored",
+  "about": "A player draws two from Divination while an opponent controls Notion Thief.",
+  "battlefield": {
+   "Bob": [
+    "Notion Thief"
+   ],
+   "Ann": [
+    {
+     "card": "Island",
+     "count": 3
+    }
+   ]
+  },
+  "hand": {
+   "Ann": [
+    "Divination"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "cast",
+    {
+     "card": "@Divination",
+     "payment": {
+      "tap": [
+       "@Island",
+       "@Island#2",
+       "@Island#3"
+      ]
+     },
+     "text": "Draw two cards."
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "resolve",
+    {
+     "mutations": [
+      {
+       "op": "draw",
+       "count": 2
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "finish_resolution"
+   ]
+  ],
+  "expect": {
+   "findings": [
+    {
+     "mentions": "Notion Thief",
+     "kinds": [
+      "misresolved"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "id": "hook-upkeep-trigger",
+  "about": "Phyrexian Arena resolves; the table needs a hook for its upkeep trigger.",
+  "battlefield": {
+   "Ann": [
+    {
+     "card": "Swamp",
+     "count": 3
+    }
+   ]
+  },
+  "hand": {
+   "Ann": [
+    "Phyrexian Arena"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "cast",
+    {
+     "card": "@Phyrexian Arena",
+     "payment": {
+      "tap": [
+       "@Swamp",
+       "@Swamp#2",
+       "@Swamp#3"
+      ]
+     },
+     "resolves": "auto_permanent"
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ]
+  ],
+  "expect": {
+   "findings": [],
+   "hooks": [
+    {
+     "kind": "step_trigger",
+     "mentions": "upkeep"
+    }
+   ]
+  }
+ },
+ {
+  "id": "hook-does-not-untap",
+  "about": "Mana Vault resolves; the table must not untap it by itself.",
+  "battlefield": {
+   "Ann": [
+    "Island"
+   ]
+  },
+  "hand": {
+   "Ann": [
+    "Mana Vault"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "cast",
+    {
+     "card": "@Mana Vault",
+     "payment": {
+      "tap": [
+       "@Island"
+      ]
+     },
+     "resolves": "auto_permanent"
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ]
+  ],
+  "expect": {
+   "findings": [],
+   "hooks": [
+    {
+     "kind": "hold",
+     "mentions": "untap"
+    }
+   ]
+  }
+ }
+]

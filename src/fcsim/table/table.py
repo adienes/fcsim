@@ -114,7 +114,8 @@ class Table:
 
     def _get_log(self, seat: int | None, args: dict) -> dict:
         since = int(args.get("since", 0))
-        return {"events": [{"n": e["n"], "seat": e["seat"], "tool": e["tool"], "text": e["public"],
+        return {"events": [{"n": e["n"], "seat": e["seat"], "tool": e["tool"], "turn": e["turn"], "step": e["step"],
+                            "text": e["public"],
                             **({"private": e["private"][str(seat)]} if str(seat) in e["private"] else {}),
                             **({"lints": e["lints"]} if e["lints"] else {})}
                            for e in self.events[since:]], "next": len(self.events)}
@@ -161,7 +162,7 @@ class Table:
         return self._commit(seat, tool, args, run, recorded)
 
     def _commit(self, seat: int | None, tool: str, args: dict, run: Callable, recorded: list | None = None) -> dict:
-        game = copy.deepcopy(self.game)
+        game, before = copy.deepcopy(self.game), self.game.turn
         self.dice.begin(recorded)
         outcome = run(game) or ops.Told()
         told = outcome if isinstance(outcome, ops.Told) else outcome[0]
@@ -169,6 +170,7 @@ class Table:
         turn.repair_after_elimination(game)
         self.game, self.rev = game, self.rev + 1
         event = {"n": len(self.events), "rev": self.rev, "seat": seat, "tool": tool, "args": args,
+                 "turn": before.number, "step": before.step,  # when the call was made, not where it led
                  "random": list(self.dice.recorded), "public": told.public,
                  "private": {str(s): lines for s, lines in told.private.items()}, "lints": lints}
         self.events.append(event)

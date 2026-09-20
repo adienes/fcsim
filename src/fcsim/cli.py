@@ -5,6 +5,8 @@ import json
 import sys
 from datetime import date
 
+from .agents import Budget, ClaudeCodeRunner, RunnerError
+from .audit import Auditor, build, load_scenarios, materials, play, render, run_suite
 from .cards import CardDatabase, CardsError
 from .rules import RulesError, RulesReference
 from .workshop.check import check_deck, render
@@ -54,11 +56,26 @@ def main(argv: list[str] | None = None) -> int:
     check.add_argument("--json", action="store_true", help="Print the full result as JSON")
     check.add_argument("--verbose", action="store_true", help="List the cards in each role and the policy")
 
+    audit = commands.add_parser("audit", help="Measure the rules auditor against written scenarios")
+    audit_actions = audit.add_subparsers(dest="action", required=True)
+    audit_actions.add_parser("list", help="List the scenarios")
+    shown = audit_actions.add_parser("show", help="Print what the auditor is shown for one scenario; no model call")
+    shown.add_argument("scenario")
+    suite = audit_actions.add_parser("suite", help="Run scenarios through the auditor (uses your Claude Code login)")
+    suite.add_argument("--only", nargs="+", metavar="ID", help="Run just these scenarios")
+    suite.add_argument("--tier", choices=["ordinary", "weird"])
+    suite.add_argument("--model", default="claude-opus-5")
+    suite.add_argument("--effort", choices=["low", "medium", "high", "xhigh", "max"])
+    suite.add_argument("--max-calls", type=int, default=40, help="Hard limit on model calls for this run")
+    suite.add_argument("--max-cost", type=float, default=10.0, help="Hard limit on estimated cost at list prices, USD")
+    suite.add_argument("--json", action="store_true")
+    suite.add_argument("--out", help="Also write the full report, verdicts included, to this JSON file")
+
     args = parser.parse_args(argv)
-    if args.command in ("cards", "deck"):
+    if args.command in ("cards", "deck", "audit"):
         try:
-            return _cards(args) if args.command == "cards" else _deck(args)
-        except (CardsError, ValueError, OSError) as exc:
+            return {"cards": _cards, "deck": _deck, "audit": _audit}[args.command](args)
+        except (CardsError, RunnerError, ValueError, OSError) as exc:
             print(json.dumps({"error": {"code": "cards_error", "message": str(exc)}}), file=sys.stderr)
             return 2
     try:
@@ -103,3 +120,34 @@ def _deck(args: argparse.Namespace) -> int:
                         turns=args.turns, seed=args.seed)
     print(json.dumps(result, indent=2, ensure_ascii=False) if args.json else render(result, verbose=args.verbose))
     return 0 if result["legal"] else 1
+
+
+def _audit(args: argparse.Namespace) -> int:
+    scenarios = load_scenarios()
+    if args.action == "list":
+        print("\n".join(f"{s['tier']:<9}{s['id']:<36}{s['about']}" for s in scenarios))
+        return 0
+    database = CardDatabase()
+    if args.action == "show":
+        scenario = next((s for s in scenarios if s["id"] == args.scenario), None)
+        if scenario is None:
+            raise ValueError(f"No scenario called {args.scenario!r}; see `fcsim audit list`.")
+        table, runner = build(scenario, database)
+        before, names, since = Auditor(None, database).snapshot(table)
+        play(scenario, runner)
+        print(materials(table, before, since, database, names))
+        print("\nEXPECTED\n" + json.dumps(scenario["expect"], indent=2))
+        return 0
+    chosen = [s for s in scenarios if (not args.only or s["id"] in args.only) and (not args.tier or s["tier"] == args.tier)]
+    if not chosen:
+        raise ValueError("No scenarios match; see `fcsim audit list`.")
+    runner = ClaudeCodeRunner(model=args.model, effort=args.effort,
+                              budget=Budget(max_calls=args.max_calls, max_cost_usd=args.max_cost))
+    report = run_suite(Auditor(runner, database), chosen,
+                       progress=None if args.json else lambda r: print(render({"results": [r], "summary": None}), flush=True))
+    if args.out:
+        with open(args.out, "w", encoding="utf-8") as out:
+            json.dump(report, out, indent=2, ensure_ascii=False)
+    print(json.dumps(report, indent=2, ensure_ascii=False) if args.json else render({"results": [], "summary": report["summary"]}))
+    done = [r for r in report["results"] if "passed" in r]
+    return 0 if done and all(r["passed"] for r in done) else 1
