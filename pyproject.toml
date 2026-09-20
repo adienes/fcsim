@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling>=1.26,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fcsim"
+version = "0.1.0"
+description = "Local, versioned rules reference for Commander playtesting"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+fcsim = "fcsim.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8,<10"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fcsim"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"rules" = "fcsim/rules/_data"
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "rules", "scripts", "tests", "pyproject.toml", "README.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

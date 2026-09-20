@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "default_version": "2026-08-07",
+  "snapshots": [
+    {
+      "version": "2026-08-07",
+      "effective_date": "2026-08-07",
+      "downloaded_at": "2026-09-20T16:58:54+00:00",
+      "source_url": "https://media.wizards.com/2026/downloads/MagicCompRules%2020260807.docx",
+      "source_format": "docx",
+      "source_path": "sources/2026-08-07.docx",
+      "source_sha256": "4ac9238d60800af34e40f37fb478b58bc85ec6c358563048b775cc694656ed8d",
+      "text_path": "comprehensive/2026-08-07.txt",
+      "text_sha256": "6d2a0bb5f30eae6feda189f01faaf1891e52e7cee91a22d94ad31a37580cd908",
+      "text_encoding": "utf-8",
+      "extraction": "scripts/extract_rules.py (paragraphs, tabs, and explicit line breaks; no wording changes)"
+    }
+  ]
+}

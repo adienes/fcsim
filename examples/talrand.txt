@@ -1,0 +1,72 @@
+1 Counterspell
+1 Negate
+1 Arcane Denial
+1 Swan Song
+1 Mana Drain
+1 Dissolve
+1 Dissipate
+1 Essence Scatter
+1 Remove Soul
+1 Exclude
+1 Rewind
+1 Mystic Confluence
+1 Cryptic Command
+1 Force of Will
+1 Pact of Negation
+1 An Offer You Can't Refuse
+1 Stern Dismissal
+1 Opt
+1 Ponder
+1 Preordain
+1 Brainstorm
+1 Consider
+1 Impulse
+1 Frantic Search
+1 Fact or Fiction
+1 Dig Through Time
+1 Treasure Cruise
+1 Pull from Tomorrow
+1 Blue Sun's Zenith
+1 Think Twice
+1 Deep Analysis
+1 Windfall
+1 Rhystic Study
+1 Mystic Remora
+1 Cyclonic Rift
+1 Pongify
+1 Rapid Hybridization
+1 Reality Shift
+1 Resculpt
+1 Curse of the Swine
+1 Aetherize
+1 Evacuation
+1 Capsize
+1 Into the Roil
+1 Blink of an Eye
+1 Snap
+1 Sol Ring
+1 Arcane Signet
+1 Mind Stone
+1 Sky Diamond
+1 Thought Vessel
+1 Commander's Sphere
+1 Sapphire Medallion
+1 High Tide
+1 Baral, Chief of Compliance
+1 Archmage Emeritus
+1 Murmuring Mystic
+1 Docent of Perfection
+1 Metallurgic Summonings
+1 Shark Typhoon
+1 Mystic Sanctuary
+1 Reliquary Tower
+1 Myriad Landscape
+1 Lonely Sandbar
+1 Remote Isle
+1 Halimar Depths
+1 Rogue's Passage
+1 Sea Gate Restoration
+30 Island
+1 Snapcaster Mage
+
+1 Talrand, Sky Summoner
