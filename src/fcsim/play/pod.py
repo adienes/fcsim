@@ -12,7 +12,10 @@ import secrets
 from pathlib import Path
 
 from ..agents import BudgetExceeded, Runner, RunnerError, cost_summary
-from ..audit import SERIOUS, Auditor
+from concurrent.futures import ThreadPoolExecutor
+
+from ..audit import SERIOUS, Auditor, describe
+from ..audit.auditor import card_reference
 from ..cards import CardDatabase, read_decklist, resolve, validate_deck
 from ..mcp import McpServer
 from ..rules import RulesReference
@@ -45,10 +48,15 @@ the effect needs, then finish_resolution.
 You are woken only when the table needs you: on your own turn, when something is on the stack \
 that you may respond to, to block, for a trigger or a question, or to correct an error. If you \
 are woken to respond and have no response, just pass priority. Your private notes are your only \
-memory between wakes: read them first, and update them with write_notes when your plans or your \
+memory between wakes. Every wake begins with a briefing: the table as it stands, with the handles \
+you need; your hand and the cards in play, with their text; and your notes. Act on it directly. \
+Call get_view only after you have changed the table and need fresh handles, and lookup_card only \
+for a card the briefing does not show. Update your notes with write_notes when your plans or your \
 read of the table change. A wake ends when the table stops waiting for you. Then stop calling \
 tools and reply with one or two sentences on what you did and why; only you will see them."""
 
+_TRIAGE = {"type": "object", "additionalProperties": False, "required": ["respond", "why"],
+           "properties": {"respond": {"type": "boolean"}, "why": {"type": "string", "description": "One short sentence."}}}
 _DEFAULTS = {"priority": "pass_priority", "mulligan": "keep", "declare_attackers": "declare_attackers",
              "declare_blockers": "declare_blockers", "combat_damage": "combat_damage", "discard": "finish_step",
              "held_step": "finish_step", "resolution": "finish_resolution", "correction": "finish_step"}
@@ -71,14 +79,25 @@ def _names(decks: list) -> list[str]:
 
 def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner: Runner, database: CardDatabase, *, cycles: int = 3,
              seed: int | None = None, out_root: str | Path = "games", rules: RulesReference | None = None,
-             echo=lambda line: print(line, flush=True)) -> dict:
+             resume: str | Path | None = None, echo=lambda line: print(line, flush=True)) -> dict:
     """Play up to `cycles` turns per seat. `runners[i]` pilots seat i; share one Budget across all
-    runners and the auditor to cap the whole game."""
+    runners and the auditor to cap the whole game.
+
+    With `resume`, play `cycles` more rounds of the game in that directory: its journal is replayed
+    into a table, the decks are the copies it kept, and players pick up from their notes."""
+    earlier = GameDirectory.open(resume) if resume else None
+    if earlier:
+        deck_paths = [earlier.path / "decks" / f"seat-{index}.txt" for index in range(len(earlier.read("config.json")["seats"]))]
     decks = [resolve(read_decklist(path), database, online=True) for path in deck_paths]
     for path, deck in zip(deck_paths, decks, strict=True):
         if deck.unknown or not deck.commanders:
             raise ValueError(f"{path} has unrecognized cards or no commander; run `fcsim deck check` on it first.")
     names, count = _names(decks), len(decks)
+    if earlier:
+        return _play(earlier, Table.replay(earlier.read("config.json")["table"], earlier.events(),
+                                           card_lookup=lambda n: (c := database.find(n)) and {"mana_value": c.mana_value}),
+                     earlier.read("config.json")["seats"], decks, runners, auditor_runner, database, cycles, rules, echo,
+                     earlier=earlier.read("report.json") if (earlier.path / "report.json").is_file() else None)
     seed = seed if seed is not None else secrets.randbelow(2 ** 31)
     directory = GameDirectory(out_root, "pod_" + "-".join(names), seed)
     table = Table([{"name": name, "commanders": [c.name for c in deck.commanders], "library": [c.name for c in deck.library()]}
@@ -94,13 +113,28 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
                                     "auditor_model": auditor_runner.model,
                                     "auditor_backend": getattr(auditor_runner, "backend", "custom"),
                                     "deck_issues": [[i.to_dict() for i in validate_deck(d, database)] for d in decks]})
+    return _play(directory, table, names, decks, runners, auditor_runner, database, cycles, rules, echo)
+
+
+def _play(directory: GameDirectory, table: Table, names: list[str], decks: list, runners: list, auditor_runner, database: CardDatabase,
+          cycles: int, rules: RulesReference | None, echo, *, earlier: dict | None = None) -> dict:
+    """Schedule seats and audits until the game ends or `cycles` more rounds have been played."""
+    count, seed = len(names), table.config["seed"]
+    table.on_event = directory.journal  # a replayed table was built without its journal
+    last_turn = (table.game.turn.number - 1 if earlier else 0) + cycles * count
     auditor = Auditor(auditor_runner, database, context=f"A {count}-player Commander game. Seats, in turn order: "
                       + ", ".join(f"{name} (seat {i})" for i, name in enumerate(names)) + ".")
     systems = [SYSTEM.format(name=name, count=count) + "\n\nYOUR DECK (count, name, cost, type, text)\n"
                + _deck_reference(deck, database) for name, deck in zip(names, decks, strict=True)]
     current: dict = {}
-    seen = [0] * count          # each seat's place in the log, so a wake can say what happened since its last one
-    report: dict = {"directory": str(directory.path), "seed": seed, "seats": names, "wakes": [], "audits": [], "stopped": None}
+    # Each seat's place in the log, so a wake can say what happened since its last one. After a
+    # resume the players start from their notes and the board, not from the whole history again.
+    seen = [len(table.events) if earlier else 0] * count
+    decisions: dict = {}  # triage answers for the stack as it currently stands
+    report: dict = {"directory": str(directory.path), "seed": seed, "seats": names, "stopped": None,
+                    "triage": list((earlier or {}).get("triage", [])),
+                    "wakes": list((earlier or {}).get("wakes", [])), "audits": list((earlier or {}).get("audits", [])),
+                    "earlier_usage": [*(earlier or {}).get("earlier_usage", []), *([earlier["usage"]] if earlier else [])]}
 
     def holds_pen(seat: int) -> bool:
         return not table.awaiting_audit and seat in table.game.control.seats
@@ -120,17 +154,67 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
             return result
         return tools.definitions, call
 
+    def briefing(seat: int) -> str:
+        """Everything a seat would otherwise spend two or three round trips fetching."""
+        view = table.view(seat)
+        mine = view["seats"][seat]["hand"].get("cards", [])
+        in_play = [o.get("name") for o in view["battlefield"]] + [i["source"] for i in view["stack"]] \
+            + [o.get("name") for s in view["seats"] for zone in ("command", "graveyard", "exile") for o in s[zone]]
+        hand = []
+        for card in mine:
+            known = database.find(card["name"])
+            face = known.front if known else None
+            stats = f" {face.power}/{face.toughness}" if face and face.power is not None else ""
+            hand.append(f"- [{card['handle']}] {card['name']}" + (f" {known.mana_cost} [{face.type_line}{stats}] "
+                                                                   f"{' '.join(known.text.split())}" if known else ""))
+        waiting = [f"- [{t['handle']}] {t['text']}" for t in view["waiting_triggers"] if t["seat"] == seat]
+        asked = [f"- [{q['handle']}] from {names[q['from']]}: {q['prompt']}" + (f" Options: {q['options']}" if q["options"] else "")
+                 for q in view["questions"] if q["waiting"] and q["waiting"][0] == seat]
+        return "\n".join(["THE TABLE (the codes in brackets are your handles)", describe(view), "", "YOUR HAND", *(hand or ["(empty)"]),
+                          *(["", "YOUR TRIGGERS WAITING TO GO ON THE STACK", *waiting] if waiting else []),
+                          *(["", "QUESTIONS FOR YOU", *asked] if asked else []),
+                          "", "CARDS IN PLAY", card_reference([n for n in in_play if n], database, rulings_per_card=0) or "(none)",
+                          "", "YOUR NOTES", table.notes[seat] or "(none yet)"])
+
+    def news(seat: int) -> str:
+        events = table.act(seat, "get_log", {"since": seen[seat]})["events"]
+        lines = [f"[{e['step']}] " + " ".join(e["text"]) + (" (to you: " + " ".join(e["private"]) + ")" if e.get("private") else "")
+                 for e in events if e["text"] or e.get("private")][-40:]
+        return "Since your last wake:\n" + "\n".join(lines) if lines else "Nothing has happened since your last wake."
+
+    def triage(seats: list[int]) -> dict[int, bool]:
+        """Ask several seats at once, each with one question and no tools, whether they want to
+        respond to what is on the stack. Most answers are no, and a no costs seconds, not a wake."""
+        game = table.game
+        top = game.stack[-1]
+        question = (f"{names[top.controller]}'s {top.source_name} is on top of the stack and you have priority. Do you want to "
+                    "respond before it resolves, by casting a spell or activating an ability? Answer respond=false to pass. "
+                    "Answer respond=true only if you would actually act now; you will then be woken to do it.")
+        prompts = {seat: f"Table turn {game.turn.number}, {names[game.turn.active]}'s turn, {game.turn.step} step. {question}\n\n"
+                         f"{news(seat)}\n\n{briefing(seat)}" for seat in seats}
+
+        def one(seat: int):
+            return seat, runners[seat].ask(systems[seat], prompts[seat], schema=_TRIAGE)
+        with ThreadPoolExecutor(max_workers=len(seats)) as pool:
+            replies = list(pool.map(one, seats))
+        answers = {}
+        for seat, reply in replies:
+            answers[seat] = bool((reply.data or {}).get("respond"))
+            record = {"turn": game.turn.number, "seat": seat, "respond": answers[seat], "why": (reply.data or {}).get("why", ""),
+                      "about": top.source_name, "seconds": round(reply.seconds, 1)}
+            report["triage"].append(record)
+            directory.append(f"transcript-seat-{seat}.jsonl", {"kind": "triage", **record})
+        echo(f"turn {game.turn.number} {game.turn.step}: response to {top.source_name}: "
+             + ", ".join(f"{names[s]} {'RESPONDS' if a else 'passes'}" for s, a in answers.items()))
+        return answers
+
     def wake(server: McpServer, seat: int, kind: str, extra: str = "") -> None:
         token, handle = secrets.token_hex(16), table.open_wake(seat, kind)
         current.update(tools=SeatTools(table, seat, handle, database=database, rules=rules), token=token, wake=handle,
                        seat=seat, ended=False)
-        news = table.act(seat, "get_log", {"since": seen[seat]})["events"]
-        lines = [f"[{e['step']}] " + " ".join(e["text"]) + (" (to you: " + " ".join(e["private"]) + ")" if e.get("private") else "")
-                 for e in news if e["text"] or e.get("private")][-40:]
         game = table.game
         prompt = (f"Table turn {game.turn.number}, {names[game.turn.active]}'s turn, {game.turn.step} step. "
-                  f"{extra or _WHY.get(kind, 'The table is waiting for you.')}\n\n"
-                  + ("Since your last wake:\n" + "\n".join(lines) if lines else "Nothing has happened since your last wake."))
+                  f"{extra or _WHY.get(kind, 'The table is waiting for you.')}\n\n{news(seat)}\n\n{briefing(seat)}")
         echo(f"turn {game.turn.number} {game.turn.step}: {names[seat]} ({kind}) ...")
         started = len(table.events)
         reply = runners[seat].ask(systems[seat], prompt, tools=server.connection(
@@ -185,7 +269,7 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
     with McpServer(tools_for) as server:
         try:
             snapshot = auditor.snapshot(table)
-            while table.game.control.kind != "over" and table.game.turn.number <= cycles * count:
+            while table.game.control.kind != "over" and table.game.turn.number <= last_turn:
                 if table.awaiting_audit:
                     audit(server, snapshot)
                     table.release()
@@ -199,6 +283,18 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
                 if kind == "priority" and seat != table.game.turn.active and not table.game.stack:
                     table.act(seat, "pass_priority")  # nothing to respond to on someone else's turn
                     continue
+                if kind == "priority" and table.game.stack:
+                    # A chance to respond. Ask everyone still to act at once, and remember the answers
+                    # for as long as the stack stays as it is.
+                    signature = tuple(item.id for item in table.game.stack)
+                    if decisions.get("stack") != signature:
+                        waiting = [s for s in table.game.turn_order_from(seat) if s not in table.game.turn.passed]
+                        decisions.clear()
+                        decisions.update(stack=signature, **{str(s): a for s, a in triage(waiting).items()})
+                    if not decisions.get(str(seat), True):
+                        table.act(seat, "pass_priority")
+                        seen[seat] = len(table.events)
+                        continue
                 before = len(table.events)
                 wake(server, seat, kind)
                 if len(table.events) == before and table.expected() and table.expected()[0] == (seat, kind):

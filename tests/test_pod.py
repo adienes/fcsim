@@ -39,12 +39,16 @@ class ScriptedSeat:
 
     model = "scripted"
 
-    def __init__(self, budget: Budget):
-        self.budget, self.prompts = budget, []
+    def __init__(self, budget: Budget, *, cast_commander: bool = False):
+        self.budget, self.prompts, self.cast_commander = budget, [], cast_commander
 
-    def ask(self, system: str, prompt: str, *, tools: McpConnection, **_) -> Reply:
+    def ask(self, system: str, prompt: str, *, tools: McpConnection | None = None, schema: dict | None = None, **_) -> Reply:
         self.budget.begin()
         self.prompts.append(prompt)
+        if tools is None:  # a triage question: this scripted player never responds
+            reply = Reply(data={"respond": False, "why": "scripted"}, text="", cost_usd=0.01, seconds=0.5, model=self.model)
+            self.budget.record(reply)
+            return reply
         count = [0]
 
         def tool(tool_name: str, **arguments) -> dict:
@@ -73,6 +77,13 @@ class ScriptedSeat:
             elif waiting_for == "priority" and view["turn"]["active"] == me and view["turn"]["step"] == "main1" \
                     and land and not view["turn"]["land_plays"]:
                 result = tool("play_land", card=land)
+            elif self.cast_commander and waiting_for == "priority" and view["turn"]["active"] == me and not view["stack"] \
+                    and view["turn"]["step"] == "main1" and view["seats"][me]["command"] \
+                    and len([c for c in view["battlefield"] if c["controller"] == me and not c["tapped"]]) >= 4:
+                lands = [c["handle"] for c in view["battlefield"] if c["controller"] == me and not c["tapped"]][:4]
+                result = tool("cast", card=view["seats"][me]["command"][0]["handle"], payment={"tap": lands}, resolves="auto_permanent")
+            elif waiting_for == "priority" and view["turn"]["active"] == me and view["stack"]:
+                result = tool("pass_priority")   # my own spell is on the stack: let it resolve
             elif waiting_for == "priority" and view["turn"]["active"] == me and not view["stack"]:
                 step = view["turn"]["step"]
                 result = tool("pass_priority", until="main1") if step in ("upkeep", "draw") else \
@@ -121,3 +132,47 @@ def test_a_pod_game_stops_at_its_budget(database, tmp_path):
     report = play_pod(decks(tmp_path), [ScriptedSeat(budget) for _ in range(3)], FakeRunner([OK] * 9, budget), database,
                       cycles=2, seed=4, out_root=tmp_path / "games", echo=lambda *_: None)
     assert "limit of 4 model calls" in report["stopped"] and (Path(report["directory"]) / "report.md").exists()
+
+
+def test_a_pod_game_can_be_resumed_from_its_directory(database, tmp_path):
+    from fcsim.play.gamedir import GameDirectory
+    from fcsim.table import Table
+    budget = Budget(max_calls=300)
+    first = play_pod(decks(tmp_path), [ScriptedSeat(budget) for _ in range(3)], FakeRunner([OK] * 60, budget), database,
+                     cycles=1, seed=4, out_root=tmp_path / "games", echo=lambda *_: None)
+    assert first["turns_played"] == 4 and [s["permanents"] for s in first["standings"]] == [1, 1, 1]
+    seats = [ScriptedSeat(budget) for _ in range(3)]
+    more = play_pod([], seats, FakeRunner([OK] * 60, budget), database, cycles=2, resume=first["directory"], echo=lambda *_: None)
+    assert more["directory"] == first["directory"] and more["turns_played"] == 10 and more["stopped"] is None
+    assert [s["permanents"] for s in more["standings"]] == [3, 3, 3]            # two more land drops each, on the same board
+    assert len(more["wakes"]) > len(first["wakes"]) and more["wakes"][:len(first["wakes"])] == first["wakes"]
+    assert more["earlier_usage"] == [first["usage"]]
+    assert not any("Since your last wake" in p and "keeps 7 cards" in p for seat in seats for p in seat.prompts)  # no replayed history
+    directory = GameDirectory.open(first["directory"])
+    events = directory.events()
+    assert [e["n"] for e in events] == list(range(len(events)))                  # one unbroken journal
+    replayed = Table.replay(directory.read("config.json")["table"], events).game.to_dict()
+    assert json.loads(json.dumps(replayed)) == directory.read("state.json")    # the saved state is the journal's state
+    with pytest.raises(ValueError, match="not a game directory"):
+        play_pod([], seats, FakeRunner([OK], budget), database, resume=tmp_path)
+
+
+def test_a_wake_starts_with_a_briefing_and_responses_are_triaged_in_parallel(database, tmp_path):
+    from fcsim.play import pod
+
+    budget = Budget(max_calls=400)
+    seats = [ScriptedSeat(budget, cast_commander=True), ScriptedSeat(budget), ScriptedSeat(budget)]
+    report = play_pod(decks(tmp_path), seats, FakeRunner([OK] * 120, budget), database, cycles=5, seed=4,
+                      out_root=tmp_path / "games", echo=lambda *_: None)
+    assert report["stopped"] is None
+    briefed = seats[1].prompts[1]
+    assert "THE TABLE (the codes in brackets are your handles)" in briefed and "YOUR HAND\n- [c" in briefed
+    assert "[Basic Land — Forest]" in briefed and "YOUR NOTES\n(none yet)" in briefed and "CARDS IN PLAY" in briefed
+    assert "ruling " not in briefed                                        # card text, not rulings: a briefing stays short
+    asked = [t for t in report["triage"] if t["about"] == "Talrand, Sky Summoner"]
+    assert sorted(t["seat"] for t in asked) == [1, 2] and not any(t["respond"] for t in asked)   # both other seats, in one round
+    events = [json.loads(line) for line in (Path(report["directory"]) / "events.jsonl").read_text().splitlines()]
+    talrands_turns = {e["turn"] for e in events if e["seat"] == 0 and e["tool"] == "play_land"}
+    woken_to_pass = [w for w in report["wakes"] if w["kind"] == "priority" and w["seat"] != 0 and w["turn"] in talrands_turns]
+    assert talrands_turns and woken_to_pass == []                          # on Talrand's turns nobody else was woken just to pass
+    assert report["standings"][0]["commander_casts"] == {"Talrand, Sky Summoner": 1} and pod._TRIAGE["required"] == ["respond", "why"]

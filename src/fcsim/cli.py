@@ -121,7 +121,8 @@ def main(argv: list[str] | None = None) -> int:
     fish.add_argument("--out", default="games", help="Directory to create the game directory in")
 
     pod = commands.add_parser("pod", help="A multiplayer game: one agent per deck, audited")
-    pod.add_argument("decks", nargs="+", help="Two to four decklists, in turn order after a random start")
+    pod.add_argument("decks", nargs="*", help="Two to four decklists, in turn order after a random start")
+    pod.add_argument("--resume", metavar="GAME_DIR", help="Play --cycles more rounds of an existing game instead of starting one")
     pod.add_argument("--cycles", type=int, default=3, help="Turns per seat before the game is stopped")
     pod.add_argument("--seed", type=int)
     _model_options(pod, audited=True, cost_default=40.0)
@@ -235,7 +236,10 @@ def _goldfish(args: argparse.Namespace) -> int:
 
 
 def _pod(args: argparse.Namespace) -> int:
-    if not 2 <= len(args.decks) <= 4:
+    if args.resume:
+        with open(f"{args.resume}/config.json", encoding="utf-8") as config:
+            args.decks = json.load(config)["seats"]  # one runner per seat; the decks are the game's own copies
+    elif not 2 <= len(args.decks) <= 4:
         raise ValueError("A pod is two to four decks.")
     budget = _budget(args)
     try:
@@ -246,7 +250,7 @@ def _pod(args: argparse.Namespace) -> int:
                                              budget=budget, timeout=1800) for _ in args.decks],
                       make_runner(args.audit_backend or args.backend, model=args.audit_model, effort=args.audit_effort,
                                   budget=budget), CardDatabase(), cycles=args.cycles,
-                      seed=args.seed, out_root=args.out, rules=rules)
+                      seed=args.seed, out_root=args.out, rules=rules, resume=args.resume)
     with open(f"{report['directory']}/report.md", encoding="utf-8") as text:
         print("\n" + text.read())
     print(f"Everything is in {report['directory']}")

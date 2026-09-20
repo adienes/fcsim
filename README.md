@@ -197,7 +197,13 @@ someone else's turn and nothing on the stack is passed for without a wake. At ev
 checkpoint where something auditable happened, the auditor reviews it before the
 game goes on: its hooks go into the ledger, a trigger it reports is put in front of
 its controller, and a seat whose action it faults gets a correction wake to put
-the table right. Players can talk with `say`. Not built yet: disputes and a judge,
+the table right. Players can talk with `say`. Every wake opens with a briefing (the
+table with the seat's handles, its hand and the cards in play with their text, and
+its notes), so an agent can act without first fetching any of it. When something is
+on the stack, every seat still to act is asked at once, with one tool-less question,
+whether it wants to respond; a no is passed for mechanically and only a yes gets a
+wake. `fcsim pod --resume <game_dir> --cycles N` plays N more rounds of a saved game
+by replaying its journal. Not built yet: disputes and a judge,
 rewinds, reply wakes for table talk, narrower watches and triage, and the
 postgame narrative. It has been tested with scripted seats only, not yet with
 models.

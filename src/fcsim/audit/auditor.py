@@ -197,7 +197,7 @@ def card_reference(names: list[str], database: CardDatabase, *, rulings_per_card
             lines.append(f"{face.name} {face.mana_cost} — {face.type_line}{stats}")
             lines += [f"    {text}" for text in face.oracle_text.splitlines()]
         rulings = database.rulings(card)
-        lines += [f"    ruling {r['date']}: {r['text']}" for r in rulings[-rulings_per_card:]]
+        lines += [f"    ruling {r['date']}: {r['text']}" for r in (rulings[-rulings_per_card:] if rulings_per_card else [])]
     return "\n".join(lines)
 
 
