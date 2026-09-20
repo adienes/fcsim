@@ -11,7 +11,7 @@ from __future__ import annotations
 import secrets
 from pathlib import Path
 
-from ..agents import BudgetExceeded, RunnerError
+from ..agents import BudgetExceeded, Runner, RunnerError, cost_summary
 from ..audit import SERIOUS, Auditor
 from ..cards import CardDatabase, read_decklist, resolve, validate_deck
 from ..mcp import McpServer
@@ -69,7 +69,7 @@ def _names(decks: list) -> list[str]:
     return names
 
 
-def play_pod(deck_paths: list[str | Path], runners: list, auditor_runner, database: CardDatabase, *, cycles: int = 3,
+def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner: Runner, database: CardDatabase, *, cycles: int = 3,
              seed: int | None = None, out_root: str | Path = "games", rules: RulesReference | None = None,
              echo=lambda line: print(line, flush=True)) -> dict:
     """Play up to `cycles` turns per seat. `runners[i]` pilots seat i; share one Budget across all
@@ -90,7 +90,9 @@ def play_pod(deck_paths: list[str | Path], runners: list, auditor_runner, databa
     directory.pin_rules(rules)
     directory.write("config.json", {"mode": "pod", "decks": [str(p) for p in deck_paths], "seats": names, "cycles": cycles,
                                     "table": table.config, "models": [r.model for r in runners],
+                                    "backends": [getattr(r, "backend", "custom") for r in runners],
                                     "auditor_model": auditor_runner.model,
+                                    "auditor_backend": getattr(auditor_runner, "backend", "custom"),
                                     "deck_issues": [[i.to_dict() for i in validate_deck(d, database)] for d in decks]})
     auditor = Auditor(auditor_runner, database, context=f"A {count}-player Commander game. Seats, in turn order: "
                       + ", ".join(f"{name} (seat {i})" for i, name in enumerate(names)) + ".")
@@ -131,8 +133,8 @@ def play_pod(deck_paths: list[str | Path], runners: list, auditor_runner, databa
                   + ("Since your last wake:\n" + "\n".join(lines) if lines else "Nothing has happened since your last wake."))
         echo(f"turn {game.turn.number} {game.turn.step}: {names[seat]} ({kind}) ...")
         started = len(table.events)
-        reply = runners[seat].ask(systems[seat], prompt, mcp_config=server.config(token),
-                                  allowed_tools=tuple(f"mcp__{server.name}__{t['name']}" for t in current["tools"].definitions))
+        reply = runners[seat].ask(systems[seat], prompt, tools=server.connection(
+            token, tuple(t["name"] for t in current["tools"].definitions)))
         table.close_wake(handle)
         forced = None
         if holds_pen(seat) and table.game.control.kind != "setup" or (kind == "mulligan" and holds_pen(seat)):
@@ -140,7 +142,7 @@ def play_pod(deck_paths: list[str | Path], runners: list, auditor_runner, databa
         seen[seat] = len(table.events)
         entry = {"seat": seat, "turn": game.turn.number, "kind": kind, "summary": reply.text, "events": [started, len(table.events)],
                  "tool_calls": len(current["tools"].calls), "tool_errors": [c for c in current["tools"].calls if c["error"]],
-                 "forced": forced, "seconds": round(reply.seconds, 1), "estimated_cost_usd": round(reply.cost_usd, 4)}
+                 "forced": forced, "seconds": round(reply.seconds, 1), "estimated_cost_usd": reply.estimated_cost_usd}
         report["wakes"].append(entry)
         directory.append(f"transcript-seat-{seat}.jsonl", {**entry, "calls": current["tools"].calls})
         directory.write(f"notes-seat-{seat}.md", table.notes[seat])
@@ -259,7 +261,7 @@ def render(report: dict) -> str:
     lines += [f"- Turn {turn}, {f['kind']}: {f['summary']}" for turn, f in serious]
     usage = report["usage"]
     lines += ["", "## Usage", "", f"{usage['calls']} model calls, {usage['seconds']:.0f} seconds of model time, "
-              f"${usage['estimated_cost_usd']:.2f} estimated at list prices (plan usage on a subscription, not a charge).",
+              f"{cost_summary(usage)}.",
               "", "`log.md` has the play-by-play, table talk included."]
     if report["stopped"]:
         lines += ["", f"**Stopped early:** {report['stopped']}"]

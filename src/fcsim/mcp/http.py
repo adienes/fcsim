@@ -12,6 +12,8 @@ import threading
 from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from .connection import McpConnection
+
 PROTOCOL_VERSION = "2025-06-18"
 
 
@@ -96,7 +98,6 @@ class McpServer:
     def __exit__(self, *exc) -> None:
         self.stop()
 
-    def config(self, token: str) -> dict:
-        """The `--mcp-config` value that connects a Claude Code session with this token."""
-        return {"mcpServers": {self.name: {"type": "http", "url": self.url,
-                                           "headers": {"Authorization": f"Bearer {token}"}}}}
+    def connection(self, token: str, allowed_tools: tuple[str, ...]) -> McpConnection:
+        """Grant a runner access to this wake's tools; the runner handles client configuration."""
+        return McpConnection(self.name, self.url, {"Authorization": f"Bearer {token}"}, allowed_tools)

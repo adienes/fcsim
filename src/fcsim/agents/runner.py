@@ -1,9 +1,4 @@
-"""One model call at a time, through the Claude Code command line in headless mode.
-
-This uses whatever account the local `claude` is logged in with, so a subscription works and
-no API key is needed. Each call is a fresh session with no built-in tools, no user or project
-settings and no other MCP servers: the model sees the system prompt and the prompt, nothing else.
-"""
+"""Runner contract, shared accounting, and the Claude Code and test adapters."""
 
 from __future__ import annotations
 
@@ -13,6 +8,9 @@ import subprocess
 import tempfile
 import time
 from dataclasses import dataclass, field
+from typing import Protocol
+
+from ..mcp.connection import McpConnection
 
 
 class RunnerError(RuntimeError):
@@ -25,19 +23,23 @@ class BudgetExceeded(RunnerError):
 
 @dataclass
 class Budget:
-    """Hard limits for a run, checked before every call. `cost_usd` is Claude Code's estimate at
-    list prices; on a subscription nothing is billed, but it tracks how much of the plan is used."""
+    """Attempt limit and optional reported-cost limit, shared by every role in a run.
+
+    Backends without dollar estimates must use max_cost_usd=None. Their usage is
+    counted in calls and tokens; a missing cost is never reported as zero.
+    """
     max_calls: int = 50
-    max_cost_usd: float = 5.0
+    max_cost_usd: float | None = 5.0
     calls: int = 0
     cost_usd: float = 0.0
     seconds: float = 0.0
     tokens: dict[str, int] = field(default_factory=dict)
+    unpriced_calls: int = 0
 
     def check(self) -> None:
         if self.calls >= self.max_calls:
             raise BudgetExceeded(f"The run's limit of {self.max_calls} model calls is used up.")
-        if self.cost_usd >= self.max_cost_usd:
+        if self.max_cost_usd is not None and self.cost_usd >= self.max_cost_usd:
             raise BudgetExceeded(f"The run's limit of ${self.max_cost_usd:.2f} (estimated) is used up.")
 
     def begin(self) -> None:
@@ -46,13 +48,18 @@ class Budget:
         self.calls += 1
 
     def record(self, reply: Reply) -> None:
-        self.cost_usd += reply.cost_usd
+        if reply.cost_usd is None:
+            self.unpriced_calls += 1
+        else:
+            self.cost_usd += reply.cost_usd
         self.seconds += reply.seconds
         for key, value in reply.tokens.items():
             self.tokens[key] = self.tokens.get(key, 0) + value
 
     def to_dict(self) -> dict:
-        return {"calls": self.calls, "max_calls": self.max_calls, "estimated_cost_usd": round(self.cost_usd, 4),
+        return {"calls": self.calls, "max_calls": self.max_calls,
+                "estimated_cost_usd": None if self.unpriced_calls else round(self.cost_usd, 4),
+                "reported_cost_usd": round(self.cost_usd, 4), "unpriced_calls": self.unpriced_calls,
                 "max_cost_usd": self.max_cost_usd, "seconds": round(self.seconds, 1), "tokens": self.tokens}
 
 
@@ -60,37 +67,63 @@ class Budget:
 class Reply:
     data: dict | None          # the structured answer, when a schema was given
     text: str
-    cost_usd: float = 0.0
+    cost_usd: float | None = None
     seconds: float = 0.0
     tokens: dict[str, int] = field(default_factory=dict)
     model: str = ""
 
+    @property
+    def estimated_cost_usd(self) -> float | None:
+        return round(self.cost_usd, 4) if self.cost_usd is not None else None
+
+
+class Runner(Protocol):
+    backend: str
+    model: str
+    budget: Budget
+
+    def ask(self, system: str, prompt: str, *, schema: dict | None = None,
+            tools: McpConnection | None = None) -> Reply: ...
+
+
+def cost_summary(usage: dict) -> str:
+    cost = usage["estimated_cost_usd"]
+    if cost is None:
+        return (f"USD estimate unavailable for {usage['unpriced_calls']} call(s); "
+                f"${usage['reported_cost_usd']:.2f} reported for the remaining calls")
+    return f"${cost:.2f} estimated at list prices (subscription usage, not a charge)"
+
 
 class ClaudeCodeRunner:
+    backend = "claude"
+
     def __init__(self, *, model: str = "claude-opus-5", effort: str | None = None, budget: Budget | None = None,
                  timeout: int = 600, executable: str = "claude"):
+        if effort not in (None, "low", "medium", "high", "xhigh", "max"):
+            raise RunnerError(f"Unsupported Claude effort: {effort!r}; use low, medium, high, xhigh or max.")
         self.model, self.effort, self.timeout, self.executable = model, effort, timeout, executable
         self.budget = budget or Budget()
 
-    def ask(self, system: str, prompt: str, *, schema: dict | None = None, mcp_config: dict | None = None,
-            allowed_tools: tuple[str, ...] = ()) -> Reply:
-        """One fresh session. With `schema`, the reply's `data` is validated JSON of that shape."""
+    def ask(self, system: str, prompt: str, *, schema: dict | None = None,
+            tools: McpConnection | None = None) -> Reply:
+        """One fresh session, requesting structured output when a schema is supplied."""
         if shutil.which(self.executable) is None:
             raise RunnerError(f"`{self.executable}` is not on PATH. Install Claude Code and log in.")
         self.budget.begin()
         with tempfile.TemporaryDirectory(prefix="fcsim-") as scratch:  # an empty directory: no CLAUDE.md to find
             command = [self.executable, "--print", "--output-format", "json", "--model", self.model,
                        "--system-prompt", system, "--tools", "", "--strict-mcp-config",
-                       "--setting-sources", "", "--no-session-persistence",
-                       "--max-budget-usd", f"{max(self.budget.max_cost_usd - self.budget.cost_usd, 0.01):.2f}"]
+                       "--setting-sources", "", "--no-session-persistence"]
+            if self.budget.max_cost_usd is not None:
+                command += ["--max-budget-usd", f"{max(self.budget.max_cost_usd - self.budget.cost_usd, 0.01):.2f}"]
             if self.effort:
                 command += ["--effort", self.effort]
             if schema is not None:
                 command += ["--json-schema", json.dumps(schema)]
-            if mcp_config is not None:
-                command += ["--mcp-config", json.dumps(mcp_config)]
-            if allowed_tools:
-                command += ["--allowedTools", ",".join(allowed_tools)]
+            if tools is not None:
+                config = {"mcpServers": {tools.name: {"type": "http", "url": tools.url, "headers": tools.headers}}}
+                command += ["--mcp-config", json.dumps(config)]
+                command += ["--allowedTools", ",".join(f"mcp__{tools.name}__{name}" for name in tools.allowed_tools)]
             started = time.monotonic()
             try:
                 done = subprocess.run(command, input=prompt, capture_output=True, text=True, cwd=scratch,
@@ -111,7 +144,7 @@ class ClaudeCodeRunner:
                       tokens={key: int(usage.get(key) or 0) for key in
                               ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")})
         self.budget.record(reply)
-        if result.get("is_error"):
+        if done.returncode or result.get("is_error"):
             raise RunnerError(f"Claude Code reported an error: {reply.text[:500]}")
         if schema is not None and not isinstance(reply.data, dict):
             raise RunnerError(f"The model did not answer in the requested form: {reply.text[:500]}")
@@ -120,6 +153,8 @@ class ClaudeCodeRunner:
 
 class FakeRunner:
     """Answers from a list, for tests. Records what it was asked."""
+
+    backend = "fake"
 
     def __init__(self, answers: list[dict], budget: Budget | None = None):
         self.answers, self.asked, self.budget = list(answers), [], budget or Budget()

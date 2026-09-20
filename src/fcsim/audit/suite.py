@@ -12,7 +12,7 @@ import json
 import re
 from pathlib import Path
 
-from ..agents import BudgetExceeded, RunnerError
+from ..agents import BudgetExceeded, RunnerError, cost_summary
 from ..table import STEPS, ScriptedRunner, Table
 from ..table.model import Control, Obj
 from .auditor import SERIOUS, Auditor
@@ -144,7 +144,7 @@ def run_suite(auditor: Auditor, scenarios: list[dict], *, progress=None) -> dict
             results.append({"id": scenario["id"], "tier": scenario["tier"], "error": str(error), "passed": False})
             continue
         result = {"id": scenario["id"], "tier": scenario["tier"], "about": scenario["about"], **score(scenario, verdict),
-                  "seconds": round(reply.seconds, 1), "estimated_cost_usd": round(reply.cost_usd, 4), "verdict": verdict}
+                  "seconds": round(reply.seconds, 1), "estimated_cost_usd": reply.estimated_cost_usd, "verdict": verdict}
         results.append(result)
         if progress:
             progress(result)
@@ -153,7 +153,8 @@ def run_suite(auditor: Auditor, scenarios: list[dict], *, progress=None) -> dict
     clean = [r for r in done if not r["expected_findings"]]
     hooks = sum(r["hooks_expected"] for r in done)
     summary = {
-        "model": auditor.runner.model, "scenarios": len(done), "passed": sum(r["passed"] for r in done),
+        "model": auditor.runner.model, "backend": getattr(auditor.runner, "backend", "custom"),
+        "scenarios": len(done), "passed": sum(r["passed"] for r in done),
         "catch_rate": round(1 - sum(len(r["missed"]) for r in done) / expected, 3) if expected else None,
         "false_alarm_scenarios": sum(bool(r["false_alarms"]) for r in done),
         "clean_plays_flagged": f"{sum(bool(r['false_alarms']) for r in clean)} of {len(clean)}",
@@ -187,5 +188,5 @@ def render(report: dict) -> str:
                   f"(clean plays flagged: {s['clean_plays_flagged']}), hook accuracy {s['hook_accuracy']}, "
                   f"{s['unexpected_hooks']} unexpected hook(s).",
               f"{s['seconds_per_audit']}s per audit; {s['budget']['calls']} calls, "
-              f"${s['budget']['estimated_cost_usd']:.2f} estimated at list prices."]
+              f"{cost_summary(s['budget'])}."]
     return "\n".join(lines)

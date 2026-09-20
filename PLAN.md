@@ -401,28 +401,51 @@ something to measure in milestone 4, and optional per-seat personas
 
 ### 7.4 Runtime
 
-A small runner interface, with these implementations:
+A backend-neutral `Runner.ask(system, prompt, schema=..., tools=...)` interface.
+The host supplies an `McpConnection` containing the server URL, wake credential
+and permitted tool names; each adapter translates it into its client's format.
+Game drivers, rules prompts and tool schemas do not depend on a model vendor.
+Implementations:
 
 - `FakeRunner` and `ScriptedRunner` answer from a script, for tests with no model.
 - `ClaudeCodeRunner` runs each call through the Claude Code command line in
   headless mode (`claude --print`), on whatever account the local `claude` is
-  logged in with. **This is the one in use: you are on a subscription, not the
-  API.** A call is a fresh session with `--tools ""`, `--strict-mcp-config`, no
+  logged in with. This remains the default. A call is a fresh session with
+  `--tools ""`, `--strict-mcp-config`, no
   user or project settings and its own system prompt, so the model sees only
   what it is handed; `--json-schema` gives structured answers. Measured: about
   three seconds of overhead and under a thousand tokens of fixed context.
+- `CodexRunner` runs `codex exec` on the local login, in an empty temporary
+  directory with user configuration, project instructions, skills, plugins,
+  shell/file/web/app tools and delegation disabled. The seat's MCP server is
+  required and its tools are allowlisted. Structured answers use
+  `--output-schema`; optional fields become nullable for that backend and are
+  restored on return. Tested with CLI 0.155.1 against a local mock model and
+  the real MCP server; model play quality still needs measurement.
 - `ApiRunner`, a plain Messages API tool loop, stays possible behind the same
   interface if you ever want per-token billing and finer control of caching.
 - `ExternalRunner` parks the wake until an outside MCP client collects it, for
-  a human seat or a Claude Code session sitting in.
+  a human seat or a compatible AI client sitting in. This is still planned.
 
 Agents that need tools (players; the auditor when it wants to search the
-Comprehensive Rules) get them as an MCP server passed with `--mcp-config`, with
-every built-in tool still off. So MCP is how seats get their tools after all,
+Comprehensive Rules) get them through the same seat-bound HTTP MCP server,
+configured by the chosen adapter. So MCP is how seats get their tools after all,
 as well as the outside interface for starting and watching games.
 
-Models are set per role. Default `claude-opus-5` throughout; §13 shows what
-cheaper choices would save.
+Backends and models are set per role with `--backend` / `--model` and
+`--audit-backend` / `--audit-model`. The auditor's backend inherits the players'
+backend unless overridden; its model defaults independently. Claude defaults to
+`claude-opus-5`; Codex uses its built-in default unless an explicit model is
+supplied. The pod CLI currently shares one player configuration; Python callers
+can pass different runners per seat. Record the backend and requested model in
+each game configuration, and use explicit model IDs for comparisons.
+
+Budgets count all attempts and token usage across roles. Dollar estimates and
+dollar limits are optional capabilities: Codex does not expose an estimate, so
+runs containing it use call limits and timeouts, reject a finite dollar cap, and
+report unknown cost rather than zero. Claude-only runs retain their default
+dollar limits. Adding another provider means adding an adapter, not changing the
+table or scheduler. §13's dollar projections remain specific to its stated models.
 
 ## 8. Rules integrity
 
@@ -1036,10 +1059,11 @@ than for the deck under test.
 ## 14. Guards
 
 - **Length.** A cap of 14 turn cycles, after which the judge assesses standings.
-- **Budget.** Hard limits from the first prototype that calls a model, not
-  added later: per-wake tool-call and time limits, and a per-game and per-run
-  dollar ceiling, on which the game adjourns with state saved and can be
-  resumed. `fcsim tune` refuses to start without a ceiling.
+- **Budget.** Model-attempt limits and per-call timeouts apply to every backend.
+  Dollar ceilings apply only when all selected backends can report cost;
+  unsupported dollar ceilings are rejected, never silently ignored. Future
+  per-wake tool-call limits and per-run tuning limits stop with state saved for
+  resumption. `fcsim tune` must require a ceiling supported by its backends.
 - **Loops.** `declare_loop` is the rules' shortcut mechanism: state the loop,
   the iteration count and the net result; opponents get priority to respond or
   dispute.
@@ -1056,9 +1080,10 @@ than for the deck under test.
 Python 3.12 with `uv`, and so far the standard library only: state and events
 are dataclasses, matching the rules reference that was already in the
 repository. Tool schemas will be written once and exported both as MCP tools
-and as API tool definitions. `anthropic` for the default runner, the official `mcp` package for
-the HTTP server, `claude-agent-sdk` only if `SdkRunner` is wanted, `httpx` for
-Scryfall and EDHREC, `pytest` plus property tests.
+and as API tool definitions. Current model adapters invoke the local `claude`
+and `codex` CLIs; the HTTP MCP server and data clients use the standard library.
+Provider SDKs would be optional dependencies of future API adapters, not of the
+game table. Tests use `pytest` plus property tests.
 
 ```
 src/fcsim/
@@ -1067,8 +1092,8 @@ src/fcsim/
   table/    model.py  events.py  mutations.py  visibility.py  turn.py  lints.py  replay.py
   tools/    registry.py  player.py  judge.py  host.py
   sched/    scheduler.py  wakes.py  watches.py  triage.py  audit.py
-  agents/   runner.py  scripted.py  api_runner.py  sdk_runner.py  external.py  prompts/
-  mcp/      host.py (start, status, report)  http_server.py  inproc.py
+  agents/   runner.py  codex.py  factory.py  api_runner.py (planned)  external.py (planned)  prompts/
+  mcp/      connection.py  http.py  host.py (planned: start, status, report)
   report/   metrics.py  quality.py  render.py  aggregate.py  narrative.py
   workshop/ static.py  shuffle.py  review.py  lessons.py  propose.py  apply.py  track_record.py
   cli.py    fcsim deck init|check|gen · goldfish · play · resume · summarize · report · serve
@@ -1102,7 +1127,7 @@ tests are optional integration coverage; ordinary directory play needs no Git.
 | M0 | Scryfall cache, decklist parser, validator, static analysis with bracket signals, shuffle simulation: `fcsim deck check` | Your lists load cleanly, and you already get a free report on mana, curve and power signals |
 | M1 | Table: state, handles and visibility, mutations, RNG, event log and replay, turn skeleton and priority checkpoint, resolutions, call contract, lints; `ScriptedRunner`; the non-interference test | Hidden information holds and the protocol is sound; no model needed yet |
 | M2 | Auditor with hooks and ledger, run against a **small rules suite of ordinary interactions**; hard spending limits | The riskiest assumption, tested first and cheaply: catch rate, false alarms, hook accuracy, cost and time per audit |
-| M3 | Tool registry as an MCP server, `ClaudeCodeRunner` seats, game directory, report. **An audited ten-turn solo goldfish of one supplied deck**, with measured cost. A minimal MCP host interface: `start`, `status`, `report` | Tool ergonomics, prompts, real cost per wake and per audit. The first useful artifact, usable from Claude Code |
+| M3 | Tool registry as an MCP server, configurable Claude Code/Codex runners, game directory, report. **An audited ten-turn solo goldfish of one supplied deck**, with measured usage and cost where available. A minimal MCP host interface: `start`, `status`, `report` | Tool ergonomics, portable prompts, usage per wake and per audit. The first useful artifact, independent of the chosen model backend |
 | M3a | **Next: first-class deck projects.** `DeckProject`/`ResolvedDeck`/`DeckSnapshot`, `deck init`, directory input for check/goldfish, brief and primer templates, frozen guidance and `get_deck_guide`, separate revision hashes, self-contained game capture; plain-list input still works | A pilot starts with the deck's intended gameplan; every game records exactly which list, goals and guidance it used, including uncommitted edits |
 | M3b | Postgame observations and reviewed lessons from goldfish logs/audits, guidance-only promotion, dependency checks; a measured runbook/no-runbook comparison on a fixed list | Piloting knowledge accumulates without live-game leakage or changing the experiment mid-run; its effect on cost, time and play quality is measured |
 | M4 | Scheduler, all wake kinds, default watches, combat, choices, corrections, disputes and judge, elimination, table talk. **One fixed pod of supplied lists**, audited; one run with `audit: off` for comparison | The core loop; whether agents play to win; how much the auditor is catching |
@@ -1116,12 +1141,13 @@ tests are optional integration coverage; ordinary directory play needs no Git.
 
 Each has a default I will proceed with unless you say otherwise.
 
-1. **How agents are billed.** Settled: your Claude subscription, through
-   headless Claude Code (§7.4). The dollar figures in §13 are then estimates at
-   list prices of how much plan usage a run consumes, not a bill, and every run
-   has a hard limit on calls and on that estimate.
-2. **Models.** Default `claude-opus-5` for every role. A cheaper model for
-   opponents or for triage is your call, given §13.
+1. **How agents are billed.** Use the selected CLI's local login, with Claude
+   Code and Codex supported (§7.4). Every run limits calls; Claude-only runs also
+   default to a reported-cost limit. Codex's cost is unknown, not zero. §13's
+   dollar figures are list-price estimates for its stated models, not bills.
+2. **Models.** Configurable backend, model and effort for players and auditor.
+   Claude defaults to `claude-opus-5`; Codex to its built-in default. Compare
+   rules accuracy and piloting quality before changing the overall default.
 3. **Budget and volume.** How many games per tuning round, and what is a game
    worth? This decides whether the cost work in M8 moves ahead of M5–M7.
 4. **The rubric.** §12.1 now has your priorities: fun and interactive, every

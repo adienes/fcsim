@@ -99,7 +99,8 @@ VERDICT_SCHEMA = {
                 "text": {"type": "string", "description": "What happens, in a sentence."},
                 "step": {"type": "string"},
                 "seat": {"type": "integer", "description": "For a hold: whose step is held."},
-                "whose": {"description": "For a step_trigger: \"each\" or a seat number."},
+                "whose": {"anyOf": [{"type": "string", "enum": ["each"]}, {"type": "integer"}],
+                          "description": "For a step_trigger: \"each\" or a seat number."},
                 "controller": {"type": "integer"}}}},
     },
 }

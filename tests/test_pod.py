@@ -8,6 +8,7 @@ import pytest
 
 from fcsim.agents import Budget, FakeRunner, Reply
 from fcsim.cards import CardDatabase
+from fcsim.mcp import McpConnection
 from fcsim.play import play_pod
 
 OK = {"verdict": "ok", "findings": [], "hooks": []}
@@ -41,17 +42,16 @@ class ScriptedSeat:
     def __init__(self, budget: Budget):
         self.budget, self.prompts = budget, []
 
-    def ask(self, system: str, prompt: str, *, mcp_config: dict, allowed_tools: tuple[str, ...], **_) -> Reply:
+    def ask(self, system: str, prompt: str, *, tools: McpConnection, **_) -> Reply:
         self.budget.begin()
         self.prompts.append(prompt)
-        server = mcp_config["mcpServers"]["fcsim"]
         count = [0]
 
         def tool(tool_name: str, **arguments) -> dict:
             count[0] += 1
-            request = urllib.request.Request(server["url"], data=json.dumps(
+            request = urllib.request.Request(tools.url, data=json.dumps(
                 {"jsonrpc": "2.0", "id": count[0], "method": "tools/call", "params": {"name": tool_name, "arguments": arguments}}).encode(),
-                headers={**server["headers"], "Content-Type": "application/json"})
+                headers={**tools.headers, "Content-Type": "application/json"})
             with urllib.request.urlopen(request, timeout=10) as response:
                 return json.loads(json.loads(response.read())["result"]["content"][0]["text"])
 

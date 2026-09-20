@@ -1,5 +1,8 @@
-"""Running models: headless Claude Code on the user's own login, and a scripted stand-in for tests."""
+"""Interchangeable model backends and shared usage limits."""
 
-from .runner import Budget, BudgetExceeded, ClaudeCodeRunner, FakeRunner, Reply, RunnerError
+from .runner import Budget, BudgetExceeded, ClaudeCodeRunner, FakeRunner, Reply, Runner, RunnerError, cost_summary
+from .codex import CodexRunner
+from .factory import BACKENDS, make_runner
 
-__all__ = ["Budget", "BudgetExceeded", "ClaudeCodeRunner", "FakeRunner", "Reply", "RunnerError"]
+__all__ = ["BACKENDS", "Budget", "BudgetExceeded", "ClaudeCodeRunner", "CodexRunner", "FakeRunner", "Reply",
+           "Runner", "RunnerError", "cost_summary", "make_runner"]

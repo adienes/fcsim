@@ -8,6 +8,7 @@ import pytest
 
 from fcsim.agents import Budget, FakeRunner, Reply
 from fcsim.cards import CardDatabase
+from fcsim.mcp import McpConnection
 from fcsim.play import goldfish
 from fcsim.play.goldfish import GOLDFISH
 
@@ -32,17 +33,16 @@ class ScriptedPilot:
     def __init__(self, budget: Budget):
         self.budget, self.prompts, self.systems = budget, [], []
 
-    def ask(self, system: str, prompt: str, *, mcp_config: dict, allowed_tools: tuple[str, ...], **_) -> Reply:
+    def ask(self, system: str, prompt: str, *, tools: McpConnection, **_) -> Reply:
         self.budget.begin()
         self.prompts.append(prompt), self.systems.append(system)
-        server = mcp_config["mcpServers"]["fcsim"]
         count = [0]
 
         def rpc(method: str, params: dict | None = None) -> dict:
             count[0] += 1
-            request = urllib.request.Request(server["url"], data=json.dumps(
+            request = urllib.request.Request(tools.url, data=json.dumps(
                 {"jsonrpc": "2.0", "id": count[0], "method": method, "params": params or {}}).encode(),
-                headers={**server["headers"], "Content-Type": "application/json"})
+                headers={**tools.headers, "Content-Type": "application/json"})
             with urllib.request.urlopen(request, timeout=10) as response:
                 return json.loads(response.read())["result"]
 
@@ -51,7 +51,7 @@ class ScriptedPilot:
 
         assert rpc("initialize", {"protocolVersion": "2025-06-18"})["capabilities"] == {"tools": {}}
         offered = {t["name"] for t in rpc("tools/list")["tools"]}
-        assert {f"mcp__fcsim__{name}" for name in offered} == set(allowed_tools) and "lookup_card" in offered
+        assert offered == set(tools.allowed_tools) and "lookup_card" in offered
         view = tool("get_view")
         if view["pen"]["kind"] == "setup":
             tool("keep")

@@ -2,10 +2,11 @@
 
 import argparse
 import json
+import math
 import sys
 from datetime import date
 
-from .agents import Budget, ClaudeCodeRunner, RunnerError
+from .agents import BACKENDS, Budget, RunnerError, make_runner
 from .audit import Auditor, build, load_scenarios, materials, play, run_suite
 from .audit import render as render_report
 from .cards import CardDatabase, CardsError
@@ -13,6 +14,41 @@ from .cards.edhrec import average_deck
 from .play import goldfish, play_pod
 from .rules import RulesError, RulesReference
 from .workshop.check import check_deck, render
+
+
+def _cost_limit(value: str) -> float | None:
+    if value.lower() == "none":
+        return None
+    try:
+        amount = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("Use a positive USD amount or 'none'.") from exc
+    if not math.isfinite(amount) or amount <= 0:
+        raise argparse.ArgumentTypeError("Use a positive USD amount or 'none'.")
+    return amount
+
+
+def _model_options(parser: argparse.ArgumentParser, *, audited: bool, cost_default: float) -> None:
+    parser.add_argument("--backend", choices=BACKENDS, default="claude", help="Model CLI backend (default: claude)")
+    parser.add_argument("--model", help="Model ID for this backend (default: Claude Opus 5 or Codex's built-in default)")
+    parser.add_argument("--effort", help="Backend reasoning effort, e.g. low, medium, high or xhigh")
+    if audited:
+        parser.add_argument("--audit-backend", choices=BACKENDS, help="Auditor backend (default: inherit --backend)")
+        parser.add_argument("--audit-model", help="Auditor model (default: its backend's default)")
+        parser.add_argument("--audit-effort", help="Auditor reasoning effort")
+    parser.add_argument("--max-cost", type=_cost_limit, default=argparse.SUPPRESS, metavar="USD|none",
+                        help=f"Reported-cost limit (default: {cost_default:g} USD for Claude-only runs, none with Codex)")
+    parser.set_defaults(default_max_cost=cost_default)
+
+
+def _budget(args: argparse.Namespace) -> Budget:
+    if args.max_calls <= 0:
+        raise ValueError("--max-calls must be positive.")
+    backends = {args.backend, getattr(args, "audit_backend", None) or args.backend}
+    cost = getattr(args, "max_cost", None if "codex" in backends else args.default_max_cost)
+    if "codex" in backends and cost is not None:
+        raise ValueError("Codex has no USD estimate; choose --max-cost none and bound the run with --max-calls.")
+    return Budget(max_calls=args.max_calls, max_cost_usd=cost)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -67,35 +103,29 @@ def main(argv: list[str] | None = None) -> int:
     audit_actions.add_parser("list", help="List the scenarios")
     shown = audit_actions.add_parser("show", help="Print what the auditor is shown for one scenario; no model call")
     shown.add_argument("scenario")
-    suite = audit_actions.add_parser("suite", help="Run scenarios through the auditor (uses your Claude Code login)")
+    suite = audit_actions.add_parser("suite", help="Run scenarios through the auditor using a local model CLI login")
     suite.add_argument("--only", nargs="+", metavar="ID", help="Run just these scenarios")
     suite.add_argument("--tier", choices=["ordinary", "weird", "hard"])
-    suite.add_argument("--model", default="claude-opus-5")
-    suite.add_argument("--effort", choices=["low", "medium", "high", "xhigh", "max"])
+    _model_options(suite, audited=False, cost_default=10.0)
     suite.add_argument("--max-calls", type=int, default=40, help="Hard limit on model calls for this run")
-    suite.add_argument("--max-cost", type=float, default=10.0, help="Hard limit on estimated cost at list prices, USD")
     suite.add_argument("--json", action="store_true")
     suite.add_argument("--out", help="Also write the full report, verdicts included, to this JSON file")
 
-    fish = commands.add_parser("goldfish", help="An agent pilots a deck alone, audited (uses your Claude Code login)")
+    fish = commands.add_parser("goldfish", help="An agent pilots a deck alone, audited")
     fish.add_argument("deck")
     fish.add_argument("--turns", type=int, default=5,
                       help="Pilot turns to play. Past five or so a real game would have had interaction.")
     fish.add_argument("--seed", type=int)
-    fish.add_argument("--model", default="claude-opus-5", help="The pilot's model")
-    fish.add_argument("--audit-model", default="claude-opus-5")
+    _model_options(fish, audited=True, cost_default=15.0)
     fish.add_argument("--max-calls", type=int, default=30, help="Hard limit on model calls for this run")
-    fish.add_argument("--max-cost", type=float, default=15.0, help="Hard limit on estimated cost at list prices, USD")
     fish.add_argument("--out", default="games", help="Directory to create the game directory in")
 
-    pod = commands.add_parser("pod", help="A multiplayer game: one agent per deck, audited (uses your Claude Code login)")
+    pod = commands.add_parser("pod", help="A multiplayer game: one agent per deck, audited")
     pod.add_argument("decks", nargs="+", help="Two to four decklists, in turn order after a random start")
     pod.add_argument("--cycles", type=int, default=3, help="Turns per seat before the game is stopped")
     pod.add_argument("--seed", type=int)
-    pod.add_argument("--model", default="claude-opus-5", help="Every player's model")
-    pod.add_argument("--audit-model", default="claude-opus-5")
+    _model_options(pod, audited=True, cost_default=40.0)
     pod.add_argument("--max-calls", type=int, default=120, help="Hard limit on model calls for this game")
-    pod.add_argument("--max-cost", type=float, default=40.0, help="Hard limit on estimated cost at list prices, USD")
     pod.add_argument("--out", default="games")
 
     args = parser.parse_args(argv)
@@ -177,8 +207,7 @@ def _audit(args: argparse.Namespace) -> int:
     chosen = [s for s in scenarios if (not args.only or s["id"] in args.only) and (not args.tier or s["tier"] == args.tier)]
     if not chosen:
         raise ValueError("No scenarios match; see `fcsim audit list`.")
-    runner = ClaudeCodeRunner(model=args.model, effort=args.effort,
-                              budget=Budget(max_calls=args.max_calls, max_cost_usd=args.max_cost))
+    runner = make_runner(backend=args.backend, model=args.model, effort=args.effort, budget=_budget(args))
     report = run_suite(Auditor(runner, database), chosen,
                        progress=None if args.json else lambda r: print(render_report({"results": [r], "summary": None}), flush=True))
     if args.out:
@@ -190,13 +219,14 @@ def _audit(args: argparse.Namespace) -> int:
 
 
 def _goldfish(args: argparse.Namespace) -> int:
-    budget = Budget(max_calls=args.max_calls, max_cost_usd=args.max_cost)
+    budget = _budget(args)
     try:
         rules = RulesReference()
     except RulesError:
         rules = None
-    report = goldfish(args.deck, ClaudeCodeRunner(model=args.model, budget=budget, timeout=1800),
-                      ClaudeCodeRunner(model=args.audit_model, budget=budget), CardDatabase(),
+    report = goldfish(args.deck, make_runner(args.backend, model=args.model, effort=args.effort, budget=budget, timeout=1800),
+                      make_runner(args.audit_backend or args.backend, model=args.audit_model, effort=args.audit_effort,
+                                  budget=budget), CardDatabase(),
                       turns=args.turns, seed=args.seed, out_root=args.out, rules=rules)
     with open(f"{report['directory']}/report.md", encoding="utf-8") as text:
         print("\n" + text.read())
@@ -207,13 +237,15 @@ def _goldfish(args: argparse.Namespace) -> int:
 def _pod(args: argparse.Namespace) -> int:
     if not 2 <= len(args.decks) <= 4:
         raise ValueError("A pod is two to four decks.")
-    budget = Budget(max_calls=args.max_calls, max_cost_usd=args.max_cost)
+    budget = _budget(args)
     try:
         rules = RulesReference()
     except RulesError:
         rules = None
-    report = play_pod(args.decks, [ClaudeCodeRunner(model=args.model, budget=budget, timeout=1800) for _ in args.decks],
-                      ClaudeCodeRunner(model=args.audit_model, budget=budget), CardDatabase(), cycles=args.cycles,
+    report = play_pod(args.decks, [make_runner(args.backend, model=args.model, effort=args.effort,
+                                             budget=budget, timeout=1800) for _ in args.decks],
+                      make_runner(args.audit_backend or args.backend, model=args.audit_model, effort=args.audit_effort,
+                                  budget=budget), CardDatabase(), cycles=args.cycles,
                       seed=args.seed, out_root=args.out, rules=rules)
     with open(f"{report['directory']}/report.md", encoding="utf-8") as text:
         print("\n" + text.read())

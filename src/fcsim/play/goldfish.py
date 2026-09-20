@@ -10,7 +10,7 @@ import re
 import secrets
 from pathlib import Path
 
-from ..agents import Budget, BudgetExceeded, RunnerError
+from ..agents import Budget, BudgetExceeded, Runner, RunnerError, cost_summary
 from ..audit import Auditor
 from ..cards import CardDatabase, read_decklist, resolve, validate_deck
 from ..mcp import McpServer
@@ -65,7 +65,7 @@ _MECHANICAL = {"priority": "pass_priority", "mulligan": "keep", "declare_attacke
                "held_step": "finish_step", "resolution": "finish_resolution"}
 
 
-def goldfish(deck_path: str | Path, runner, auditor_runner, database: CardDatabase, *, turns: int = 5,
+def goldfish(deck_path: str | Path, runner: Runner, auditor_runner: Runner, database: CardDatabase, *, turns: int = 5,
              seed: int | None = None, out_root: str | Path = "games", rules: RulesReference | None = None,
              echo=lambda line: print(line, flush=True)) -> dict:
     """Play `turns` pilot turns. `runner` plays the pilot and `auditor_runner` audits; give both the
@@ -86,6 +86,8 @@ def goldfish(deck_path: str | Path, runner, auditor_runner, database: CardDataba
     directory.pin_rules(rules)
     directory.write("config.json", {"mode": "goldfish", "deck": str(deck_path), "turns": turns, "table": table.config,
                                     "pilot_model": runner.model, "auditor_model": auditor_runner.model,
+                                    "pilot_backend": getattr(runner, "backend", "custom"),
+                                    "auditor_backend": getattr(auditor_runner, "backend", "custom"),
                                     "deck_issues": [i.to_dict() for i in issues]})
     auditor = Auditor(auditor_runner, database, context=(
         "A solo test of Pilot's deck that stands in for a four-player Commander game, so multiplayer rules "
@@ -183,8 +185,8 @@ def goldfish(deck_path: str | Path, runner, auditor_runner, database: CardDataba
                     prompt = (f"It is Goldfish's turn (table turn {turn_number}) and the table is waiting for you: {kind}. "
                               "Look with get_view, do what is needed, and stop.")
                 echo(f"turn {label}: pilot is playing ({kind}{'' if own_turn else ', during Goldfish turn'}) ...")
-                reply = runner.ask(system, prompt, mcp_config=server.config(token),
-                                   allowed_tools=tuple(f"mcp__{server.name}__{t['name']}" for t in current["tools"].definitions))
+                reply = runner.ask(system, prompt, tools=server.connection(
+                    token, tuple(t["name"] for t in current["tools"].definitions)))
                 table.close_wake(wake)
                 forced = False
                 for _ in range(80):  # it stopped early: finish its turn, or its decision, for it
@@ -202,7 +204,7 @@ def goldfish(deck_path: str | Path, runner, auditor_runner, database: CardDataba
                          "tool_calls": len(current["tools"].calls),
                          "tool_errors": [c for c in current["tools"].calls if c["error"]],
                          "forced_to_end": forced, "seconds": round(reply.seconds, 1),
-                         "estimated_cost_usd": round(reply.cost_usd, 4), "events": [snapshot[2], ended]}
+                         "estimated_cost_usd": reply.estimated_cost_usd, "events": [snapshot[2], ended]}
                 directory.append("transcript-seat-0.jsonl", {**entry, "calls": current["tools"].calls})
                 report["turns"].append(entry)
                 if kind != "mulligan" and any(e["public"] for e in table.events[snapshot[2]:ended]):
@@ -282,7 +284,7 @@ def render(report: dict, deck) -> str:
               "so a finding may mean later turns played on from a wrong board.",
               "", "## Usage", "",
               f"{usage['calls']} model calls, {usage['seconds']:.0f} seconds of model time, "
-              f"${usage['estimated_cost_usd']:.2f} estimated at list prices (on a subscription this is plan usage, not a charge)."]
+              f"{cost_summary(usage)}."]
     if report["stopped"]:
         lines += ["", f"**Stopped early:** {report['stopped']}"]
     return "\n".join(lines) + "\n"

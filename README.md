@@ -7,7 +7,7 @@ an audited solo goldfish in which an agent pilots a deck through tools served ov
 MCP, and a first multiplayer driver. Disputes, rewinds and the deck workshop are not
 built yet. There
 are no runtime dependencies outside Python 3.12+ and its SQLite FTS5 support; model
-calls go through your local Claude Code login.
+calls go through your local Claude Code or Codex CLI login.
 
 ```sh
 uv sync
@@ -138,9 +138,9 @@ and official rulings for the cards involved. It answers with findings (`illegal`
 or rule it rests on, and with the hooks the card-blind table needs for permanents
 that just arrived, such as "Mana Vault does not untap".
 
-Model calls go through the Claude Code command line in headless mode, on whatever
-account your local `claude` is logged in with, so a subscription works and there
-is no API key. Each call is a fresh session with every built-in tool off.
+Model calls go through a selected CLI backend in headless mode, using its local
+login. Claude Code remains the default; `--backend codex` selects Codex. Each
+call is a fresh session, with coding tools and unrelated MCP servers disabled.
 
 ```sh
 uv run fcsim audit list                        # the scenarios
@@ -158,8 +158,9 @@ actions, a replaced draw and hooks. The weird tier covers fizzling and partial
 fizzling, combat-trick timing, a removed blocker, Humility with Opalescence,
 Blood Moon with Urborg, what a blinked creature forgets, last known information,
 split second, first strike, and trample with deathtouch. Every run has a hard
-limit on calls and on Claude Code's cost estimate; on a subscription that
-estimate is plan usage at list prices, not a charge.
+limit on calls. Claude-only runs also default to a limit on Claude Code's cost
+estimate; on a subscription that estimate is plan usage at list prices, not a
+charge. Codex reports tokens but no dollar estimate; see backend configuration below.
 
 Measured on 2026-09-20 over all 41 scenarios: `claude-opus-5` passed 41 with no
 false alarms, about 11 seconds and 4 cents (estimated) an audit; `claude-sonnet-5`
@@ -173,8 +174,8 @@ uv run fcsim goldfish examples/zuko.txt --turns 5 --max-calls 16
 ```
 
 One agent pilots the deck against a seat, Goldfish, that never acts and is passed
-for mechanically. The pilot is a headless Claude Code session whose only tools are
-the table's, served to it over MCP with a token for its seat (`fcsim.mcp`,
+for mechanically. The pilot is a fresh session in the selected backend, given
+the table's tools over MCP with a token for its seat (`fcsim.mcp`,
 `fcsim.tools`). Each pilot turn is one wake, and the auditor reviews it before the
 game goes on, so its hooks are in the ledger before any later step runs. A game
 directory under `games/` gets the configuration, the deck as played, card text,
@@ -189,7 +190,7 @@ corrected. A three-turn run took about four minutes and seven model calls.
 uv run fcsim pod examples/zuko.txt examples/talrand.txt --cycles 3 --max-calls 80
 ```
 
-A multiplayer game: one agent per deck, each a headless Claude Code session with
+A multiplayer game: one agent per deck, each a fresh session in the selected backend with
 only its own seat's tools. The scheduler wakes whichever seat the table is waiting
 for and tells it what has happened since its last wake. A seat with priority on
 someone else's turn and nothing on the stack is passed for without a wake. At every
@@ -200,6 +201,65 @@ the table right. Players can talk with `say`. Not built yet: disputes and a judg
 rewinds, reply wakes for table talk, narrower watches and triage, and the
 postgame narrative. It has been tested with scripted seats only, not yet with
 models.
+
+## Model backends
+
+The game logic, prompts and seat-bound MCP tools are shared across backends.
+Select the CLI separately for players and the auditor:
+
+```sh
+# Codex pilots and audits, using its built-in default model.
+uv run fcsim goldfish examples/zuko.txt --backend codex --turns 3 --max-calls 12
+
+# Codex players, Claude auditor.
+uv run fcsim pod examples/zuko.txt examples/talrand.txt --backend codex --audit-backend claude
+
+# Measure the Codex auditor against the same rules scenarios.
+uv run fcsim audit suite --backend codex --tier ordinary --max-calls 10
+```
+
+`--backend` defaults to `claude` and applies to every player in a pod.
+`--audit-backend` inherits it unless supplied. `--model` and `--audit-model` are
+independent: each defaults to its backend's model, not to the other role's choice.
+Claude's default remains `claude-opus-5`; Codex uses its built-in default, ignoring
+personal model settings. Pass explicit model IDs when comparing runs. Reasoning
+effort is optional via `--effort` and `--audit-effort`; supported values depend on
+the backend and model. Game configurations record the backend and requested model
+for each role (`codex-default` when no model was specified).
+
+Install and log in to the CLIs you select. Codex must support `exec` with
+`--ignore-user-config`, `--ignore-rules`, `--ephemeral` and structured output;
+tested with **0.155.1**. fcsim retains the CLI's authentication but skips personal
+configuration, project instructions, skills, plugins and unrelated tools. Codex's
+generic MCP discovery helpers may still appear; the server exposes no resources.
+Shell, file, web, app and delegation tools are disabled so agents cannot read
+game files or other seats' private state. Older incompatible CLIs fail with an
+upgrade message. Tool isolation should be rechecked when upgrading Codex.
+
+`--max-calls` bounds model attempts, including failures; each call also has a
+timeout (30 minutes for players, 10 for auditors). For Claude-only runs,
+`--max-cost` defaults to 10 USD for an audit suite, 15 for a goldfish, and 40 for
+a pod. Any run containing Codex defaults to no dollar limit and rejects an
+explicit finite `--max-cost`, because Codex cannot report or enforce it. Use
+`--max-cost none` to disable it explicitly. This is a call limit, not a token or
+spending cap within one call. Reports mark the overall dollar estimate as
+unavailable when any call is unpriced, preserving the known subtotal separately.
+Input token counts exclude cache reads/writes so mixed-backend totals remain
+comparable; reasoning tokens are a subset of output tokens, not an extra charge.
+
+New backends implement `Runner.ask(system, prompt, schema=..., tools=...)` in
+`fcsim.agents` and join the factory there. Drivers hand them a neutral
+`McpConnection`; adapter code owns CLI flags, tool configuration and output
+parsing. Python callers can already pass a different runner for each pod seat.
+No reusable client skill or outside-client seat workflow is implemented yet.
+
+The optional CLI compatibility test uses the installed Codex with a **local mock
+model endpoint**, calls the real MCP server, and verifies the offered tools,
+structured output and accounting. It makes no paid model requests:
+
+```sh
+FCSIM_TEST_CODEX=1 uv run pytest tests/test_codex_cli.py
+```
 
 ```sh
 uv run pytest

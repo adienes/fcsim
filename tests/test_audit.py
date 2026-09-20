@@ -110,7 +110,7 @@ def test_the_audit_command_lists_shows_and_runs(database, tmp_path, capsys, monk
     assert "WHAT WAS DONE" in shown and "table warning: This is land number 2 this turn." in shown and "EXPECTED" in shown
     assert main(["audit", "show", "nonsense"]) == 2
     capsys.readouterr()
-    monkeypatch.setattr("fcsim.cli.ClaudeCodeRunner", lambda **options: FakeRunner(
+    monkeypatch.setattr("fcsim.cli.make_runner", lambda **options: FakeRunner(
         [{"verdict": "findings", "findings": [finding("illegal", "A second land was played.")], "hooks": []}, OK],
         Budget(max_calls=options["budget"].max_calls)))
     out = tmp_path / "report.json"
