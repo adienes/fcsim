@@ -178,3 +178,23 @@ def test_a_wake_starts_with_a_briefing_and_responses_are_triaged_in_parallel(dat
     woken_to_pass = [w for w in report["wakes"] if w["kind"] == "priority" and w["seat"] != 0 and w["turn"] in talrands_turns]
     assert talrands_turns and woken_to_pass == []                          # on Talrand's turns nobody else was woken just to pass
     assert report["standings"][0]["commander_casts"] == {"Talrand, Sky Summoner": 1} and pod._TRIAGE["required"] == ["respond", "why"]
+
+
+def test_status_reads_a_game_directory_while_it_is_being_written(database, tmp_path):
+    from fcsim.cli import main
+    from fcsim.play.status import render, status
+    budget = Budget(max_calls=300)
+    wrong = {"kind": "illegal", "seat": 0, "summary": "Talrand paid no life", "basis": "test", "fix": "set life to 39", "confidence": "high"}
+    report = play_pod(decks(tmp_path), [ScriptedSeat(budget, cast_commander=True), ScriptedSeat(budget), ScriptedSeat(budget)],
+                      FakeRunner([{"verdict": "findings", "findings": [wrong], "hooks": []}] + [OK] * 80, budget), database,
+                      cycles=5, seed=4, out_root=tmp_path / "games", echo=lambda *_: None)
+    seen = status(report["directory"])
+    assert seen["seats"] == ["Talrand", "Pir", "Thrasios"] and seen["standings"][0]["life"] == 39 and seen["winner"] is None
+    time = seen["time"]
+    assert time["wakes"] == len(report["wakes"]) and time["audits"] == len(report["audits"]) and time["triage_questions"] == 2
+    assert time["calls_by_tool"]["play_land"] == 15 and time["wakes_the_driver_finished"] == 0
+    assert seen["findings"] == [{"turn": 1, "kind": "illegal", "seat": 0, "summary": "Talrand paid no life"}]
+    assert sum(row["wakes"] for row in seen["by_turn"].values()) == time["wakes"]
+    text = render(seen)
+    assert "BY TABLE TURN" in text and "respond-or-pass questions (0 said respond)" in text and "Talrand" in text
+    assert main(["status", report["directory"]]) == 0 and main(["status", str(tmp_path)]) == 2

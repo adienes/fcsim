@@ -12,6 +12,8 @@ from .audit import render as render_report
 from .cards import CardDatabase, CardsError
 from .cards.edhrec import average_deck
 from .play import goldfish, play_pod
+from .play.status import render as render_status
+from .play.status import status
 from .rules import RulesError, RulesReference
 from .workshop.check import check_deck, render
 
@@ -120,6 +122,10 @@ def main(argv: list[str] | None = None) -> int:
     fish.add_argument("--max-calls", type=int, default=30, help="Hard limit on model calls for this run")
     fish.add_argument("--out", default="games", help="Directory to create the game directory in")
 
+    where = commands.add_parser("status", help="Where a game stands and where its time went; works while it is being played")
+    where.add_argument("game_dir")
+    where.add_argument("--json", action="store_true")
+
     pod = commands.add_parser("pod", help="A multiplayer game: one agent per deck, audited")
     pod.add_argument("decks", nargs="*", help="Two to four decklists, in turn order after a random start")
     pod.add_argument("--resume", metavar="GAME_DIR", help="Play --cycles more rounds of an existing game instead of starting one")
@@ -134,9 +140,9 @@ def main(argv: list[str] | None = None) -> int:
     pod.add_argument("--out", default="games")
 
     args = parser.parse_args(argv)
-    if args.command in ("cards", "deck", "audit", "goldfish", "pod"):
+    if args.command in ("cards", "deck", "audit", "goldfish", "pod", "status"):
         try:
-            return {"cards": _cards, "deck": _deck, "audit": _audit, "goldfish": _goldfish, "pod": _pod}[args.command](args)
+            return {"cards": _cards, "deck": _deck, "audit": _audit, "goldfish": _goldfish, "pod": _pod, "status": _status}[args.command](args)
         except (CardsError, RunnerError, ValueError, OSError) as exc:
             print(json.dumps({"error": {"code": "cards_error", "message": str(exc)}}), file=sys.stderr)
             return 2
@@ -261,3 +267,9 @@ def _pod(args: argparse.Namespace) -> int:
         print("\n" + text.read())
     print(f"Everything is in {report['directory']}")
     return 0 if not report["stopped"] else 1
+
+
+def _status(args: argparse.Namespace) -> int:
+    report = status(args.game_dir)
+    print(json.dumps(report, indent=2, ensure_ascii=False) if args.json else render_status(report))
+    return 0
