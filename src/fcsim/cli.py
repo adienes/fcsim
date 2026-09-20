@@ -6,7 +6,8 @@ import sys
 from datetime import date
 
 from .agents import Budget, ClaudeCodeRunner, RunnerError
-from .audit import Auditor, build, load_scenarios, materials, play, render, run_suite
+from .audit import Auditor, build, load_scenarios, materials, play, run_suite
+from .audit import render as render_report
 from .cards import CardDatabase, CardsError
 from .rules import RulesError, RulesReference
 from .workshop.check import check_deck, render
@@ -144,10 +145,10 @@ def _audit(args: argparse.Namespace) -> int:
     runner = ClaudeCodeRunner(model=args.model, effort=args.effort,
                               budget=Budget(max_calls=args.max_calls, max_cost_usd=args.max_cost))
     report = run_suite(Auditor(runner, database), chosen,
-                       progress=None if args.json else lambda r: print(render({"results": [r], "summary": None}), flush=True))
+                       progress=None if args.json else lambda r: print(render_report({"results": [r], "summary": None}), flush=True))
     if args.out:
         with open(args.out, "w", encoding="utf-8") as out:
             json.dump(report, out, indent=2, ensure_ascii=False)
-    print(json.dumps(report, indent=2, ensure_ascii=False) if args.json else render({"results": [], "summary": report["summary"]}))
+    print(json.dumps(report, indent=2, ensure_ascii=False) if args.json else render_report({"results": [], "summary": report["summary"]}))
     done = [r for r in report["results"] if "passed" in r]
     return 0 if done and all(r["passed"] for r in done) else 1

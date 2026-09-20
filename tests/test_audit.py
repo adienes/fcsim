@@ -8,6 +8,7 @@ import pytest
 from fcsim.agents import Budget, BudgetExceeded, FakeRunner
 from fcsim.audit import VERDICT_SCHEMA, Auditor, build, load_scenarios, materials, play, run_suite, score
 from fcsim.cards import CardDatabase
+from fcsim.cli import main
 
 SCENARIOS = load_scenarios()
 OK = {"verdict": "ok", "findings": [], "hooks": []}
@@ -87,3 +88,23 @@ def test_a_suite_run_reports_rates_and_stops_at_the_budget(database):
     assert "skipped" in stopped["results"][-1] and stopped["summary"]["scenarios"] == 2
     with pytest.raises(BudgetExceeded):
         Budget(max_cost_usd=1.0, cost_usd=1.0).check()
+
+
+def test_the_audit_command_lists_shows_and_runs(database, tmp_path, capsys, monkeypatch):
+    (tmp_path / "scryfall").mkdir()
+    (tmp_path / "scryfall" / "cards.sqlite").write_bytes(database.path.read_bytes())
+    monkeypatch.setenv("FCSIM_DATA", str(tmp_path))
+    assert main(["audit", "list"]) == 0 and "fizzle-still-gains-life" in capsys.readouterr().out
+    assert main(["audit", "show", "second-land"]) == 0
+    shown = capsys.readouterr().out
+    assert "WHAT WAS DONE" in shown and "table warning: This is land number 2 this turn." in shown and "EXPECTED" in shown
+    assert main(["audit", "show", "nonsense"]) == 2
+    capsys.readouterr()
+    monkeypatch.setattr("fcsim.cli.ClaudeCodeRunner", lambda **options: FakeRunner(
+        [{"verdict": "findings", "findings": [finding("illegal", "A second land was played.")], "hooks": []}, OK],
+        Budget(max_calls=options["budget"].max_calls)))
+    out = tmp_path / "report.json"
+    assert main(["audit", "suite", "--only", "second-land", "second-land-with-exploration", "--out", str(out)]) == 0
+    printed = capsys.readouterr().out
+    assert "pass  ordinary second-land " in printed and "2 of 2 scenarios passed" in printed
+    assert json.loads(out.read_text())["summary"]["catch_rate"] == 1.0

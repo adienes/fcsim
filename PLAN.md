@@ -1,8 +1,9 @@
 # fcsim — playtest and tune Commander decks with LLM agents
 
 Status: design, 2026-09-20, revised once after an outside review. Built so far:
-the rules reference (`fcsim rules`), M0 (`fcsim cards`, `fcsim deck check`) and M1
-(the table, `fcsim.table`); see README.md.
+the rules reference (`fcsim rules`), M0 (`fcsim cards`, `fcsim deck check`), M1
+(the table, `fcsim.table`) and most of M2 (the auditor and its scenario suite,
+`fcsim audit`); see README.md.
 
 ## 1. Goal
 
@@ -378,34 +379,25 @@ something to measure in milestone 4, and optional per-seat personas
 
 ### 7.4 Runtime
 
-A small `Runner` interface — `run(wake) -> usage` — with these implementations:
+A small runner interface, with these implementations:
 
-- `ScriptedRunner` replays tool calls from a file, for tests with no LLM.
-- `ApiRunner` runs a plain Messages API tool loop over the seat's tools.
-- `SdkRunner` drives a Claude Agent SDK session per seat.
+- `FakeRunner` and `ScriptedRunner` answer from a script, for tests with no model.
+- `ClaudeCodeRunner` runs each call through the Claude Code command line in
+  headless mode (`claude --print`), on whatever account the local `claude` is
+  logged in with. **This is the one in use: you are on a subscription, not the
+  API.** A call is a fresh session with `--tools ""`, `--strict-mcp-config`, no
+  user or project settings and its own system prompt, so the model sees only
+  what it is handed; `--json-schema` gives structured answers. Measured: about
+  three seconds of overhead and under a thousand tokens of fixed context.
+- `ApiRunner`, a plain Messages API tool loop, stays possible behind the same
+  interface if you ever want per-token billing and finer control of caching.
 - `ExternalRunner` parks the wake until an outside MCP client collects it, for
   a human seat or a Claude Code session sitting in.
 
-I recommend building `ApiRunner` first. I checked the Agent SDK docs, and it
-can do what this needs: a separate in-process tool server per client
-(`create_sdk_mcp_server`), so tools are closures bound to one seat; `tools=[]`
-removes every built-in tool from the model's context; `setting_sources=[]`
-keeps out your CLAUDE.md, settings and other MCP servers; the system prompt and
-model are set per client. But the same docs direct SDK-built agents to API-key
-authentication, so it is billed per token exactly like the plain API. With
-cost equal, the plain loop wins: the agent can only ever see the tools it is
-handed, cache breakpoints and context are under direct control, model and
-effort can vary per wake, a triage call is one request, and there is no CLI
-subprocess per session.
-
-That changes where MCP sits, not whether it is there. MCP is the outside
-interface: the host tools that let you say "playtest this against Atraxa and
-two random pods" from Claude Code, and the door through which an external
-client takes a seat. The agents the driver spawns itself are better driven
-directly. Both use the same tool registry, so nothing is built twice. If the
-real reason for MCP is to have seats be Claude Code sessions on your
-subscription rather than API calls, that is `ExternalRunner` plus the HTTP
-server, and it moves to milestone 3 — see open question 1.
+Agents that need tools (players; the auditor when it wants to search the
+Comprehensive Rules) get them as an MCP server passed with `--mcp-config`, with
+every built-in tool still off. So MCP is how seats get their tools after all,
+as well as the outside interface for starting and watching games.
 
 Models are set per role. Default `claude-opus-5` throughout; §13 shows what
 cheaper choices would save.
@@ -837,7 +829,9 @@ against the gauntlet.
 
 ## 13. Cost and time
 
-Rough, and to be replaced with measurements from milestones 2 and 3. The figures
+Rough, and to be replaced with measurements from milestones 2 and 3. On a
+subscription these are estimates at list prices of the plan usage consumed, not
+charges. The figures
 assume a game of about 35 turns. At the 4–10 cycle lengths the rubric aims for,
 expect about two-thirds of them.
 
@@ -943,7 +937,7 @@ and error text.
 | M0 | Scryfall cache, decklist parser, validator, static analysis with bracket signals, shuffle simulation: `fcsim deck check` | Your lists load cleanly, and you already get a free report on mana, curve and power signals |
 | M1 | Table: state, handles and visibility, mutations, RNG, event log and replay, turn skeleton and priority checkpoint, resolutions, call contract, lints; `ScriptedRunner`; the non-interference test | Hidden information holds and the protocol is sound; no model needed yet |
 | M2 | Auditor with hooks and ledger, run against a **small rules suite of ordinary interactions**; hard spending limits | The riskiest assumption, tested first and cheaply: catch rate, false alarms, hook accuracy, cost and time per audit |
-| M3 | Tool registry, `ApiRunner`, game directory, report. **An audited ten-turn solo goldfish of one supplied deck**, with measured cost. A minimal MCP host interface: `start`, `status`, `report` | Tool ergonomics, prompts, real cost per wake and per audit. The first useful artifact, usable from Claude Code |
+| M3 | Tool registry as an MCP server, `ClaudeCodeRunner` seats, game directory, report. **An audited ten-turn solo goldfish of one supplied deck**, with measured cost. A minimal MCP host interface: `start`, `status`, `report` | Tool ergonomics, prompts, real cost per wake and per audit. The first useful artifact, usable from Claude Code |
 | M4 | Scheduler, all wake kinds, default watches, combat, choices, corrections, disputes and judge, elimination, table talk. **One fixed pod of supplied lists**, audited; one run with `audit: off` for comparison | The core loop; whether agents play to win; how much the auditor is catching |
 | M5 | Metrics, table-quality rubric, rules health, post-mortems, `fcsim summarize` narrative, `--games N --parallel K`, aggregate report | Games you can read, compare, and know how far to trust |
 | M6 | EDHREC seeds, random commanders, LLM deckbuilder fallback, deck directories, reference set | Pods from partial input |
@@ -955,13 +949,10 @@ and error text.
 
 Each has a default I will proceed with unless you say otherwise.
 
-1. **How agents are billed.** Are the per-token numbers in §13 acceptable? If
-   so: `ApiRunner` first, with MCP as the outside interface: a minimal one in
-   M3, the full server in M9 (§7.4). If you would rather seats were Claude
-   Code sessions on your subscription, the HTTP MCP server and
-   `ExternalRunner` move to M3 and the game runs at the pace those sessions
-   allow. I have not checked what your plan permits for unattended use like
-   this. Default: API.
+1. **How agents are billed.** Settled: your Claude subscription, through
+   headless Claude Code (§7.4). The dollar figures in §13 are then estimates at
+   list prices of how much plan usage a run consumes, not a bill, and every run
+   has a hard limit on calls and on that estimate.
 2. **Models.** Default `claude-opus-5` for every role. A cheaper model for
    opponents or for triage is your call, given §13.
 3. **Budget and volume.** How many games per tuning round, and what is a game
