@@ -95,7 +95,7 @@ def _names(decks: list) -> list[str]:
 def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner: Runner, database: CardDatabase, *, cycles: int = 3,
              seed: int | None = None, out_root: str | Path = "games", rules: RulesReference | None = None,
              resume: str | Path | None = None, audit_every: str = "turn", triage_runners: list[Runner] | None = None,
-             echo=lambda line: print(line, flush=True)) -> dict:
+             refresh_before_blocks: bool = True, echo=lambda line: print(line, flush=True)) -> dict:
     """Play up to `cycles` turns per seat. `runners[i]` pilots seat i; share one Budget across all
     runners and the auditor to cap the whole game.
 
@@ -104,7 +104,9 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
     `audit_every` is "turn" (one audit of each whole turn, before the next begins) or "checkpoint"
     (an audit every time the pen moves after an action: stricter and several times slower).
     `triage_runners[i]` answers seat i's respond-or-pass questions, if given: a cheaper or
-    lower-effort runner than the one that plays the seat."""
+    lower-effort runner than the one that plays the seat. With `refresh_before_blocks` the auditor
+    works out current power and toughness before blockers are chosen, if the battlefield has
+    changed since it last did."""
     earlier = GameDirectory.open(resume) if resume else None
     if earlier:
         deck_paths = [earlier.path / "decks" / f"seat-{index}.txt" for index in range(len(earlier.read("config.json")["seats"]))]
@@ -118,7 +120,7 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
                                            card_lookup=_lookup(database)),
                      earlier.read("config.json")["seats"], decks, runners, auditor_runner, database, cycles, rules, echo,
                      earlier=earlier.read("report.json") if (earlier.path / "report.json").is_file() else {"wakes": []},
-                     audit_every=audit_every, triage_runners=triage_runners)
+                     audit_every=audit_every, triage_runners=triage_runners, refresh_before_blocks=refresh_before_blocks)
     seed = seed if seed is not None else secrets.randbelow(2 ** 31)
     directory = GameDirectory(out_root, "pod_" + "-".join(names), seed)
     table = Table([{"name": name, "commanders": [c.name for c in deck.commanders], "library": [c.name for c in deck.library()]}
@@ -135,12 +137,12 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
                                     "auditor_backend": getattr(auditor_runner, "backend", "custom"),
                                     "deck_issues": [[i.to_dict() for i in validate_deck(d, database)] for d in decks]})
     return _play(directory, table, names, decks, runners, auditor_runner, database, cycles, rules, echo,
-                 audit_every=audit_every, triage_runners=triage_runners)
+                 audit_every=audit_every, triage_runners=triage_runners, refresh_before_blocks=refresh_before_blocks)
 
 
 def _play(directory: GameDirectory, table: Table, names: list[str], decks: list, runners: list, auditor_runner, database: CardDatabase,
           cycles: int, rules: RulesReference | None, echo, *, earlier: dict | None = None, audit_every: str = "turn",
-          triage_runners: list | None = None) -> dict:
+          triage_runners: list | None = None, refresh_before_blocks: bool = True) -> dict:
     """Schedule seats and audits until the game ends or `cycles` more rounds have been played."""
     count, seed = len(names), table.config["seed"]
     table.on_event = directory.journal  # a replayed table was built without its journal
@@ -158,8 +160,9 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
     seen = [len(table.events) if earlier is not None else 0] * count
     decisions: dict = {}  # who said they will respond to the stack as it currently stands
     waived: list[set] = [set() for _ in range(count)]  # per seat, the stack items it has said it will let resolve
+    stamped: list = [None]  # what the battlefield looked like when power and toughness were last worked out
     report: dict = {"directory": str(directory.path), "seed": seed, "seats": names, "stopped": None,
-                    "triage": list((earlier or {}).get("triage", [])),
+                    "triage": list((earlier or {}).get("triage", [])), "refreshes": list((earlier or {}).get("refreshes", [])),
                     "wakes": list((earlier or {}).get("wakes", [])), "audits": list((earlier or {}).get("audits", [])),
                     "earlier_usage": [*(earlier or {}).get("earlier_usage", []), *([earlier["usage"]] if (earlier or {}).get("usage") else [])]}
 
@@ -323,6 +326,7 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
             except ValueError as error:
                 record["hooks_error"] = str(error)
         table.apply_computed(verdict.get("computed") or [])
+        stamped[0] = _characteristics_print(table)
         actors = [e["seat"] for e in unit if e["seat"] is not None]
         at_fault: dict[int, list[str]] = {}
         for finding in verdict.get("findings", []):
@@ -341,6 +345,17 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
                  "explain why with `say` and call finish_step without changing anything.\n" + "\n".join(f"- {p}" for p in problems))
             if table.game.control.kind == "correction":
                 table.act(seat, "finish_step")
+
+    def refresh() -> None:
+        """Work the creatures' power and toughness out again. Audits are a turn apart, and blocks are
+        chosen on these numbers: in the first real game a 4/4 was blocked and dealt damage as a 3/3."""
+        echo("         working out power and toughness before blocks ...")
+        computed, reply = auditor.characteristics(table)
+        table.apply_computed(computed)
+        stamped[0] = _characteristics_print(table)
+        record = {"turn": table.game.turn.number, "kind": "characteristics", "computed": computed, "seconds": round(reply.seconds, 1)}
+        report["refreshes"].append(record)
+        directory.append("audits.jsonl", record)
 
     def settle(me: int | None = None) -> str:
         """Do everything that needs no full wake: release mid-turn checkpoints, pass for seats with
@@ -381,6 +396,11 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
                 continue
             if kind in ("priority", "declare_blockers") and _cannot_act(table, seat, kind):
                 table.act(seat, _DEFAULTS[kind])  # an empty hand and nothing untapped; or nothing that could block
+                continue
+            if kind == "declare_blockers" and refresh_before_blocks and stamped[0] != _characteristics_print(table):
+                if me is not None:
+                    return "wake"  # the attacker's wake is over either way: somebody has to choose blocks
+                refresh()
                 continue
             if kind == "priority" and game.stack:
                 # A chance to respond. Ask everyone still to act at once, except those who have
@@ -451,6 +471,16 @@ def _must_lose(table: Table) -> list[tuple[int, str]]:
         if reason:
             lost.append((seat.index, reason))
     return lost
+
+
+def _characteristics_print(table: Table) -> tuple:
+    """Everything on the battlefield that can bear on a creature's power and toughness, as far as a
+    card-blind table can tell: which permanents are there and under whom, their counters, notes and
+    attachments, and the continuous effects on the ledger. Tapping and damage do not."""
+    game = table.game
+    return (tuple((o.id, o.controller, tuple(sorted(o.counters.items())), tuple(str(a) for a in o.annotations), o.attached_to,
+                   o.face_down, o.transformed, o.phased_out) for o in (game.objects[i] for i in game.battlefield)),
+            tuple(sorted(str(e.get("text")) for e in game.ledger if e.get("kind") == "static")))
 
 
 def _wants_asking(table: Table, seat: int) -> bool:

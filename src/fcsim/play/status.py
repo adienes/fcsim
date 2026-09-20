@@ -25,7 +25,9 @@ def status(game_dir: str | Path) -> dict:
     rows = [row for index in range(len(names)) for row in _lines(directory.path / f"transcript-seat-{index}.jsonl")]
     wakes = [r for r in rows if r.get("kind") != "triage" and "seconds" in r]
     triage = [r for r in rows if r.get("kind") == "triage"]
-    audits = _lines(directory.path / "audits.jsonl")
+    checks = _lines(directory.path / "audits.jsonl")
+    audits = [a for a in checks if a.get("kind") != "characteristics"]
+    refreshes = [a for a in checks if a.get("kind") == "characteristics"]  # power and toughness, before blocks
     last = events[-1]
     by_turn: dict[int, dict] = {}
     for wake in wakes:
@@ -33,7 +35,7 @@ def status(game_dir: str | Path) -> dict:
         turn["wakes"] += 1
         turn["seconds"] += wake["seconds"]
         turn["tool_calls"] += wake["tool_calls"]
-    for audit in audits:
+    for audit in checks:
         by_turn.setdefault(audit["turn"], {"wakes": 0, "seconds": 0.0, "tool_calls": 0})["audit_seconds"] = \
             by_turn[audit["turn"]].get("audit_seconds", 0) + (audit.get("seconds") or 0)
     idle = [w for w in wakes if not any(c["tool"] not in ("get_view", "get_notes", "get_log", "lookup_card", "lookup_rule",
@@ -56,6 +58,7 @@ def status(game_dir: str | Path) -> dict:
             "wakes_the_driver_finished": sum(1 for w in wakes if w.get("forced") or w.get("forced_to_end")),
             "triage_questions": len(triage), "triage_said_respond": sum(1 for t in triage if t["respond"]),
             "audits": len(audits), "audit_seconds": round(sum(a.get("seconds") or 0 for a in audits)),
+            "refreshes": len(refreshes), "refresh_seconds": round(sum(a.get("seconds") or 0 for a in refreshes)),
             "slowest_wakes": [{"seat": names[w["seat"]] if "seat" in w else names[0], "turn": w.get("table_turn", w["turn"]),
                                "kind": w["kind"], "seconds": w["seconds"], "tool_calls": w["tool_calls"]}
                               for w in sorted(wakes, key=lambda w: -w["seconds"])[:5]],
@@ -74,6 +77,7 @@ def render(report: dict) -> str:
               + (f"  commander cast x{sum(s['commander_casts'].values())}" if s["commander_casts"] else "") for s in report["standings"]]
     lines += ["", f"TIME  {time['wakes']} wakes, {time['wake_seconds']}s of model time ({time['seconds_per_wake']}s each), "
                   f"{time['tool_calls']} tool calls; {time['audits']} audits, {time['audit_seconds']}s; "
+                  + (f"{time['refreshes']} power/toughness checks before blocks, {time['refresh_seconds']}s; " if time["refreshes"] else "") +
                   f"{time['triage_questions']} respond-or-pass questions ({time['triage_said_respond']} said respond)",
               f"  {time['wakes_that_only_looked_and_passed']} wakes only looked and passed ({time['their_seconds']}s); "
               f"{time['wakes_the_driver_finished']} the driver had to finish; rejected calls {time['rejected_calls'] or 'none'}",

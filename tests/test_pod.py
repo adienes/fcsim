@@ -39,8 +39,9 @@ class ScriptedSeat:
 
     model = "scripted"
 
-    def __init__(self, budget: Budget, *, cast_commander: bool = False, with_trigger: bool = False, triage: dict | None = None):
-        self.budget, self.prompts, self.cast_commander = budget, [], cast_commander
+    def __init__(self, budget: Budget, *, cast_commander: bool = False, with_trigger: bool = False, triage: dict | None = None,
+                 attack: int | None = None):
+        self.budget, self.prompts, self.cast_commander, self.attack = budget, [], cast_commander, attack
         self.with_trigger, self.triage = with_trigger, triage or {}   # a made-up trigger on top of the commander; triage answers
 
     def ask(self, system: str, prompt: str, *, tools: McpConnection | None = None, schema: dict | None = None, **_) -> Reply:
@@ -88,6 +89,15 @@ class ScriptedSeat:
                 result = tool("add_trigger", text="Whenever you cast your commander, scry 1.")
             elif waiting_for == "priority" and view["turn"]["active"] == me and view["stack"]:
                 result = tool("pass_priority")   # my own spell is on the stack: let it resolve
+            elif waiting_for == "declare_attackers" and self.attack is not None:
+                result = tool("declare_attackers", attacks=[{"attacker": c["handle"], "target": {"seat": self.attack}} for c in view["battlefield"]
+                                                            if c["controller"] == me and c.get("is_commander") and not c.get("entered_this_turn")])
+            elif waiting_for == "combat_damage" and self.attack is not None:
+                result = tool("combat_damage", assignments=[{"source": a["attacker"], "target": {"seat": self.attack}, "amount": 2}
+                                                            for a in view["turn"]["attackers"]])
+            elif self.attack is not None and waiting_for == "priority" and view["turn"]["active"] == me and not view["stack"] \
+                    and view["turn"]["step"] in ("main1", "begin_combat"):
+                result = tool("pass_priority", until="begin_combat") if view["turn"]["step"] == "main1" else tool("pass_priority")
             elif waiting_for == "priority" and view["turn"]["active"] == me and not view["stack"]:
                 step = view["turn"]["step"]
                 result = tool("pass_priority", until="main1") if step in ("upkeep", "draw") else \
@@ -344,3 +354,27 @@ def test_a_triage_answer_can_set_a_standing_policy(database, tmp_path):
                       out_root=tmp_path / "games", echo=lambda *_: None)
     assert report["stopped"] is None
     assert [t["seat"] for t in report["triage"]].count(1) == 1 and [t["seat"] for t in report["triage"]].count(2) == 2
+
+
+def test_power_and_toughness_are_worked_out_again_before_blocks(database, tmp_path):
+    import re
+
+    class Auditing(FakeRunner):
+        def ask(self, system, prompt, *, schema=None, **_):
+            if schema and schema["required"] == ["computed"]:
+                handle = re.search(r"Talrand, Sky Summoner \[(c\d+)\]", prompt)[1]
+                self.answers.insert(0, {"computed": [{"handle": handle, "power": "4", "toughness": "4", "because": "a test anthem"}]})
+            return super().ask(system, prompt, schema=schema)
+
+    budget = Budget(max_calls=500)
+    seats = [ScriptedSeat(budget, cast_commander=True, attack=1), ScriptedSeat(budget, cast_commander=True), ScriptedSeat(budget)]
+    auditor = Auditing([OK] * 150, budget)
+    report = play_pod(decks(tmp_path), seats, auditor, database, cycles=6, seed=4, out_root=tmp_path / "games", echo=lambda *_: None)
+    assert report["stopped"] is None and report["standings"][1]["commander_damage"]
+    # Talrand attacks Pir, who has a creature to block with, on two turns. The battlefield changed before the
+    # first (nobody had worked anything out yet) and before the second (a land), so both are worked out afresh.
+    assert [r["computed"][0]["power"] for r in report["refreshes"]] == ["4", "4"]
+    asked = [a for a in auditor.asked if a["schema"]["required"] == ["computed"]]
+    assert "THIS TURN SO FAR" in asked[0]["prompt"] and "Talrand attacks" not in asked[0]["system"]
+    blocking = next(p for p in seats[1].prompts if "declare blockers" in p)
+    assert "NOW 4/4 (a test anthem" in blocking                                # the blocker reads the fresh numbers

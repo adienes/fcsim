@@ -91,6 +91,30 @@ The table stamps these on the permanents, so that players do not each have to wo
 
 Answer in the required JSON form. Seats are numbered from 0 in the order listed."""
 
+CHARACTERISTICS_SYSTEM = """\
+You work out the current power and toughness of the creatures in a game of Magic: The Gathering \
+(Commander), for players who are about to declare blockers. You never play and you never comment \
+on strategy or on whether earlier play was legal.
+
+How this table works. The table is a virtual tabletop that knows no card text, so it shows what \
+is printed on each card and nothing that other cards do to it. Conventions to read it by:
+- Effects that live on no card are written as notes on a permanent, such as "gets +3/+3 until \
+end of turn". Treat a note as true.
+- The battlefield is listed in order of arrival, oldest first. That order is the timestamp order.
+- CONTINUOUS EFFECTS lists the static abilities found at the last audit. Permanents that arrived \
+since then may have others: read the card texts you are given.
+- THIS TURN SO FAR is what has been done this turn. An effect that lasts until end of turn and \
+appears there still applies even if nobody wrote it as a note.
+
+List every creature on the battlefield whose current power or toughness differs from what is \
+printed on it (for a token, from what it was created with), and every creature whose printed \
+value is not a number. Apply continuous effects in layer order (rule 613.4: characteristic-defining \
+abilities, effects that set values, then modifications and counters, then switching), and use \
+timestamps within a layer. Give the values and, briefly, the reason. A creature you do not list is \
+taken at its printed values, and your list replaces the last one entirely.
+
+Answer in the required JSON form."""
+
 VERDICT_SCHEMA = {
     "type": "object", "additionalProperties": False, "required": ["verdict", "findings", "hooks"],
     "properties": {
@@ -130,6 +154,10 @@ VERDICT_SCHEMA = {
                            "because": {"type": "string", "description": "What changes it, briefly."}}}},
     },
 }
+
+
+COMPUTED_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["computed"],
+                   "properties": {"computed": VERDICT_SCHEMA["properties"]["computed"]}}
 
 
 def _object_line(obj: dict, names: dict[str, str], combat: dict[str, str], database: CardDatabase | None = None) -> str:
@@ -291,3 +319,15 @@ class Auditor:
         serious = [f for f in verdict.get("findings", []) if f.get("kind") in SERIOUS]
         verdict["verdict"] = "findings" if serious else "ok"  # the findings decide, whatever the label says
         return verdict, reply
+
+    def characteristics(self, table: Table) -> tuple[list[dict], Reply]:
+        """Current power and toughness only, for the moment before blocks: audits are a turn apart,
+        and what was cast this turn has changed the numbers since the last one."""
+        view, turn = table.view(None), table.game.turn.number
+        done = [f"[{e['step']}] " + " ".join(e["public"]) for e in table.events
+                if e["turn"] == turn and e["public"] and e["tool"] not in ("pass_priority", "say")]
+        reply = self.runner.ask(CHARACTERISTICS_SYSTEM, "\n\n".join([
+            "THE TABLE NOW\n" + describe(view, self.database), "THIS TURN SO FAR\n" + ("\n".join(done) or "(nothing)"),
+            "CARDS\n" + card_reference([o.get("name") for o in view["battlefield"] if o.get("name")], self.database, rulings_per_card=3),
+            "Work out the creatures' current power and toughness."]), schema=COMPUTED_SCHEMA)
+        return list((reply.data or {}).get("computed") or []), reply
