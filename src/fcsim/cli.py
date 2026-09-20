@@ -9,6 +9,7 @@ from .agents import Budget, ClaudeCodeRunner, RunnerError
 from .audit import Auditor, build, load_scenarios, materials, play, run_suite
 from .audit import render as render_report
 from .cards import CardDatabase, CardsError
+from .cards.edhrec import average_deck
 from .play import goldfish, play_pod
 from .rules import RulesError, RulesReference
 from .workshop.check import check_deck, render
@@ -57,6 +58,9 @@ def main(argv: list[str] | None = None) -> int:
     check.add_argument("--seed", type=int)
     check.add_argument("--json", action="store_true", help="Print the full result as JSON")
     check.add_argument("--verbose", action="store_true", help="List the cards in each role and the policy")
+    average = deck_actions.add_parser("average", help="Write EDHREC's average deck for a commander: a placeholder opponent")
+    average.add_argument("commander")
+    average.add_argument("--out", help="File to write (default: print)")
 
     audit = commands.add_parser("audit", help="Measure the rules auditor against written scenarios")
     audit_actions = audit.add_subparsers(dest="action", required=True)
@@ -139,6 +143,15 @@ def _cards(args: argparse.Namespace) -> int:
 
 
 def _deck(args: argparse.Namespace) -> int:
+    if args.action == "average":
+        text = average_deck(args.commander)
+        if args.out:
+            with open(args.out, "w", encoding="utf-8") as out:
+                out.write(text)
+            print(f"Wrote {args.out}: {sum(int(line.split()[0]) for line in text.splitlines() if line)} cards")
+        else:
+            print(text, end="")
+        return 0
     result = check_deck(args.path, CardDatabase(), commanders=tuple(args.commander), trials=args.trials,
                         turns=args.turns, seed=args.seed, online=True)
     print(json.dumps(result, indent=2, ensure_ascii=False) if args.json else render(result, verbose=args.verbose))

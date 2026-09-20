@@ -206,3 +206,14 @@ def test_mana_spent_on_ramp_is_not_spent_again_on_the_commander(database):
     assert shuffle._payable(4, (), [island, island, ring], spent=0)
     assert not shuffle._payable(4, (), [island, island, ring], spent=1)     # 4 mana in play, 1 already used on the ring
     assert shuffle.simulate(deck, trials=50, turns=4, seed=2)["commanders"][0]["mana_value"] == 4
+
+
+def test_an_edhrec_average_deck_page_becomes_an_mtgo_list(database, tmp_path):
+    from fcsim.cards import edhrec
+    page = {"deck": {"commander": ["Talrand, Sky Summoner"], "cards": {"Artifact": [["Sol Ring", 1]], "Basic": [["Island", 98]]}}}
+    (tmp_path / "talrand-sky-summoner.json").write_text(json.dumps(page))
+    text = edhrec.average_deck("Talrand, Sky Summoner", cache_dir=tmp_path)       # from the cache: no network
+    assert text == "98 Island\n1 Sol Ring\n\n1 Talrand, Sky Summoner\n" and codes(text, database) == []
+    assert edhrec.slug("Lim-Dûl's Vault") == "lim-duls-vault"
+    with pytest.raises(CardsError, match="no deck"):
+        edhrec.deck_text({"deck": {}})
