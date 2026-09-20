@@ -49,6 +49,7 @@ def begin_turn(game: Game, seat: int) -> None:
     turn.number += 1
     game.seats[seat].turns_taken += 1
     game.seats[seat].response_policy = "ask"  # a standing "pass for me" lasts until one's own next turn
+    game.seats[seat].holds_for_end_step = False
     turn.active, turn.remaining, turn.passed = seat, list(STEPS), []
     turn.land_plays, turn.attackers, turn.blockers = 0, [], []
     advance(game)

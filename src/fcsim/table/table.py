@@ -533,7 +533,12 @@ class Table:
         if policy not in ("ask", "pass_unless_targeted", "pass_always"):
             raise TableError("bad_policy", "The policy is \"ask\", \"pass_unless_targeted\" or \"pass_always\".")
         game.seats[seat].response_policy = policy
-        return ops.Told(private={seat: [f"Until your next turn, when others put something on the stack: {policy.replace('_', ' ')}."]})
+        told = [f"Until your next turn, when others put something on the stack: {policy.replace('_', ' ')}."]
+        if "hold_for_end_step" in args:
+            game.seats[seat].holds_for_end_step = bool(args["hold_for_end_step"])
+            told.append("You will be given priority in the end step of the turn before yours." if args["hold_for_end_step"]
+                        else "You will not be stopped for in the end step before your turn.")
+        return ops.Told(private={seat: told})
 
     def _do_write_notes(self, game: Game, seat: int, args: dict):
         self.notes[seat] = str(args.get("text", ""))

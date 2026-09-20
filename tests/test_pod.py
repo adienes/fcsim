@@ -41,9 +41,10 @@ class ScriptedSeat:
     model = "scripted"
 
     def __init__(self, budget: Budget, *, cast_commander: bool = False, with_trigger: bool = False, triage: dict | None = None,
-                 attack: int | None = None, contests: bool = False, disputes: str = "", mulligans: int = 0, bottoms: bool = True):
+                 attack: int | None = None, contests: bool = False, disputes: str = "", mulligans: int = 0, bottoms: bool = True,
+                 acts: bool = False, holds: bool = False):
         self.budget, self.prompts, self.cast_commander, self.attack, self.contests = budget, [], cast_commander, attack, contests
-        self.disputes, self.mulligans, self.bottoms = disputes, mulligans, bottoms
+        self.disputes, self.mulligans, self.bottoms, self.acts, self.holds = disputes, mulligans, bottoms, acts, holds
         self.with_trigger, self.triage = with_trigger, triage or {}   # a made-up trigger on top of the commander; triage answers
 
     def ask(self, system: str, prompt: str, *, tools: McpConnection | None = None, schema: dict | None = None, **_) -> Reply:
@@ -54,6 +55,8 @@ class ScriptedSeat:
                 owed = int(re.search(r"you owe (\d+)", prompt)[1]) if self.bottoms else 0
                 data = {"keep": self.mulligans <= 0, "bottom": re.findall(r"^- \[(c\d+)\]", prompt.split("YOUR HAND")[1], re.M)[:owed], "why": "scripted"}
                 self.mulligans -= 1
+            elif "act" in (schema or {}).get("properties", {}):
+                data = {"act": self.acts, "why": "scripted"}
             else:
                 data = {"respond": False, "why": "scripted", **self.triage}
             reply = Reply(data=data, text="", cost_usd=0.01, seconds=0.5, model=self.model)
@@ -80,6 +83,8 @@ class ScriptedSeat:
             if self.disputes and waiting_for == "priority":
                 tool("dispute", claim=self.disputes)
                 self.disputes = ""
+            if self.holds and waiting_for == "priority" and view["turn"]["active"] == me and not view["seats"][me]["holds_for_end_step"]:
+                tool("set_response_policy", policy="ask", hold_for_end_step=True)
             if waiting_for == "setup":
                 result = tool("keep")
             elif waiting_for == "triggers":
@@ -542,3 +547,30 @@ def test_opening_hands_are_decided_together_and_a_game_always_starts(database, t
     assert [(w["seat"], w["kind"]) for w in forced] == [(2, "mulligan")] and "chose what went on the bottom" in forced[0]["forced"]
     opening = [w for w in report["wakes"] if w["kind"] == "mulligan" and not w["tool_calls"]]
     assert sorted(w["seat"] for w in opening) == [0, 0, 0, 1, 2, 2, 2]            # three rounds of questions; Pir was asked once
+
+
+def test_seats_are_asked_at_attacks_and_at_an_end_step_they_hold_for_though_the_stack_is_empty(database, tmp_path):
+    budget = Budget(max_calls=600)
+    seats = [ScriptedSeat(budget, cast_commander=True, attack=1), ScriptedSeat(budget, cast_commander=True, acts=True),
+             ScriptedSeat(budget, holds=True, acts=True)]
+    report = play_pod(decks(tmp_path), seats, FakeRunner([OK] * 150, budget), database, cycles=6, seed=4, out_root=tmp_path / "games",
+                      echo=lambda *_: None)
+    assert report["stopped"] is None
+    events = [json.loads(line) for line in (Path(report["directory"]) / "events.jsonl").read_text().splitlines()]
+    attack_turns = sorted({e["turn"] for e in events if e["tool"] == "declare_attackers" and e["args"]["attacks"]})
+    asked = [t for t in report["triage"] if t["about"] == "declare_attackers window"]
+    assert len(attack_turns) == 2 and sorted((t["turn"], t["seat"]) for t in asked) == [(turn, seat) for turn in attack_turns for seat in (1, 2)]
+    question = next(p for p in seats[1].prompts if "Attackers have been declared" in p)
+    assert "Talrand, Sky Summoner at Pir. Blockers have not been chosen yet." in question and "the stack is empty" in question
+    # Both said they would act, so each was woken with priority in Talrand's declare attackers step, once.
+    woken = [(w["seat"], w["turn"]) for w in report["wakes"] if w["kind"] == "priority" and w["turn"] in attack_turns and w["seat"] != 0]
+    assert sorted(woken) == [(seat, turn) for seat in (1, 2) for turn in attack_turns]
+    # Thrasios holds for the end step of the turn before its own, which is Pir's: asked there every round, and nowhere else.
+    held = [t for t in report["triage"] if t["about"] == "end window"]
+    assert {t["seat"] for t in held} == {2} and len(held) >= 4
+    assert all(events_turn_active(events, t["turn"]) == 1 for t in held)
+
+
+def events_turn_active(events: list[dict], turn: int) -> int:
+    """Whose turn a table turn was: the seat that played a land or passed first in it."""
+    return next(e["seat"] for e in events if e["turn"] == turn and e["seat"] is not None and e["step"] in ("upkeep", "main1"))

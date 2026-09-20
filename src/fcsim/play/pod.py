@@ -20,6 +20,7 @@ from ..cards import CardDatabase, read_decklist, resolve, validate_deck
 from ..mcp import McpServer
 from ..rules import RulesReference
 from ..table import Table
+from ..table.ops import _named as ops_named
 from ..tools import SeatTools
 from . import rubric
 from .gamedir import GameDirectory
@@ -60,7 +61,11 @@ for a card the briefing does not show. Update your notes with write_notes when y
 read of the table change. When you pass priority and nobody responds, the same wake carries on: \
 the result says `carry_on` and shows the table again. A wake ends when the table stops waiting \
 for you: the result then says `wake`. When you end your turn tapped out, or hold nothing you would \
-respond with, call set_response_policy so the table stops asking you until your next turn. Then stop calling \
+respond with, call set_response_policy so the table stops asking you until your next turn. On \
+other players' turns you are asked whether you respond when something goes on the stack, when \
+attackers are declared and when blocks are; at other moments the table passes for you, except that \
+set_response_policy with hold_for_end_step gives you priority in the end step before your turn, \
+for an instant or a flash card you are holding for it. Then stop calling \
 tools and reply with one or two sentences on what you did and why; only you will see them."""
 
 _TRIAGE = {"type": "object", "additionalProperties": False, "required": ["respond", "ask_again", "why"],
@@ -71,6 +76,8 @@ _OPENING = {"type": "object", "additionalProperties": False, "required": ["keep"
             "properties": {"keep": {"type": "boolean"}, "why": {"type": "string", "description": "One short sentence."},
                            "bottom": {"type": "array", "items": {"type": "string"},
                                       "description": "Handles of the cards to put on the bottom of your library, if you keep after more than one mulligan."}}}
+_WINDOW = {"type": "object", "additionalProperties": False, "required": ["act", "why"],
+           "properties": {"act": {"type": "boolean"}, "why": {"type": "string", "description": "One short sentence."}}}
 _DEFAULTS = {"priority": "pass_priority", "mulligan": "keep", "declare_attackers": "declare_attackers",
              "declare_blockers": "declare_blockers", "combat_damage": "combat_damage", "discard": "finish_step",
              "held_step": "finish_step", "resolution": "finish_resolution", "correction": "finish_step"}
@@ -172,6 +179,7 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
     seen = [len(table.events) if earlier is not None else 0] * count
     decisions: dict = {}  # who said they will respond to the stack as it currently stands
     waived: list[set] = [set() for _ in range(count)]  # per seat, the stack items it has said it will let resolve
+    windows: dict = {}  # (table turn, step) -> the seats that said they would act in that empty-stack window
     stamped: list = [None]  # what the battlefield looked like when power and toughness were last worked out
     report: dict = {"directory": str(directory.path), "seed": seed, "seats": names, "stopped": None,
                     "rulings": list((earlier or {}).get("rulings", [])),
@@ -340,11 +348,38 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
                         report["wakes"][-1]["forced"] = "the driver kept the hand and chose what went on the bottom"
                 seen[seat] = len(table.events)
 
+    def window(seats: list[int], situation: str) -> set[int]:
+        """Ask several seats at once whether they would act now, with the stack empty on another player's
+        turn. Without this nobody could ever kill an attacker, play a combat trick after blocks, or
+        flash something in at the end of turn: the driver passes for everyone when nothing is on the stack."""
+        game = table.game
+        question = (f"It is {names[game.turn.active]}'s {game.turn.step} step, the stack is empty, and you have priority. {situation} Do you "
+                    "want to act now, at instant speed: cast an instant or a card with flash, or activate an ability? Answer "
+                    "act=false to pass. Answer act=true only if you would actually do it now; you will then be woken to do it.")
+        prompts = {seat: f"{when()} {question}\n\n{news(seat)}\n\n{briefing(seat)}" for seat in seats}
+
+        def one(seat: int):
+            return seat, (triage_runners or runners)[seat].ask(systems[seat], prompts[seat], schema=_WINDOW)
+        with ThreadPoolExecutor(max_workers=len(seats)) as pool:
+            replies = list(pool.map(one, seats))
+        acting = set()
+        for seat, reply in replies:
+            data = reply.data or {}
+            acting |= {seat} if data.get("act") else set()
+            record = {"turn": game.turn.number, "seat": seat, "respond": bool(data.get("act")), "why": data.get("why", ""),
+                      "about": f"{game.turn.step} window", "stack": 0, "seconds": round(reply.seconds, 1)}
+            report["triage"].append(record)
+            directory.append(f"transcript-seat-{seat}.jsonl", {"kind": "triage", **record})
+        echo(f"turn {game.turn.number} {game.turn.step}: a chance to act: "
+             + ", ".join(f"{names[s]} {'ACTS' if s in acting else 'passes'}" for s, _ in replies))
+        return acting
+
     def wake(server: McpServer, seat: int, kind: str, extra: str = "") -> None:
         token, handle = secrets.token_hex(16), table.open_wake(seat, kind)
         current.update(tools=SeatTools(table, seat, handle, database=database, rules=rules), token=token, wake=handle,
                        seat=seat, ended=False)
         game = table.game
+        windows.get((game.turn.number, game.turn.step), set()).discard(seat)
         if kind == "correction" and not extra:
             extra = _correction(game.control.detail)
         prompt = f"{when()} {extra or _WHY.get(kind, 'The table is waiting for you.')}\n\n{news(seat)}\n\n{briefing(seat)}"
@@ -464,6 +499,21 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
                 return "stuck"
             seat, kind = expected[0]
             quiet_step = seat == game.turn.active and game.turn.step in ("upkeep", "draw")
+            if kind == "priority" and not game.stack and seat != game.turn.active:
+                # An empty stack on someone else's turn. Usually there is nothing to do and the driver
+                # passes; at the moments that matter the seats that could act are asked first, together.
+                key = (game.turn.number, game.turn.step)
+                if key not in windows:
+                    waiting = [s for s in game.turn_order_from(seat) if s not in game.turn.passed]
+                    situation = {s: _window(table, s) for s in waiting}
+                    asked = [s for s in waiting if situation[s] and s != me]
+                    windows.clear()
+                    windows[key] = (window(asked, next(situation[s] for s in asked)) if asked else set()) | ({me} if situation.get(me) else set())
+                if seat in windows[key]:
+                    if seat != me:
+                        return "wake"  # its wake takes it off the list: if it passes after all, the window is over for it
+                    windows[key].discard(seat)
+                    return "yours"
             if kind == "priority" and not game.stack and (quiet_step or seat != game.turn.active):
                 # Nothing to respond to on someone else's turn; and nothing waiting in one's own
                 # upkeep or draw step, or the table would be asking for a trigger, not priority. That
@@ -582,6 +632,36 @@ def _characteristics_print(table: Table) -> tuple:
     return (tuple((o.id, o.controller, tuple(sorted(o.counters.items())), tuple(str(a) for a in o.annotations), o.attached_to,
                    o.face_down, o.transformed, o.phased_out) for o in (game.objects[i] for i in game.battlefield)),
             tuple(sorted(str(e.get("text")) for e in game.ledger if e.get("kind") == "static")))
+
+
+def _window(table: Table, seat: int) -> str | None:
+    """Whether this is a moment at which `seat` should be asked if it acts though the stack is empty,
+    on another player's turn: an attack, blocks, or the end step it said it is holding something for.
+    Returns what to tell it about the moment."""
+    game = table.game
+    turn, me = game.turn, game.seats[seat]
+    mine = [game.objects[i] for i in game.battlefield if game.objects[i].controller == seat]
+    if me.response_policy == "pass_always" or not (me.hand or any(not obj.tapped for obj in mine)):
+        return None
+
+    def named(target: dict) -> str:
+        return game.seats[target["seat"]].name if "seat" in target else ops_named(game.objects[target["obj"]]) if target.get("obj") in game.objects else "?"
+    attacks = [a for a in turn.attackers if a["attacker"] in game.objects]
+    if turn.step == "declare_attackers" and attacks:
+        at_me = any(a["target"].get("seat") == seat or (a["target"].get("obj") in game.objects and game.objects[a["target"]["obj"]].controller == seat)
+                    for a in attacks)
+        if me.response_policy == "pass_unless_targeted" and not at_me:
+            return None
+        return "Attackers have been declared: " + "; ".join(f"{ops_named(game.objects[a['attacker']])} at {named(a['target'])}" for a in attacks) \
+            + ". Blockers have not been chosen yet."
+    blocks = [b for b in turn.blockers if b["blocker"] in game.objects and b["attacker"] in game.objects]
+    if turn.step == "declare_blockers" and blocks and me.response_policy == "ask":
+        return "Blockers have been declared: " + "; ".join(f"{ops_named(game.objects[b['blocker']])} blocks {ops_named(game.objects[b['attacker']])}"
+                                                           for b in blocks) + ". Combat damage comes next."
+    order = game.turn_order_from(turn.active)
+    if turn.step == "end" and me.holds_for_end_step and len(order) > 1 and order[1] == seat:
+        return "This is the end step of the turn before yours, which you said you were holding something for."
+    return None
 
 
 def _wants_asking(table: Table, seat: int) -> bool:

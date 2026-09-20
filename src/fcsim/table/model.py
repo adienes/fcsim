@@ -129,6 +129,7 @@ class Seat:
     response_policy: str = "ask"   # ask, pass_unless_targeted or pass_always; private, and reset on the seat's own turn
     kept: bool = False
     drew_from_empty: bool = False
+    holds_for_end_step: bool = False  # private: wants priority in the end step of the turn before its own
     failed_disputes: int = 0       # contests and disputes that went against this seat; at three it may raise no more
     yield_to: dict | None = None   # {"turn", "step"}: pass by itself until that step, while the stack stays empty
 
