@@ -194,16 +194,51 @@ def _queue_step_triggers(game: Game, step: str) -> None:
                                           "text": entry.get("text", ""), "source": entry.get("source")})
 
 
+_EVENTS = {"cast": lambda f: f["event"] == "cast", "attacks": lambda f: f["event"] == "attacks",
+           "enters": lambda f: f["event"] == "moved" and f["to"] == "battlefield" and f["from"] != "battlefield",
+           "leaves": lambda f: f["event"] == "moved" and f["from"] == "battlefield" and f["to"] != "battlefield",
+           "dies": lambda f: f["event"] == "moved" and f["from"] == "battlefield" and f["to"] == "graveyard"
+           and ("creature" in f["type_line"].lower() or not f["type_line"])}
+
+
+def collect_triggers(game: Game) -> None:
+    """Match what has happened against the ledger's event triggers and queue each match for its
+    controller. The table cannot read a card, but it can tell that "a Dragon entered under seat 2"
+    fits what the auditor wrote down for Ganax. A loose match is fine: the controller declines a
+    trigger that does not really apply, and the auditor checks."""
+    facts, game.facts = game.facts, []
+    for fact in facts:
+        actor = fact["was_controller"] if fact["event"] == "moved" and fact["to"] != "battlefield" else fact["controller"]
+        for hook in game.ledger:
+            on = hook.get("on") or {}
+            if hook.get("kind") != "event_trigger" or on.get("event") not in _EVENTS or not _EVENTS[on["event"]](fact):
+                continue
+            mine = actor == hook["controller"]
+            if (on.get("who") == "you" and not mine) or (on.get("who") == "opponent" and mine):
+                continue
+            if on.get("type") and fact["type_line"] and str(on["type"]).lower() not in fact["type_line"].lower():
+                continue
+            if on.get("nontoken") and fact.get("token"):
+                continue
+            if on.get("other") and hook.get("source") in (fact.get("id"), fact.get("old_id")):
+                continue
+            what = {"cast": "cast", "attacks": "attacked", "enters": "entered", "leaves": "left the battlefield", "dies": "died"}
+            game.pending_triggers.append({"id": game.new_id(), "seat": hook["controller"], "source": hook.get("source"),
+                                          "text": f"{hook.get('text', '')} (because {fact['name']} {what[on['event']]})"})
+
+
 def grant_priority(game: Game, seat: int) -> None:
     """The priority checkpoint: waiting triggers go on the stack, in APNAP order, before anyone
     receives priority. (The audit of what just happened gates this too, once there is an auditor.)"""
     if game.control.kind == "over" or _gate(game, {"do": "grant", "seat": seat}):
         return
+    collect_triggers(game)
     owed = {t["seat"] for t in game.pending_triggers}
     for candidate in game.turn_order_from(game.turn.active):
         if candidate in owed:
             game.control = Control("triggers", [candidate], {"then": seat})
             return
+    game.pending_triggers.clear()  # any left belong to players who have gone
     _give_priority(game, game.turn_order_from(seat)[0])  # the seat itself, or the next living one in turn order
 
 
@@ -221,6 +256,9 @@ def _yielding(game: Game, seat: int) -> bool:
 def _give_priority(game: Game, seat: int) -> None:
     if _gate(game, {"do": "give", "seat": seat}):
         return
+    collect_triggers(game)
+    if game.pending_triggers:  # something triggered since priority was last granted: it goes on the stack first
+        return grant_priority(game, seat)
     game.control = Control("priority", [seat])
     if _yielding(game, seat):
         pass_priority(game, seat)

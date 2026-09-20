@@ -555,3 +555,57 @@ def test_the_auditors_computed_characteristics_and_static_effects_are_written_on
     runner.step(0, "act", {"because": "bounced", "mutations": [{"op": "move", "obj": "@Lord of the Undead", "to": "graveyard"}]})
     assert "CONTINUOUS EFFECTS" not in describe(table.view(2))  # the effect leaves with its source
     assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()
+
+
+def test_the_table_queues_a_trigger_the_moment_its_event_happens():
+    lookup = {"Ann spell 0": "Creature — Zombie", "Blood Artist": "Creature — Vampire"}
+    table = Table(seats(), seed=5, first=0, card_lookup=lambda name: {"type_line": lookup.get(name, "Instant")})
+    runner = ScriptedRunner(table)
+    for seat in range(3):
+        runner.step(seat, "keep")
+    pass_until(table, runner, "main1")
+    table.patch([{"op": "create_token", "controller": 1, "token": {"name": "Blood Artist", "types": "Creature — Vampire"}},
+                 {"op": "create_token", "controller": 0, "token": {"name": "Zombie", "types": "Creature — Zombie"}, "count": 2},
+                 {"op": "create_token", "controller": 0, "token": {"name": "Treasure", "types": "Artifact — Treasure"}}], "set up")
+    artist = next(c["handle"] for c in table.view(None)["battlefield"] if c["name"] == "Blood Artist")
+    table.apply_hooks([{"kind": "event_trigger", "handle": artist, "source": "Blood Artist", "text": "Target player loses 1 life and you gain 1.",
+                        "on": {"event": "dies", "type": "Creature", "who": "any"}},
+                       {"kind": "event_trigger", "handle": artist, "source": "Blood Artist", "text": "a made-up cast trigger",
+                        "on": {"event": "cast", "who": "opponent", "type": "Instant"}}])
+    assert table.view(0)["ledger"][0]["on"] == {"event": "dies", "type": "Creature", "who": "any"}
+
+    runner.step(0, "act", {"because": "sacrificed", "mutations": [{"op": "move", "obj": "@Treasure", "to": "graveyard"}]})
+    runner.step(0, "pass_priority")
+    assert table.expected() == [(1, "priority")]                       # an artifact leaving is not a creature dying
+    runner.step(1, "pass_priority"), runner.step(2, "pass_priority")
+
+    runner.step(0, "act", {"because": "sacrificed", "mutations": [{"op": "move", "obj": "@Zombie", "to": "graveyard"}]})
+    runner.step(0, "pass_priority")
+    assert table.expected() == [(1, "triggers")]                       # Bob is asked before anyone receives priority
+    waiting = table.view(1)["waiting_triggers"]
+    assert len(waiting) == 1 and waiting[0]["text"] == "Target player loses 1 life and you gain 1. (because Zombie died)"
+    runner.step(1, "add_trigger", {"pending": waiting[0]["handle"], "targets": [{"seat": 0}]})
+    assert table.expected() == [(1, "priority")] and table.view(0)["stack"][0]["controller"] == 1
+    for seat in (1, 2, 0):
+        runner.step(seat, "pass_priority")
+    runner.step(1, "finish_resolution")
+
+    runner.step(0, "cast", {"card": f"@{spell_in_hand(table, 0)}"})     # "Ann spell N": an Instant to the lookup, cast by Bob's opponent
+    runner.step(0, "pass_priority")
+    assert table.expected() == [(1, "triggers")] and "made-up cast trigger" in table.view(1)["waiting_triggers"][0]["text"]
+    runner.step(1, "skip_trigger", {"pending": table.view(1)["waiting_triggers"][0]["handle"], "because": "does not apply"})
+    assert table.expected() == [(1, "priority")]
+    assert Table.replay(table.config, table.events, card_lookup=table.card_lookup).game.to_dict() == table.game.to_dict()
+
+
+def test_a_trigger_put_on_the_stack_by_hand_is_not_asked_for_again():
+    table, runner = started()
+    pass_until(table, runner, "main1")
+    table.patch([{"op": "create_token", "controller": 0, "token": {"name": "Lozhan", "types": "Creature — Dragon"}}], "set up")
+    lozhan = table.view(None)["battlefield"][0]["handle"]
+    table.apply_hooks([{"kind": "event_trigger", "handle": lozhan, "source": "Lozhan", "text": "deals damage equal to its mana value",
+                        "on": {"event": "cast", "who": "you"}}])
+    runner.step(0, "cast", {"card": f"@{spell_in_hand(table, 0)}"})
+    runner.step(0, "add_trigger", {"source": "@Lozhan", "text": "Lozhan deals 5 damage", "targets": [{"seat": 1}]})
+    runner.step(0, "pass_priority")
+    assert table.expected() == [(1, "priority")] and len(table.view(0)["stack"]) == 2 and table.game.pending_triggers == []

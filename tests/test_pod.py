@@ -151,7 +151,8 @@ def test_a_pod_game_can_be_resumed_from_its_directory(database, tmp_path):
     directory = GameDirectory.open(first["directory"])
     events = directory.events()
     assert [e["n"] for e in events] == list(range(len(events)))                  # one unbroken journal
-    replayed = Table.replay(directory.read("config.json")["table"], events).game.to_dict()
+    from fcsim.play.pod import _lookup
+    replayed = Table.replay(directory.read("config.json")["table"], events, card_lookup=_lookup(database)).game.to_dict()
     assert json.loads(json.dumps(replayed)) == directory.read("state.json")    # the saved state is the journal's state
     with pytest.raises(ValueError, match="not a game directory"):
         play_pod([], seats, FakeRunner([OK], budget), database, resume=tmp_path)

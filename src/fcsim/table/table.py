@@ -57,7 +57,8 @@ class Table:
                                            ("library", seat.get("library", []), False)):
                 for name in names:
                     obj = Obj(id=game.new_id(), uid=0, owner=index, controller=index, zone=zone, name=name,
-                              is_commander=commander, public=commander)
+                              is_commander=commander, public=commander,
+                              type_line=str(((card_lookup(name) if card_lookup else None) or {}).get("type_line", "")))
                     obj.uid = obj.id
                     game.objects[obj.id] = obj
                     getattr(game.seats[index], zone).append(obj.id)
@@ -304,6 +305,8 @@ class Table:
                 lints.append(f"Commander tax: {name} costs {{{2 * casts[name]}}} more this time.")
             casts[name] = casts.get(name, 0) + 1
         card = mutations.move(game, obj, "stack", controller=seat, face_down=face_down)
+        game.facts.append({"event": "cast", "id": card.id, "old_id": None, "name": name, "type_line": card.type_line,
+                           "controller": seat, "was_controller": seat, "token": False})
         item = StackItem(id=game.new_id(), kind="spell", controller=seat,
                          source_name="a face-down spell" if face_down else name, text=str(args.get("text", "")),
                          obj=card.id, targets=args.get("targets", []), x=args.get("x"),
@@ -355,8 +358,15 @@ class Table:
                          targets=args.get("targets", []))
         game.stack.append(item)
         if game.control.kind == "triggers":
+            game.turn.passed = []  # something new is on the stack: everyone gets priority again, whoever passed before
             turn.trigger_handled(game, args["pending"])
         else:
+            # Put on the stack by hand before the table asked: the matching queued trigger is this one.
+            turn.collect_triggers(game)
+            queued = next((t for t in game.pending_triggers if t["seat"] == seat and source is not None
+                           and t.get("source") == source.id), None)
+            if queued:
+                game.pending_triggers.remove(queued)
             turn.acted(game)
         return ops.Told(public=[f"{self._name(seat)} puts a trigger on the stack ({item.source_name}): {text}"
                                 f"{self._targets_text(game, item.targets)}."])
@@ -416,6 +426,9 @@ class Table:
             if attack.get("tap", True):
                 attacker.tapped = True
             game.turn.attackers.append({"attacker": attacker.id, "target": attack["target"]})
+            game.facts.append({"event": "attacks", "id": attacker.id, "old_id": None, "name": attacker.name,
+                               "type_line": attacker.type_line, "controller": seat, "was_controller": seat,
+                               "token": attacker.token is not None})
             names.append(f"{ops._named(attacker)}{self._targets_text(game, [attack['target']]).replace(' targeting', ' at')}")
         turn.turn_action_done(game)
         return ops.Told(public=[f"{self._name(seat)} attacks with {', '.join(names) or 'nothing'}."]), lints
@@ -562,6 +575,8 @@ class Table:
                 raise TableError("bad_hook", f"A hook needs a kind and a source on the battlefield: {hook!r}")
             entry = {"kind": hook["kind"], "text": str(hook.get("text", "")), "source": source.id,
                      "controller": hook.get("controller", source.controller)}
+            if hook["kind"] == "event_trigger" and isinstance(hook.get("on"), dict):
+                entry["on"] = {k: hook["on"][k] for k in ("event", "who", "type", "nontoken", "other") if k in hook["on"]}
             if hook["kind"] == "hold":
                 entry |= {"step": hook.get("step"), "seat": hook.get("seat", source.controller)}
             elif hook["kind"] == "step_trigger":

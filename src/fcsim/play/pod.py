@@ -73,6 +73,14 @@ _WHY = {"mulligan": "Your opening hand has been dealt. Keep it or mulligan.",
         "held_step": "The table has handed you a step it must not perform by itself."}
 
 
+def _lookup(database: CardDatabase):
+    """What the card-blind table is handed about a card: numbers and words it carries but never interprets."""
+    def lookup(name: str) -> dict | None:
+        card = database.find(name)
+        return card and {"mana_value": card.mana_value, "types": sorted(card.types), "type_line": card.front.type_line}
+    return lookup
+
+
 def _names(decks: list) -> list[str]:
     names = []
     for index, deck in enumerate(decks):
@@ -104,7 +112,7 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
     names, count = _names(decks), len(decks)
     if earlier:
         return _play(earlier, Table.replay(earlier.read("config.json")["table"], earlier.events(),
-                                           card_lookup=lambda n: (c := database.find(n)) and {"mana_value": c.mana_value}),
+                                           card_lookup=_lookup(database)),
                      earlier.read("config.json")["seats"], decks, runners, auditor_runner, database, cycles, rules, echo,
                      earlier=earlier.read("report.json") if (earlier.path / "report.json").is_file() else {"wakes": []},
                      audit_every=audit_every, triage_runners=triage_runners)
@@ -112,7 +120,7 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
     directory = GameDirectory(out_root, "pod_" + "-".join(names), seed)
     table = Table([{"name": name, "commanders": [c.name for c in deck.commanders], "library": [c.name for c in deck.library()]}
                    for name, deck in zip(names, decks, strict=True)], seed=seed, gated=True, on_event=directory.journal,
-                  card_lookup=lambda n: (c := database.find(n)) and {"mana_value": c.mana_value})
+                  card_lookup=_lookup(database))
     for index, path in enumerate(deck_paths):
         directory.write(f"decks/seat-{index}.txt", read_decklist(path).to_mtgo())
     directory.pin_cards({card.name for deck in decks for card in [*deck.commanders, *(c for c, _ in deck.cards)]}, database)
@@ -137,7 +145,6 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
     # not shorten it. On a resume the turn in progress (or just begun) is the first of the new rounds.
     game = table.game
     last_round = (game.seats[game.turn.active].turns_taken - 1 if earlier is not None else 0) + cycles
-    table.card_lookup = lambda n: (c := database.find(n)) and {"mana_value": c.mana_value, "types": sorted(c.types)}
     auditor = Auditor(auditor_runner, database, context=f"A {count}-player Commander game. Seats, in turn order: "
                       + ", ".join(f"{name} (seat {i})" for i, name in enumerate(names)) + ".")
     systems = [SYSTEM.format(name=name, count=count) + "\n\nYOUR DECK (count, name, cost, type, text)\n"

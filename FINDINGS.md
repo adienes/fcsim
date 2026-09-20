@@ -33,7 +33,7 @@ one to three minutes. Busy turns are still six to fifteen, which is what S3 and 
 | R2 | Players defer to the auditor even when it is wrong. | Neither disputed R1, though the prompt allowed it | **Open**: disputes and a judge (PLAN §8.3); until then a false alarm costs real game state |
 | R3 | A fresh session repeats what it just did. | Wilhelt's end-step trigger put on the stack and resolved five times in one step | **Fixed**: the briefing opens with "what you have already done this turn" |
 | R4 | Each player re-derives the board, and gets it wrong. | Combat resolved with Wilhelt's printed 3/3 while Lord of the Undead made it 4/4 | **Fixed**: the auditor writes continuous effects and current power/toughness onto the board. **Open**: they are only as fresh as the last audit; recompute before blocks when the board changed this turn |
-| R5 | Missed triggers are the commonest error by far. | 11 of 16 findings: Norin, Isochron Scepter, Wilhelt, Ganax, Miirym's copy trigger | Caught and queued at end of turn. **Open**: match game events against `event_trigger` hooks so the table queues a trigger when it happens, not a turn later |
+| R5 | Missed triggers are the commonest error by far. | 11 of 16 findings: Norin, Isochron Scepter, Wilhelt, Ganax, Miirym's copy trigger | **Built, not yet run with models**: the auditor gives an event trigger a small structured `on` (event: cast/enters/dies/leaves/attacks; who; a type-line word; nontoken; other). The table records what happens as facts, matches them, and puts the trigger in front of its controller before anyone receives priority. A loose match is declined by the player. A trigger put on the stack by hand consumes its queued twin. Hooks exist from the turn after a permanent arrives, since audits are per turn |
 | R6 | State-based losses were applied a few passes late. | Zuko and Wilhelt sat at -1 life while priority was passed | **Open**: the table knows life totals; it could stop and ask for the loss to be carried out before anyone gets priority |
 | R7 | A pilot repeated commander damage the table had already counted, and could not undo it. | Zuko goldfish: 16 recorded, 8 dealt | **Fixed**: tool text says the table counts it; `commander_damage` takes `set` |
 | R8 | The auditor judged the big turn correctly. | Turn 19: cost reductions and 56 damage accepted; only Miirym's own missed triggers flagged | Good sign; the suite should gain a long-chain scenario |
@@ -42,13 +42,13 @@ one to three minutes. Busy turns are still six to fifteen, which is what S3 and 
 
 | # | Finding | Evidence | Status |
 | --- | --- | --- | --- |
-| F1 | "Table turn 9" reads as turn nine; it was each player's third. | User confusion mid-game | **Open**: reports and prompts should say "round 3, Zuko's turn" |
+| F1 | "Table turn 9" reads as turn nine; it was each player's third. | User confusion mid-game | **Fixed**: seats count their own turns; prompts, the board text, reports and `status` say "round 5, Miirym's turn (table turn 19)" |
 | F2 | No way to see a running game except reading files. | Asked twice "still going?" | **Fixed**: `fcsim status <game_dir>` |
 | F3 | A game could not be continued. | First run stopped at its round cap | **Fixed**: `fcsim pod --resume` replays the journal; verified on 506 real events |
 | F4 | News was capped at 40 lines, mostly passes, so real plays fell out of a briefing. | Found by a test after the upkeep wake was removed | **Fixed**: passes are left out of news |
 | F5 | Politics appears by itself once there are threats. | No talk in rounds 1-2; by round 3 all four seats argued about who the threat was, and Zuko changed its removal target | Good. **Open**: reply wakes, so a direct question gets an answer before the decision |
 | F6 | The table read the threat correctly and still lost to it. | All three opponents named Miirym's engine in round 3; it killed two of them on turn 5 | A deck-balance result, not a harness one: see below |
-| F7 | Round caps count eliminated seats. | `--cycles` multiplies by the number of seats at the start | **Open**: count rounds by living players |
+| F7 | Round caps count eliminated seats. | `--cycles` multiplies by the number of seats at the start | **Fixed**: a game is capped in rounds; on a resume the turn in progress is the first of the new rounds |
 | F8 | No narrative or rubric score at the end. | Only `report.md` standings and each player's own account | **Open**: PLAN §11.1 and §12.1 |
 
 ## What the pod says about the decks

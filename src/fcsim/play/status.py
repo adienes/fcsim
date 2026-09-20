@@ -40,7 +40,7 @@ def status(game_dir: str | Path) -> dict:
                                                            "pass_priority", "write_notes") for c in w.get("calls", []))]
     return {
         "directory": str(directory.path), "seats": names, "events": len(events),
-        "at": {"round": max((s.get("turns_taken", 0) for s in state["seats"]), default=None) if state else None,
+        "at": {"round": (max((s.get("turns_taken", 0) for s in state["seats"]), default=0) or "?") if state else "?",
                "table_turn": last["turn"], "step": last["step"]},
         "standings": [{"name": s["name"], "status": s["status"], "life": s["life"], "hand": len(s["hand"]),
                        "permanents": sum(1 for o in state["objects"].values() if o["zone"] == "battlefield" and o["controller"] == s["index"]),

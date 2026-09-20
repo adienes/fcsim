@@ -32,6 +32,8 @@ def obj_view(game: Game, obj: Obj, viewer: int | None, handles: Handles) -> dict
     view: dict = {"handle": handles.of("c", obj.id), "owner": obj.owner}
     if obj.face_known_to(viewer):
         view["name"] = obj.name
+        if obj.type_line:
+            view["type_line"] = obj.type_line
         if obj.token is not None:
             view["token"] = obj.token
         if obj.is_commander:

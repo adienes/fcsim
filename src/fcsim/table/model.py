@@ -70,6 +70,7 @@ class Obj:
     zone: str
     name: str
     token: dict | None = None
+    type_line: str = ""        # carried for matching triggers and for display; the table never interprets it
     is_commander: bool = False
     tapped: bool = False
     face_down: bool = False
@@ -167,6 +168,7 @@ class Game:
     designations: dict[str, int | str | None] = field(default_factory=dict)
     winner: int | None = None
     next_id: int = 1
+    facts: list[dict] = field(default_factory=list)  # what has happened since triggers were last collected
     audit_pending: bool = False   # something auditable has happened since the last checkpoint was released
     gated: bool = False           # stop at audit checkpoints, and at the end of every turn
 

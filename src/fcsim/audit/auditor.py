@@ -69,7 +69,13 @@ permanents can share a name:
 "cleanup"; seat is the player whose step it is. Example: a permanent that replaces draws.
 - step_trigger: an ability that triggers at the beginning of a step. step is one of upkeep, \
 draw, main1, begin_combat, end_combat, main2, end; whose is "each" or a seat number.
-- event_trigger: an ability that triggers on a game event, described in text.
+- event_trigger: an ability that triggers on a game event, described in text. Also give `on`, so \
+that the table can put the trigger in front of its controller the moment the event happens: \
+`event` is cast, enters, dies, leaves or attacks; `who` is "you" (the permanent's controller cast \
+the spell or controlled the object), "opponent" or "any"; `type` is a word that must be in the \
+object's type line, such as Creature, Dragon, Zombie or Instant; `nontoken` is true if tokens do \
+not count; `other` is true if the ability says "another". Leave `on` out when the trigger does not \
+fit these words, and describe it in text alone.
 - static: a continuous effect that changes other objects, players or the rules while the \
 permanent stays: "other Zombie creatures you control get +1/+1", "spells cost {1} less", \
 "players can't gain life". Players will read it at the top of their view, so state it exactly.
@@ -110,7 +116,11 @@ VERDICT_SCHEMA = {
                 "seat": {"type": "integer", "description": "For a hold: whose step is held."},
                 "whose": {"anyOf": [{"type": "string", "enum": ["each"]}, {"type": "integer"}],
                           "description": "For a step_trigger: \"each\" or a seat number."},
-                "controller": {"type": "integer"}}}},
+                "controller": {"type": "integer"},
+                "on": {"type": "object", "additionalProperties": False, "required": ["event"], "properties": {
+                    "event": {"type": "string", "enum": ["cast", "enters", "dies", "leaves", "attacks"]},
+                    "who": {"type": "string", "enum": ["you", "opponent", "any"]},
+                    "type": {"type": "string"}, "nontoken": {"type": "boolean"}, "other": {"type": "boolean"}}}}}},
         "computed": {"type": "array", "items": {
             "type": "object", "additionalProperties": False, "required": ["handle", "power", "toughness", "because"],
             "properties": {"handle": {"type": "string", "description": "The creature's handle, such as c12."},

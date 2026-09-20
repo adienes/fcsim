@@ -50,12 +50,14 @@ def move(game: Game, obj: Obj, to: str, *, position: str | int = "top", controll
     if obj.id in source:
         source.remove(obj.id)
     knew = set(range(len(game.seats))) if obj.public else set(obj.known_by)
-    came_from = obj.zone
+    came_from, was_controller, old_id = obj.zone, obj.controller, obj.id
     for other in game.objects.values():
         if other.attached_to == obj.id:
             other.attached_to = None
     game.stack[:] = [item for item in game.stack if item.obj != obj.id or to == "stack"]
     if obj.token is not None and to != "battlefield" and came_from == "battlefield":
+        game.facts.append({"event": "moved", "id": None, "old_id": old_id, "name": obj.name, "type_line": obj.type_line,
+                           "from": came_from, "to": to, "controller": was_controller, "was_controller": was_controller, "token": True})
         del game.objects[obj.id]
         return None
 
@@ -88,7 +90,11 @@ def move(game: Game, obj: Obj, to: str, *, position: str | int = "top", controll
             target.insert(max(0, min(index, len(target))), obj.id)
         else:
             target.append(obj.id)
-    return renew(game, obj)
+    renew(game, obj)
+    game.facts.append({"event": "moved", "id": obj.id, "old_id": old_id, "name": obj.name, "type_line": obj.type_line,
+                       "from": came_from, "to": to, "controller": obj.controller, "was_controller": was_controller,
+                       "token": obj.token is not None})
+    return obj
 
 
 def shuffle(game: Game, seat: int, dice: Dice, *, only_unknown: bool = False) -> None:
@@ -140,11 +146,14 @@ def from_position(game: Game, where: dict, dice: Dice) -> list[Obj]:
 def create_token(game: Game, controller: int, definition: dict, *, enters: dict | None = None) -> Obj:
     obj = Obj(id=game.new_id(), uid=game.new_id(), owner=controller, controller=controller, zone="battlefield",
               name=definition.get("name", "Token"), token=dict(definition), public=True,
+              type_line=" ".join(str(definition.get(k, "")) for k in ("types", "type_line", "subtypes")).strip(),
               entered_turn=game.turn.number, tapped=bool((enters or {}).get("tapped")),
               counters={k: int(n) for k, n in ((enters or {}).get("counters") or {}).items()},
               attached_to=(enters or {}).get("attached_to"))
     game.objects[obj.id] = obj
     game.battlefield.append(obj.id)
+    game.facts.append({"event": "moved", "id": obj.id, "old_id": None, "name": obj.name, "type_line": obj.type_line, "from": None,
+                       "to": "battlefield", "controller": controller, "was_controller": controller, "token": True})
     return obj
 
 
