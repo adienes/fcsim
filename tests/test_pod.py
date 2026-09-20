@@ -42,9 +42,10 @@ class ScriptedSeat:
 
     def __init__(self, budget: Budget, *, cast_commander: bool = False, with_trigger: bool = False, triage: dict | None = None,
                  attack: int | None = None, contests: bool = False, disputes: str = "", mulligans: int = 0, bottoms: bool = True,
-                 acts: bool = False, holds: bool = False):
+                 acts: bool = False, holds: bool = False, fidgets: bool = False):
         self.budget, self.prompts, self.cast_commander, self.attack, self.contests = budget, [], cast_commander, attack, contests
         self.disputes, self.mulligans, self.bottoms, self.acts, self.holds = disputes, mulligans, bottoms, acts, holds
+        self.fidgets = fidgets  # does something auditable each turn: a basic land alone is not sent to the auditor
         self.with_trigger, self.triage = with_trigger, triage or {}   # a made-up trigger on top of the commander; triage answers
 
     def ask(self, system: str, prompt: str, *, tools: McpConnection | None = None, schema: dict | None = None, **_) -> Reply:
@@ -97,6 +98,8 @@ class ScriptedSeat:
             elif waiting_for == "priority" and view["turn"]["active"] == me and view["turn"]["step"] == "main1" \
                     and land and not view["turn"]["land_plays"]:
                 result = tool("play_land", card=land)
+                if self.fidgets:
+                    result = tool("act", because="Tapping and untapping my land, to no purpose.", mutations=[{"op": "life", "seat": me, "delta": 0}])
             elif self.cast_commander and waiting_for == "priority" and view["turn"]["active"] == me and not view["stack"] \
                     and view["turn"]["step"] == "main1" and view["seats"][me]["command"] \
                     and len([c for c in view["battlefield"] if c["controller"] == me and not c["tapped"]]) >= 4:
@@ -132,7 +135,7 @@ class ScriptedSeat:
 
 def test_a_pod_game_schedules_seats_audits_and_acts_on_findings(database, tmp_path):
     budget = Budget(max_calls=200)
-    seats = [ScriptedSeat(budget) for _ in range(3)]
+    seats = [ScriptedSeat(budget, fidgets=True) for _ in range(3)]
     trigger = {"kind": "trigger", "seat": 2, "summary": "Thrasios's imaginary trigger", "basis": "test", "fix": "put it on the stack",
                "confidence": "high"}
     wrong = {"kind": "illegal", "seat": 0, "summary": "Talrand paid no life", "basis": "test", "fix": "set life to 39", "confidence": "high"}
@@ -228,7 +231,7 @@ def test_status_reads_a_game_directory_while_it_is_being_written(database, tmp_p
     from fcsim.play.status import render, status
     budget = Budget(max_calls=300)
     wrong = {"kind": "illegal", "seat": 0, "summary": "Talrand paid no life", "basis": "test", "fix": "set life to 39", "confidence": "high"}
-    report = play_pod(decks(tmp_path), [ScriptedSeat(budget, cast_commander=True), ScriptedSeat(budget), ScriptedSeat(budget)],
+    report = play_pod(decks(tmp_path), [ScriptedSeat(budget, cast_commander=True, fidgets=True), ScriptedSeat(budget, fidgets=True), ScriptedSeat(budget)],
                       FakeRunner([{"verdict": "findings", "findings": [wrong], "hooks": []}] + [OK] * 80, budget), database,
                       cycles=5, seed=4, out_root=tmp_path / "games", echo=lambda *_: None)
     seen = status(report["directory"])
@@ -436,7 +439,7 @@ def test_a_player_can_contest_a_finding_and_a_judge_rules(database, tmp_path, de
     from fcsim.rules import RulesReference
 
     budget = Budget(max_calls=300)
-    seats = [ScriptedSeat(budget, contests=True), ScriptedSeat(budget), ScriptedSeat(budget)]
+    seats = [ScriptedSeat(budget, contests=True, fidgets=True), ScriptedSeat(budget, fidgets=True), ScriptedSeat(budget, fidgets=True)]
     wrong = {"kind": "illegal", "seat": 0, "summary": "Talrand paid no life", "basis": "rule 119.4", "fix": "set life to 39", "confidence": "high"}
     auditor = FakeRunner([{"verdict": "findings", "findings": [wrong], "hooks": []}] + [OK] * 60, budget)
     judge = FakeRunner([{"decision": decision, "explanation": "Nothing in the record cost life.", "fix": "",
@@ -574,3 +577,12 @@ def test_seats_are_asked_at_attacks_and_at_an_end_step_they_hold_for_though_the_
 def events_turn_active(events: list[dict], turn: int) -> int:
     """Whose turn a table turn was: the seat that played a land or passed first in it."""
     return next(e["seat"] for e in events if e["turn"] == turn and e["seat"] is not None and e["step"] in ("upkeep", "main1"))
+
+
+def test_a_turn_that_is_only_a_basic_land_is_not_sent_to_the_auditor(database, tmp_path):
+    budget = Budget(max_calls=200)
+    auditor = FakeRunner([OK] * 20, budget)
+    report = play_pod(decks(tmp_path), [ScriptedSeat(budget), ScriptedSeat(budget, fidgets=True), ScriptedSeat(budget)], auditor, database,
+                      cycles=2, seed=4, out_root=tmp_path / "games", echo=lambda *_: None)
+    assert report["stopped"] is None and len(report["audits"]) == 2 == len(auditor.asked)       # Pir's two turns, and nobody else's
+    assert all("Pir acts: Tapping and untapping" in a["prompt"] for a in auditor.asked)

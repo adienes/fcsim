@@ -8,6 +8,7 @@ triggers and correction wakes. Narrower watches, triage and disputes come later 
 
 from __future__ import annotations
 
+import re
 import secrets
 from pathlib import Path
 
@@ -402,8 +403,15 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
 
     def audit(server: McpServer, snapshot: tuple) -> None:
         unit = table.events[snapshot[2]:]
-        if not any(e["seat"] is not None and e["public"] and e["tool"] not in ("pass_priority", "say", "write_notes", "keep", "mulligan")
-                   for e in unit):
+
+        def needs_no_audit(event: dict) -> bool:
+            """Talk, passing, and a basic land played when the table allows it: nothing there for a rules check to find."""
+            if event["seat"] is None or not event["public"] or event["tool"] in ("pass_priority", "say", "write_notes", "keep", "mulligan"):
+                return True
+            played = re.search(r" plays (.+) from .+'s hand\.$", event["public"][0]) if event["tool"] == "play_land" and not event["lints"] else None
+            card = database.find(played[1]) if played else None
+            return card is not None and card.is_basic
+        if all(needs_no_audit(e) for e in unit):
             return
         echo(f"         auditing {len(unit)} events ...")
         verdict, reply = auditor.audit(table, snapshot)
