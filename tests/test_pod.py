@@ -39,14 +39,15 @@ class ScriptedSeat:
 
     model = "scripted"
 
-    def __init__(self, budget: Budget, *, cast_commander: bool = False):
+    def __init__(self, budget: Budget, *, cast_commander: bool = False, with_trigger: bool = False, triage: dict | None = None):
         self.budget, self.prompts, self.cast_commander = budget, [], cast_commander
+        self.with_trigger, self.triage = with_trigger, triage or {}   # a made-up trigger on top of the commander; triage answers
 
     def ask(self, system: str, prompt: str, *, tools: McpConnection | None = None, schema: dict | None = None, **_) -> Reply:
         self.budget.begin()
         self.prompts.append(prompt)
         if tools is None:  # a triage question: this scripted player never responds
-            reply = Reply(data={"respond": False, "why": "scripted"}, text="", cost_usd=0.01, seconds=0.5, model=self.model)
+            reply = Reply(data={"respond": False, "why": "scripted", **self.triage}, text="", cost_usd=0.01, seconds=0.5, model=self.model)
             self.budget.record(reply)
             return reply
         count = [0]
@@ -82,6 +83,9 @@ class ScriptedSeat:
                     and len([c for c in view["battlefield"] if c["controller"] == me and not c["tapped"]]) >= 4:
                 lands = [c["handle"] for c in view["battlefield"] if c["controller"] == me and not c["tapped"]][:4]
                 result = tool("cast", card=view["seats"][me]["command"][0]["handle"], payment={"tap": lands}, resolves="auto_permanent")
+            elif self.with_trigger and waiting_for == "priority" and [i["kind"] for i in view["stack"]] == ["spell"]:
+                self.with_trigger = False
+                result = tool("add_trigger", text="Whenever you cast your commander, scry 1.")
             elif waiting_for == "priority" and view["turn"]["active"] == me and view["stack"]:
                 result = tool("pass_priority")   # my own spell is on the stack: let it resolve
             elif waiting_for == "priority" and view["turn"]["active"] == me and not view["stack"]:
@@ -185,7 +189,7 @@ def test_a_wake_starts_with_a_briefing_and_responses_are_triaged_in_parallel(dat
     talrands_turns = {e["turn"] for e in events if e["seat"] == 0 and e["tool"] == "play_land"}
     woken_to_pass = [w for w in report["wakes"] if w["kind"] == "priority" and w["seat"] != 0 and w["turn"] in talrands_turns]
     assert talrands_turns and woken_to_pass == []                          # on Talrand's turns nobody else was woken just to pass
-    assert report["standings"][0]["commander_casts"] == {"Talrand, Sky Summoner": 1} and pod._TRIAGE["required"] == ["respond", "why"]
+    assert report["standings"][0]["commander_casts"] == {"Talrand, Sky Summoner": 1} and pod._TRIAGE["required"] == ["respond", "ask_again", "why"]
 
 
 def test_status_reads_a_game_directory_while_it_is_being_written(database, tmp_path):
@@ -316,3 +320,27 @@ def test_notes_and_a_response_policy_can_still_be_saved_after_a_wake_has_ended()
     assert table.call(wake, "2", "write_notes", {"text": "Bob is the threat."})["ok"] and table.notes[0] == "Bob is the threat."
     assert table.call(wake, "3", "set_response_policy", {"policy": "pass_always"})["ok"]
     assert "seats" in table.call(wake, "4", "get_view") and table.call(wake, "5", "pass_priority")["error"]["code"] == "stale_wake"
+
+
+@pytest.mark.parametrize("answer, questions", [({}, 4), ({"ask_again": True}, 4), ({"ask_again": False}, 2)])
+def test_one_answer_can_cover_everything_on_the_stack(database, tmp_path, answer, questions):
+    budget = Budget(max_calls=400)
+    seats = [ScriptedSeat(budget, cast_commander=True, with_trigger=True), ScriptedSeat(budget, triage=answer), ScriptedSeat(budget, triage=answer)]
+    report = play_pod(decks(tmp_path), seats, FakeRunner([OK] * 120, budget), database, cycles=5, seed=4,
+                      out_root=tmp_path / "games", echo=lambda *_: None)
+    assert report["stopped"] is None and report["standings"][0]["commander_casts"] == {"Talrand, Sky Summoner": 1}
+    # Talrand's commander and a trigger above it: two other seats, asked once each, or once per item.
+    assert [(t["about"], t["stack"]) for t in report["triage"]].count(("a triggered ability", 2)) == 2
+    assert len(report["triage"]) == questions
+    asked = next(p for p in seats[1].prompts if "The stack, top first:" in p)
+    assert "1. Talrand's a triggered ability: Whenever you cast your commander, scry 1.  (new since you were last asked)" in asked
+    assert "2. Talrand's Talrand, Sky Summoner  (new since you were last asked)" in asked
+
+
+def test_a_triage_answer_can_set_a_standing_policy(database, tmp_path):
+    budget = Budget(max_calls=400)
+    seats = [ScriptedSeat(budget, cast_commander=True, with_trigger=True), ScriptedSeat(budget, triage={"policy": "pass_always"}), ScriptedSeat(budget)]
+    report = play_pod(decks(tmp_path), seats, FakeRunner([OK] * 120, budget), database, cycles=5, seed=4,
+                      out_root=tmp_path / "games", echo=lambda *_: None)
+    assert report["stopped"] is None
+    assert [t["seat"] for t in report["triage"]].count(1) == 1 and [t["seat"] for t in report["triage"]].count(2) == 2

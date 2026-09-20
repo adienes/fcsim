@@ -60,8 +60,10 @@ for you: the result then says `wake`. When you end your turn tapped out, or hold
 respond with, call set_response_policy so the table stops asking you until your next turn. Then stop calling \
 tools and reply with one or two sentences on what you did and why; only you will see them."""
 
-_TRIAGE = {"type": "object", "additionalProperties": False, "required": ["respond", "why"],
-           "properties": {"respond": {"type": "boolean"}, "why": {"type": "string", "description": "One short sentence."}}}
+_TRIAGE = {"type": "object", "additionalProperties": False, "required": ["respond", "ask_again", "why"],
+           "properties": {"respond": {"type": "boolean"}, "ask_again": {"type": "boolean"},
+                          "policy": {"type": "string", "enum": ["ask", "pass_unless_targeted", "pass_always"]},
+                          "why": {"type": "string", "description": "One short sentence."}}}
 _DEFAULTS = {"priority": "pass_priority", "mulligan": "keep", "declare_attackers": "declare_attackers",
              "declare_blockers": "declare_blockers", "combat_damage": "combat_damage", "discard": "finish_step",
              "held_step": "finish_step", "resolution": "finish_resolution", "correction": "finish_step"}
@@ -154,7 +156,8 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
     # Each seat's place in the log, so a wake can say what happened since its last one. After a
     # resume the players start from their notes and the board, not from the whole history again.
     seen = [len(table.events) if earlier is not None else 0] * count
-    decisions: dict = {}  # triage answers for the stack as it currently stands
+    decisions: dict = {}  # who said they will respond to the stack as it currently stands
+    waived: list[set] = [set() for _ in range(count)]  # per seat, the stack items it has said it will let resolve
     report: dict = {"directory": str(directory.path), "seed": seed, "seats": names, "stopped": None,
                     "triage": list((earlier or {}).get("triage", [])),
                     "wakes": list((earlier or {}).get("wakes", [])), "audits": list((earlier or {}).get("audits", [])),
@@ -238,13 +241,26 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
 
     def triage(seats: list[int]) -> dict[int, bool]:
         """Ask several seats at once, each with one question and no tools, whether they want to
-        respond to what is on the stack. Most answers are no, and a no costs seconds, not a wake."""
+        respond to what is on the stack. Most answers are no, and a no costs seconds, not a wake.
+        One answer can cover the whole stack, and the rest of the turn, so that a chain of
+        triggers is one question and not one per trigger."""
         game = table.game
         top = game.stack[-1]
-        question = (f"{names[top.controller]}'s {top.source_name} is on top of the stack and you have priority. Do you want to "
-                    "respond before it resolves, by casting a spell or activating an ability? Answer respond=false to pass. "
-                    "Answer respond=true only if you would actually act now; you will then be woken to do it.")
-        prompts = {seat: f"{when()} {question}\n\n"
+
+        def question(seat: int) -> str:
+            items = [f"  {n}. {names[item.controller]}'s {item.source_name}" + (f": {item.text}" if item.text else "")
+                     + ("" if item.id in waived[seat] else "  (new since you were last asked)")
+                     for n, item in enumerate(reversed(game.stack), 1)]
+            return (f"{names[top.controller]}'s {top.source_name} is on top of the stack and you have priority. The stack, top first:\n"
+                    + "\n".join(items) + "\nDo you want to respond now, before the top item resolves, by casting a spell or "
+                    "activating an ability? Answer respond=false to pass; answer respond=true only if you would actually act "
+                    "now, and you will then be woken to do it. If you pass, `ask_again` says what happens as this stack "
+                    "resolves: false means you will let everything now on the stack resolve, and the table passes for you "
+                    "until something new is added; true means you want to be asked again before each lower item resolves. "
+                    "If you would respond to nothing at all before your next turn (you are tapped out, or hold nothing you "
+                    "could use), also set `policy` to \"pass_always\", or to \"pass_unless_targeted\" to be asked only "
+                    "about things that target you or what you control.")
+        prompts = {seat: f"{when()} {question(seat)}\n\n"
                          f"{news(seat)}\n\n{briefing(seat)}" for seat in seats}
 
         def one(seat: int):
@@ -253,9 +269,15 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
             replies = list(pool.map(one, seats))
         answers = {}
         for seat, reply in replies:
-            answers[seat] = bool((reply.data or {}).get("respond"))
-            record = {"turn": game.turn.number, "seat": seat, "respond": answers[seat], "why": (reply.data or {}).get("why", ""),
-                      "about": top.source_name, "seconds": round(reply.seconds, 1)}
+            data = reply.data or {}
+            answers[seat] = bool(data.get("respond"))
+            if not answers[seat]:  # asked again by default: a player who says nothing about the rest has only passed once
+                waived[seat] = {top.id} if data.get("ask_again", True) else {item.id for item in game.stack}
+                if data.get("policy") in ("pass_unless_targeted", "pass_always"):
+                    table.act(seat, "set_response_policy", {"policy": data["policy"]})
+            record = {"turn": game.turn.number, "seat": seat, "respond": answers[seat], "why": data.get("why", ""),
+                      "about": top.source_name, "stack": len(game.stack), "ask_again": bool(data.get("ask_again", True)),
+                      "policy": data.get("policy"), "seconds": round(reply.seconds, 1)}
             report["triage"].append(record)
             directory.append(f"transcript-seat-{seat}.jsonl", {"kind": "triage", **record})
         echo(f"turn {game.turn.number} {game.turn.step}: response to {top.source_name}: "
@@ -361,16 +383,17 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
                 table.act(seat, _DEFAULTS[kind])  # an empty hand and nothing untapped; or nothing that could block
                 continue
             if kind == "priority" and game.stack:
-                # A chance to respond. Ask everyone still to act at once, and remember the answers
-                # for as long as the stack stays as it is.
-                signature = tuple(item.id for item in game.stack)
+                # A chance to respond. Ask everyone still to act at once, except those who have
+                # already said they will let the top item resolve, or have a standing "pass for me".
+                signature, top = tuple(item.id for item in game.stack), game.stack[-1].id
                 if decisions.get("stack") != signature:
-                    waiting = [s for s in game.turn_order_from(seat) if s not in game.turn.passed and s != me]
-                    asked = [s for s in waiting if _wants_asking(table, s)]  # the rest have a standing "pass for me"
-                    answers = triage(asked) if asked else {}
                     decisions.clear()
-                    decisions.update(stack=signature, **{str(s): answers.get(s, False) for s in waiting})
-                if not decisions.get(str(seat), True):
+                    decisions.update(stack=signature, respond=set())
+                waiting = [s for s in game.turn_order_from(seat) if s not in game.turn.passed and s != me]
+                asked = [s for s in waiting if s not in decisions["respond"] and top not in waived[s] and _wants_asking(table, s)]
+                if asked:
+                    decisions["respond"] |= {s for s, responds in triage(asked).items() if responds}
+                if seat not in decisions["respond"]:
                     table.act(seat, "pass_priority")
                     seen[seat] = len(table.events)
                     continue
