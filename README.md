@@ -152,6 +152,28 @@ split second, first strike, and trample with deathtouch. Every run has a hard
 limit on calls and on Claude Code's cost estimate; on a subscription that
 estimate is plan usage at list prices, not a charge.
 
+Measured on 2026-09-20 over all 41 scenarios: `claude-opus-5` passed 41 with no
+false alarms, about 11 seconds and 4 cents (estimated) an audit; `claude-sonnet-5`
+passed 39, missing one of two triggers on a busy board and a tapped land played
+untapped, at half the time and a third of the usage.
+
+## Goldfish
+
+```sh
+uv run fcsim goldfish examples/talrand.txt --turns 10 --max-calls 30
+```
+
+One agent pilots the deck against a seat, Goldfish, that never acts and is passed
+for mechanically. The pilot is a headless Claude Code session whose only tools are
+the table's, served to it over MCP with a token for its seat (`fcsim.mcp`,
+`fcsim.tools`). Each pilot turn is one wake, and the auditor reviews it before the
+game goes on, so its hooks are in the ledger before any later step runs. A game
+directory under `games/` gets the configuration, the deck as played, card text,
+the event log, a readable `log.md`, state, audits, the pilot's notes and
+transcript, usage, and `report.md`: lands, spells and attacks by turn, the pilot's
+own account of each turn, and rules health. Findings are recorded but not yet
+corrected. A three-turn run took about four minutes and seven model calls.
+
 ```sh
 uv run pytest
 uv build

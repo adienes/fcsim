@@ -40,7 +40,8 @@ it as "auto_permanent", the table then waits for you to resolve it: use resolve,
 as the effect needs, then finish_resolution.
 - Pay costs by naming the permanents you tap in `payment`. Tap only what the cost needs.
 - With an empty stack, passing priority moves the game to the next step. The table untaps your \
-permanents and draws your card for the turn by itself.
+permanents and draws your card for the turn by itself. Do not pass one step at a time: use \
+pass_priority with `until` to go straight to the step where you next want to act.
 - In combat the table asks you to declare_attackers, then later to deal combat_damage.
 - Carry out triggered abilities (add_trigger, then resolve them) and state-based actions yourself.
 - Goldfish passes instantly, so after you pass you usually hold the pen again at once.

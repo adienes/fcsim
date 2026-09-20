@@ -11,7 +11,7 @@ import copy
 from collections.abc import Callable
 
 from . import mutations, ops, turn
-from .model import Dice, Game, Obj, Seat, StackItem, TableError
+from .model import STEPS, Dice, Game, Obj, Seat, StackItem, TableError
 from .views import Handles, obj_view, view
 
 _OBJECT_KEYS = frozenset({"card", "source", "obj", "objs", "attacker", "blocker", "attached_to", "copy_of",
@@ -247,8 +247,15 @@ class Table:
         return ops.Told(public=[f"{self._name(seat)} keeps {len(game.seats[seat].hand)} cards."])
 
     def _do_pass_priority(self, game: Game, seat: int, args: dict):
+        until = args.get("until")
+        if until is not None:
+            if until not in STEPS or STEPS.index(until) <= STEPS.index(game.turn.step):
+                raise TableError("bad_step", f"`until` must be a later step of this turn: one of "
+                                             f"{', '.join(STEPS[STEPS.index(game.turn.step) + 1:-1])}.")
+            game.seats[seat].yield_to = {"turn": game.turn.number, "step": until}
         turn.pass_priority(game, seat)
-        return ops.Told(public=[f"{self._name(seat)} passes priority."])
+        return ops.Told(public=[f"{self._name(seat)} passes priority" + (f", and will keep passing until the {until} step "
+                                "unless something happens." if until else ".")])
 
     def _do_play_land(self, game: Game, seat: int, args: dict):
         obj = mutations.get(game, args["card"])
@@ -440,7 +447,7 @@ class Table:
 
     def _do_write_notes(self, game: Game, seat: int, args: dict):
         self.notes[seat] = str(args.get("text", ""))
-        return ops.Told(private={seat: ["Notes saved."]})
+        return ops.Told(public=[f"{self._name(seat)} writes in their notes."], private={seat: ["Notes saved."]})
 
     # ---- host, auditor and judge actions: not available to seats -----------------------------
 

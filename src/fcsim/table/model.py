@@ -118,6 +118,7 @@ class Seat:
     mulligans: int = 0
     kept: bool = False
     drew_from_empty: bool = False
+    yield_to: dict | None = None   # {"turn", "step"}: pass by itself until that step, while the stack stays empty
 
 
 @dataclass

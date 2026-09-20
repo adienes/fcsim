@@ -249,6 +249,9 @@ def apply_batch(game: Game, dice: Dice, actor: int, batch: list[dict]) -> Told:
     if not isinstance(batch, list) or not batch or not all(isinstance(op, dict) for op in batch):
         raise TableError("bad_batch", "Give a non-empty list of mutations, each like {\"op\": \"tap\", \"objs\": [...]}.")
     told = Told()
+    # Accept {"tap": {...}} for {"op": "tap", ...}: a slip agents make, with only one possible meaning.
+    batch = [{"op": next(iter(op)), **next(iter(op.values()))}
+             if "op" not in op and len(op) == 1 and isinstance(next(iter(op.values())), dict) else op for op in batch]
     for index, op in enumerate(batch):
         if op.get("op") == "request_choice" and index != len(batch) - 1:
             raise TableError("bad_batch", "`request_choice` must be the last mutation in its batch: nothing "

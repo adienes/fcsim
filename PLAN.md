@@ -2,8 +2,9 @@
 
 Status: design, 2026-09-20, revised once after an outside review. Built so far:
 the rules reference (`fcsim rules`), M0 (`fcsim cards`, `fcsim deck check`), M1
-(the table, `fcsim.table`) and most of M2 (the auditor and its scenario suite,
-`fcsim audit`); see README.md.
+(the table, `fcsim.table`), M2 (the auditor and its scenario suite, `fcsim audit`;
+event-trigger matching is still to do) and the goldfish half of M3 (`fcsim
+goldfish`); see README.md.
 
 ## 1. Goal
 

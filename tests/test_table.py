@@ -332,3 +332,37 @@ def test_auditor_hooks_hold_a_step_until_their_source_leaves():
     assert table.view(0)["battlefield"][0]["tapped"] and table.game.turn.step == "upkeep"
     runner.step(0, "act", {"mutations": [{"op": "move", "obj": f"@{vault}", "to": "graveyard"}], "because": "sacrificed"})
     assert table.view(0)["ledger"] == []               # the hook left with its source
+
+
+def test_passing_until_a_step_skips_the_steps_between_and_stops_when_something_happens():
+    table, runner = started()
+    assert table.game.turn.step == "upkeep"
+    runner.step(0, "pass_priority", {"until": "upkeep"}, error="bad_step")
+    count = len(table.events)
+    runner.step(0, "pass_priority", {"until": "main1"})
+    runner.step(1, "pass_priority"), runner.step(2, "pass_priority")     # upkeep ends; Ann's draw step passes by itself
+    runner.step(1, "pass_priority"), runner.step(2, "pass_priority")
+    assert table.game.turn.step == "main1" and table.expected() == [(0, "priority")] and len(table.events) == count + 5
+    assert table.game.seats[0].yield_to is None                         # reached: the request is spent
+    runner.step(0, "pass_priority", {"until": "end"})
+    runner.step(1, "cast", {"card": f"@{spell_in_hand(table, 1)}"})     # something happens: Ann is asked again
+    runner.step(1, "pass_priority"), runner.step(2, "pass_priority")
+    assert table.expected() == [(0, "priority")] and table.game.turn.step == "main1" and table.game.stack
+    runner.step(0, "pass_priority")                                     # everyone has now passed: Bob's spell resolves
+    runner.step(1, "finish_resolution")
+    runner.step(0, "pass_priority", {"until": "end"})                   # through combat: attacks with nothing
+    for _ in range(12):
+        if table.game.turn.step == "end":
+            break
+        holder = table.expected()[0][0]
+        assert holder != 0
+        runner.step(holder, "pass_priority")
+    assert table.game.turn.step == "end" and table.game.turn.attackers == [] and table.expected() == [(0, "priority")]
+    assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()
+
+
+def test_a_mutation_written_with_its_name_as_the_key_is_understood():
+    table, runner = started()
+    pass_until(table, runner, "main1")
+    result = runner.step(0, "act", {"mutations": [{"life": {"seat": 1, "delta": -3}}], "because": "test"})
+    assert result["log"][-1] == "Bob is at 37 life."

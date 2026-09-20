@@ -92,8 +92,11 @@ def _perform(game: Game, step: str) -> bool:
     if step == "draw":
         mutations.draw(game, active, 1)
     elif step == "declare_attackers":
-        game.control = Control("turn_action", [active], {"action": "declare_attackers"})
-        return True
+        if _yielding(game, active):   # passing through combat means attacking with nothing
+            turn.remaining[:] = [s for s in turn.remaining if s not in ("declare_blockers", "combat_damage")]
+        else:
+            game.control = Control("turn_action", [active], {"action": "declare_attackers"})
+            return True
     elif step == "declare_blockers":
         defenders = [s for s in game.turn_order_from(active)
                      if any(a["target"].get("seat") == s or _controller_of(game, a["target"]) == s
@@ -148,7 +151,24 @@ def grant_priority(game: Game, seat: int) -> None:
         if candidate in owed:
             game.control = Control("triggers", [candidate], {"then": seat})
             return
-    game.control = Control("priority", [seat if game.seats[seat].status == "alive" else game.turn.active])
+    _give_priority(game, seat if game.seats[seat].status == "alive" else game.turn.active)
+
+
+def _yielding(game: Game, seat: int) -> bool:
+    """Whether the seat asked to pass by itself up to a later step of this turn. The request
+    lapses as soon as anything is on the stack, the step is reached, or the turn changes."""
+    wanted = game.seats[seat].yield_to
+    if wanted and wanted["turn"] == game.turn.number and not game.stack and not game.pending_triggers \
+            and STEPS.index(game.turn.step) < STEPS.index(wanted["step"]):
+        return True
+    game.seats[seat].yield_to = None
+    return False
+
+
+def _give_priority(game: Game, seat: int) -> None:
+    game.control = Control("priority", [seat])
+    if _yielding(game, seat):
+        pass_priority(game, seat)
 
 
 def trigger_handled(game: Game, pending_id: int) -> dict:
@@ -172,7 +192,7 @@ def pass_priority(game: Game, seat: int) -> None:
     living = game.turn_order_from(seat + 1)
     waiting = [s for s in living if s not in turn.passed]
     if waiting:
-        game.control = Control("priority", [waiting[0]])
+        _give_priority(game, waiting[0])
     elif game.stack:
         _begin_resolution(game)
     else:

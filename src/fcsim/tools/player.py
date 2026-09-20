@@ -59,7 +59,12 @@ PLAYER_TOOLS = [
     _tool("keep", "Keep your hand. After more than one mulligan, `bottom` must list one card per extra mulligan.",
           {"bottom": {"type": "array", "items": _HANDLE}}),
     _tool("pass_priority", "Pass priority. When every player passes in succession, the top of the stack resolves, "
-          "or if the stack is empty the game moves to the next step."),
+          "or if the stack is empty the game moves to the next step. With `until`, you keep passing by yourself "
+          "until that later step of this turn, stopping early if anything goes on the stack; passing through "
+          "combat this way attacks with nothing. Use it to skip steps you have nothing to do in, for example "
+          "until \"main1\" at the start of your turn, or until \"end\" when you are finished.",
+          {"until": {"type": "string", "enum": ["draw", "main1", "begin_combat", "declare_attackers", "declare_blockers",
+                                                "combat_damage", "end_combat", "main2", "end"]}}),
     _tool("play_land", "Play a land from your hand.", {"card": _HANDLE, "enters": _ENTERS}, ("card",)),
     _tool("cast", "Cast a spell: it goes on the stack and you keep priority. Set `resolves` to \"auto_permanent\" "
           "only for a permanent that enters with nothing to decide (no enters-tapped, counters, choices or copy); "
