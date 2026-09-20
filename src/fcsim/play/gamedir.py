@@ -24,6 +24,21 @@ class GameDirectory:
         self.path = Path(root) / f"{datetime.now():%Y-%m-%d_%H%M%S}_{slug(label)}_{seed % 10000:04d}"
         (self.path / "decks").mkdir(parents=True)
 
+    @classmethod
+    def open(cls, path: str | Path) -> GameDirectory:
+        """An existing game, to read it or to play on from where it stopped."""
+        directory = cls.__new__(cls)
+        directory.path = Path(path)
+        if not (directory.path / "events.jsonl").is_file() or not (directory.path / "config.json").is_file():
+            raise ValueError(f"{path} is not a game directory: it has no events.jsonl and config.json.")
+        return directory
+
+    def read(self, name: str):
+        return json.loads((self.path / name).read_text(encoding="utf-8"))
+
+    def events(self) -> list[dict]:
+        return [json.loads(line) for line in (self.path / "events.jsonl").read_text(encoding="utf-8").splitlines() if line]
+
     def write(self, name: str, content: str | dict | list) -> None:
         text = content if isinstance(content, str) else json.dumps(content, indent=1, ensure_ascii=False)
         partial = self.path / f".{name.replace('/', '_')}.partial"
