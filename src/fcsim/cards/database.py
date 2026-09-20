@@ -72,7 +72,8 @@ class CardDatabase:
         self.path = Path(path) if path else default_data_dir() / "scryfall" / "cards.sqlite"
         if not self.path.is_file():
             raise CardsError(f"No card database at {self.path}. Run `fcsim cards update` first.")
-        self._db = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True)
+        # Read-only, and looked up from the tool server's thread as well as the driver's, never at once.
+        self._db = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True, check_same_thread=False)
         self._cache: dict[str, Card | None] = {}
         self._norms: list[str] | None = None
 

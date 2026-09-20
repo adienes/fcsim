@@ -9,6 +9,7 @@ from .agents import Budget, ClaudeCodeRunner, RunnerError
 from .audit import Auditor, build, load_scenarios, materials, play, run_suite
 from .audit import render as render_report
 from .cards import CardDatabase, CardsError
+from .play import goldfish
 from .rules import RulesError, RulesReference
 from .workshop.check import check_deck, render
 
@@ -72,10 +73,20 @@ def main(argv: list[str] | None = None) -> int:
     suite.add_argument("--json", action="store_true")
     suite.add_argument("--out", help="Also write the full report, verdicts included, to this JSON file")
 
+    fish = commands.add_parser("goldfish", help="An agent pilots a deck alone, audited (uses your Claude Code login)")
+    fish.add_argument("deck")
+    fish.add_argument("--turns", type=int, default=10)
+    fish.add_argument("--seed", type=int)
+    fish.add_argument("--model", default="claude-opus-5", help="The pilot's model")
+    fish.add_argument("--audit-model", default="claude-opus-5")
+    fish.add_argument("--max-calls", type=int, default=30, help="Hard limit on model calls for this run")
+    fish.add_argument("--max-cost", type=float, default=15.0, help="Hard limit on estimated cost at list prices, USD")
+    fish.add_argument("--out", default="games", help="Directory to create the game directory in")
+
     args = parser.parse_args(argv)
-    if args.command in ("cards", "deck", "audit"):
+    if args.command in ("cards", "deck", "audit", "goldfish"):
         try:
-            return {"cards": _cards, "deck": _deck, "audit": _audit}[args.command](args)
+            return {"cards": _cards, "deck": _deck, "audit": _audit, "goldfish": _goldfish}[args.command](args)
         except (CardsError, RunnerError, ValueError, OSError) as exc:
             print(json.dumps({"error": {"code": "cards_error", "message": str(exc)}}), file=sys.stderr)
             return 2
@@ -152,3 +163,18 @@ def _audit(args: argparse.Namespace) -> int:
     print(json.dumps(report, indent=2, ensure_ascii=False) if args.json else render_report({"results": [], "summary": report["summary"]}))
     done = [r for r in report["results"] if "passed" in r]
     return 0 if done and all(r["passed"] for r in done) else 1
+
+
+def _goldfish(args: argparse.Namespace) -> int:
+    budget = Budget(max_calls=args.max_calls, max_cost_usd=args.max_cost)
+    try:
+        rules = RulesReference()
+    except RulesError:
+        rules = None
+    report = goldfish(args.deck, ClaudeCodeRunner(model=args.model, budget=budget, timeout=1800),
+                      ClaudeCodeRunner(model=args.audit_model, budget=budget), CardDatabase(),
+                      turns=args.turns, seed=args.seed, out_root=args.out, rules=rules)
+    with open(f"{report['directory']}/report.md", encoding="utf-8") as text:
+        print("\n" + text.read())
+    print(f"Everything is in {report['directory']}")
+    return 0 if not report["stopped"] else 1

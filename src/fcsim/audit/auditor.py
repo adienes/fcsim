@@ -192,11 +192,12 @@ def card_reference(names: list[str], database: CardDatabase, *, rulings_per_card
     return "\n".join(lines)
 
 
-def materials(table: Table, before: str, since_event: int, database: CardDatabase, before_names: list[str]) -> str:
+def materials(table: Table, before: str, since_event: int, database: CardDatabase, before_names: list[str],
+              until_event: int | None = None) -> str:
     """The prompt for one audit: the table before, what was done, the table after, the cards."""
     after_view = table.view(None)
     record = []
-    for event in table.events[since_event:]:
+    for event in table.events[since_event:until_event]:
         actor = table.game.seats[event["seat"]].name if event["seat"] is not None else "the table"
         record.append(f"event {event['n']} ({actor}, {event['tool']}, during {event['step']}): " + " ".join(event["public"]))
         record += [f"    table warning: {lint}" for lint in event["lints"]]
@@ -217,9 +218,10 @@ class Auditor:
         view = table.view(None)
         return describe(view), _names(view), len(table.events)
 
-    def audit(self, table: Table, snapshot: tuple[str, list[str], int]) -> tuple[dict, Reply]:
+    def audit(self, table: Table, snapshot: tuple[str, list[str], int], until_event: int | None = None) -> tuple[dict, Reply]:
         before, names, since = snapshot
-        reply = self.runner.ask(SYSTEM, materials(table, before, since, self.database, names), schema=VERDICT_SCHEMA)
+        reply = self.runner.ask(SYSTEM, materials(table, before, since, self.database, names, until_event),
+                                schema=VERDICT_SCHEMA)
         verdict = reply.data
         serious = [f for f in verdict.get("findings", []) if f.get("kind") in SERIOUS]
         verdict["verdict"] = "findings" if serious else "ok"  # the findings decide, whatever the label says
