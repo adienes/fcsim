@@ -329,6 +329,16 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
             game = table.game
             if game.control.kind == "over" or game.seats[game.turn.active].turns_taken > last_round:
                 return "over"
+            lost = _must_lose(table)
+            if lost and me is not None:
+                return "wake"  # end this wake first: correcting the table kills open wakes
+            if lost:
+                # Losing the game is a state-based action the table can see for itself, and nobody
+                # should receive priority first (rule 704.3). In the first real game two players sat
+                # at -1 life while priority went round.
+                table.patch([{"op": "eliminate", "seat": seat, "reason": reason} for seat, reason in lost],
+                            "state-based action: " + "; ".join(f"{names[seat]} loses ({reason})" for seat, reason in lost))
+                continue
             if table.awaiting_audit:
                 # By default a turn is audited whole, before the next one begins: that is when its
                 # hooks must exist. Checkpoints inside the turn are released at once.
@@ -402,6 +412,22 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
     directory.write("report.json", report)
     directory.write("report.md", render(report))
     return report
+
+
+def _must_lose(table: Table) -> list[tuple[int, str]]:
+    """Living seats that the rules say have lost, unless the ledger holds their loss (a "can't lose" effect)."""
+    game, lost = table.game, []
+    held = {e.get("seat") for e in game.ledger if e.get("kind") == "hold" and e.get("step") == "loss"}
+    for seat in game.seats:
+        if seat.status != "alive" or seat.index in held:
+            continue
+        lethal = next((f"21 or more commander damage from {source}" for source, n in seat.commander_damage.items() if n >= 21), None)
+        reason = f"{seat.life} life, rule 704.5a" if seat.life <= 0 else \
+            f"{seat.counters['poison']} poison counters, rule 704.5c" if seat.counters.get("poison", 0) >= 10 else \
+            "drew from an empty library, rule 704.5b" if seat.drew_from_empty else lethal
+        if reason:
+            lost.append((seat.index, reason))
+    return lost
 
 
 def _wants_asking(table: Table, seat: int) -> bool:

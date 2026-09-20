@@ -66,7 +66,9 @@ the card-blind table needs in order to act correctly later when no agent is look
 permanent by its handle, the code in brackets after its name under THE TABLE NOW, because two \
 permanents can share a name:
 - hold: a mechanical step the table must not perform by itself. step is "draw", "untap" or \
-"cleanup"; seat is the player whose step it is. Example: a permanent that replaces draws.
+"cleanup"; seat is the player whose step it is. Example: a permanent that replaces draws. Use \
+step "loss" for an effect that stops a player losing the game (Platinum Angel): the table \
+otherwise removes a player at 0 life, 10 poison, 21 commander damage or a draw from an empty library.
 - step_trigger: an ability that triggers at the beginning of a step. step is one of upkeep, \
 draw, main1, begin_combat, end_combat, main2, end; whose is "each" or a seat number.
 - event_trigger: an ability that triggers on a game event, described in text. Also give `on`, so \

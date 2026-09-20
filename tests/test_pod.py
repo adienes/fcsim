@@ -269,3 +269,38 @@ def test_summarize_condenses_each_round_once_and_writes_the_story(database, tmp_
     assert len(again.asked) == 2          # round 1 is reused; the last round of an unfinished game and the story are rewritten
     with pytest.raises(ValueError, match="style"):
         summarize(game["directory"], again, database, style="epic")
+
+
+def test_the_driver_applies_a_loss_before_anyone_gets_priority(database, tmp_path):
+    from fcsim.play import pod
+    from fcsim.table import Table
+    table = Table([{"name": n, "commanders": [], "library": ["Island"] * 40} for n in ("Ann", "Bob", "Cat")], seed=1, first=0)
+    for seat in range(3):
+        table.act(seat, "keep")
+    assert pod._must_lose(table) == []
+    table.patch([{"op": "life", "seat": 1, "set": -1}, {"op": "counters", "seat": 2, "kind": "poison", "set": 10}], "set up")
+    assert pod._must_lose(table) == [(1, "-1 life, rule 704.5a"), (2, "10 poison counters, rule 704.5c")]
+    table.game.ledger.append({"kind": "hold", "step": "loss", "seat": 1, "text": "Platinum Angel"})
+    assert pod._must_lose(table) == [(2, "10 poison counters, rule 704.5c")]
+
+    budget = Budget(max_calls=300)
+    burn = {"kind": "note", "summary": "n/a", "basis": "", "fix": "", "confidence": "low"}
+    seats = [ScriptedSeat(budget) for _ in range(3)]
+    original = seats[1].ask
+
+    def lose_life_then_play(system, prompt, **kw):   # Pir (the first player) drops Thrasios to 0 on its first turn
+        if kw.get("tools") is not None and "Round 1, Pir" in prompt and not getattr(lose_life_then_play, "done", False):
+            lose_life_then_play.done = True
+            request = urllib.request.Request(kw["tools"].url, data=json.dumps({"jsonrpc": "2.0", "id": 99, "method": "tools/call", "params": {
+                "name": "act", "arguments": {"because": "test burn", "mutations": [{"op": "life", "seat": 2, "set": 0}]}}}).encode(),
+                headers={**kw["tools"].headers, "Content-Type": "application/json"})
+            urllib.request.urlopen(request, timeout=10).read()
+        return original(system, prompt, **kw)
+    seats[1].ask = lose_life_then_play
+    report = play_pod(decks(tmp_path), seats, FakeRunner([{"verdict": "ok", "findings": [burn], "hooks": []}] * 40, budget), database,
+                      cycles=2, seed=4, out_root=tmp_path / "games", echo=lambda *_: None)
+    log = (Path(report["directory"]) / "log.md").read_text()
+    assert "state-based action: Thrasios loses (0 life, rule 704.5a)" in log and report["standings"][2]["status"] == "eliminated"
+    after = log.split("Thrasios loses")[1]
+    assert "Thrasios passes priority" not in after and "Thrasios plays" not in after      # it never acted again
+    assert report["stopped"] is None and report["standings"][0]["permanents"] == 2
