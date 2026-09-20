@@ -22,10 +22,10 @@ _RENAMED = {"object": "obj", "stack_item": "item"}
 _ALLOWED = {
     "mulligan": ("setup",), "keep": ("setup",),
     "pass_priority": ("priority",), "play_land": ("priority",), "cast": ("priority",),
-    "activate": ("priority", "resolution", "held_step"), "act": ("priority", "held_step", "turn_action"),
+    "activate": ("priority", "resolution", "held_step"), "act": ("priority", "held_step", "turn_action", "correction"),
     "add_trigger": ("priority", "triggers"), "skip_trigger": ("triggers",),
     "resolve": ("resolution",), "finish_resolution": ("resolution",),
-    "answer": ("request",), "finish_step": ("held_step", "turn_action"),
+    "answer": ("request",), "finish_step": ("held_step", "turn_action", "correction"),
     "declare_attackers": ("turn_action",), "declare_blockers": ("turn_action",), "combat_damage": ("turn_action",),
 }
 _READ_ONLY = frozenset({"get_view", "get_log", "get_notes"})
@@ -392,6 +392,9 @@ class Table:
 
     def _do_finish_step(self, game: Game, seat: int, args: dict):
         what = game.control.detail.get("step") or game.control.detail.get("action")
+        if game.control.kind == "correction":
+            turn.correction_done(game)
+            return ops.Told(public=[f"{self._name(seat)} has finished correcting the table."])
         if game.control.kind == "held_step":
             turn.held_step_done(game)
         elif game.control.detail.get("action") == "discard":
@@ -486,6 +489,23 @@ class Table:
 
     def _do_release(self, game: Game, seat: None, args: dict):
         turn.release(game)
+
+    def queue_trigger(self, seat: int, text: str) -> dict:
+        """An ability the auditor says has triggered: its controller must deal with it before anyone gets priority."""
+        return self._execute(None, "queue_trigger", {"seat": seat, "text": text})
+
+    def _do_queue_trigger(self, game: Game, seat: None, args: dict):
+        game.pending_triggers.append({"id": game.new_id(), "seat": ops._seat(game, args["seat"]), "text": str(args["text"]),
+                                      "source": None})
+        return ops.Told(public=[f"A trigger is waiting for {self._name(args['seat'])}: {args['text']}"])
+
+    def open_correction(self, seat: int, finding: str) -> dict:
+        """Give the pen to the seat a finding is about. They fix the table with `act` and end with `finish_step`."""
+        return self._execute(None, "open_correction", {"seat": seat, "finding": finding})
+
+    def _do_open_correction(self, game: Game, seat: None, args: dict):
+        turn.open_correction(game, ops._seat(game, args["seat"]), str(args["finding"]))
+        return ops.Told(public=[f"The auditor asks {self._name(args['seat'])} to correct the table: {args['finding']}"])
 
     def apply_hooks(self, hooks: list[dict]) -> dict:
         """Write an auditor's hooks into the ledger. A hook lasts until its source leaves the battlefield.

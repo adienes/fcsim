@@ -75,6 +75,17 @@ def _gate(game: Game, resume: dict) -> bool:
     return True
 
 
+def open_correction(game: Game, seat: int, finding: str) -> None:
+    """At a checkpoint, hand the pen to the seat an auditor finding is about, to put it right."""
+    if game.control.kind != "audit":
+        raise TableError("not_waiting", "Corrections are made at an audit checkpoint.")
+    game.control = Control("correction", [seat], {"finding": finding, "resume": game.control.detail["resume"]})
+
+
+def correction_done(game: Game) -> None:
+    game.control = Control("audit", [], {"resume": game.control.detail["resume"]})
+
+
 def release(game: Game) -> None:
     if game.control.kind != "audit":
         raise TableError("not_waiting", "The table is not waiting at an audit checkpoint.")
@@ -83,7 +94,7 @@ def release(game: Game) -> None:
         _next_turn(game)
     elif resume["do"] == "advance":
         advance(game)
-    elif resume["do"] == "give":
+    elif resume["do"] == "give" and not game.pending_triggers:
         _give_priority(game, resume["seat"])
     else:
         grant_priority(game, resume["seat"])

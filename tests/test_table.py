@@ -504,3 +504,31 @@ def test_a_gated_table_stops_for_an_audit_before_the_pen_moves_or_a_step_runs():
     table.release()
     assert table.game.turn.number == 2 and table.expected() == [(1, "held_step")] or table.expected() == [(1, "priority")]
     assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()
+
+
+def test_at_a_checkpoint_a_trigger_can_be_queued_and_a_finding_corrected():
+    table = Table(seats(), seed=5, first=0, gated=True)
+    runner = ScriptedRunner(table)
+    for seat in range(3):
+        runner.step(seat, "keep")
+    for _ in range(12):
+        if table.game.turn.step == "main1":
+            break
+        runner.step(table.expected()[0][0], "pass_priority")
+    runner.step(0, "act", {"because": "a spell's effect", "mutations": [{"op": "life", "seat": 1, "delta": -5}]})
+    runner.step(0, "pass_priority")
+    assert table.awaiting_audit
+    table.open_correction(0, "Bob should have lost 3 life, not 5.")
+    assert table.expected() == [(0, "correction")] and table.act(1, "act", {"mutations": [], "because": "x"})["error"]["code"] == "not_your_pen"
+    runner.step(0, "pass_priority", error="not_your_pen")               # a correction is not a chance to play
+    runner.step(0, "act", {"because": "correction", "mutations": [{"op": "life", "seat": 1, "delta": 2}]})
+    runner.step(0, "finish_step")
+    assert table.awaiting_audit and table.view(2)["seats"][1]["life"] == 37
+    table.queue_trigger(2, "Soul Warden: you gain 1 life")
+    table.release()
+    assert table.expected() == [(2, "triggers")]                        # before anyone receives priority
+    runner.step(2, "add_trigger", {"pending": table.view(2)["waiting_triggers"][0]["handle"]})
+    assert table.awaiting_audit                                         # putting a trigger on the stack is auditable too
+    table.release()
+    assert table.expected() == [(1, "priority")]
+    assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()
