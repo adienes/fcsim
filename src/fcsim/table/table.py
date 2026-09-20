@@ -267,7 +267,7 @@ class Table:
         if until is not None:
             if until not in STEPS or STEPS.index(until) <= STEPS.index(game.turn.step):
                 raise TableError("bad_step", f"`until` must be a later step of this turn: one of "
-                                             f"{', '.join(STEPS[STEPS.index(game.turn.step) + 1:-1])}.")
+                                             f"{', '.join(STEPS[STEPS.index(game.turn.step) + 1:])}.")
             game.seats[seat].yield_to = {"turn": game.turn.number, "step": until}
         turn.pass_priority(game, seat)
         return ops.Told(public=[f"{self._name(seat)} passes priority" + (f", and will keep passing until the {until} step "

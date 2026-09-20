@@ -42,7 +42,9 @@ Cards are named by handles, which change whenever a card changes zones: look aga
 as "auto_permanent", the table later waits for you to resolve it: use resolve, as many times as \
 the effect needs, then finish_resolution.
 - Pay costs by naming the permanents you tap in `payment`. Tap only what the cost needs.
-- On your own turn, do not pass one step at a time: use pass_priority with `until`.
+- On your own turn, do not pass one step at a time: use pass_priority with `until`, and when you \
+are finished use until "cleanup", which passes through the rest of your turn. The table passes \
+for you through your own upkeep and draw steps when nothing is waiting there.
 - Put your triggered abilities on the stack (add_trigger) and carry out state-based actions.
 
 You are woken only when the table needs you: on your own turn, when something is on the stack \
@@ -79,12 +81,17 @@ def _names(decks: list) -> list[str]:
 
 def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner: Runner, database: CardDatabase, *, cycles: int = 3,
              seed: int | None = None, out_root: str | Path = "games", rules: RulesReference | None = None,
-             resume: str | Path | None = None, echo=lambda line: print(line, flush=True)) -> dict:
+             resume: str | Path | None = None, audit_every: str = "turn", triage_runners: list[Runner] | None = None,
+             echo=lambda line: print(line, flush=True)) -> dict:
     """Play up to `cycles` turns per seat. `runners[i]` pilots seat i; share one Budget across all
     runners and the auditor to cap the whole game.
 
     With `resume`, play `cycles` more rounds of the game in that directory: its journal is replayed
-    into a table, the decks are the copies it kept, and players pick up from their notes."""
+    into a table, the decks are the copies it kept, and players pick up from their notes.
+    `audit_every` is "turn" (one audit of each whole turn, before the next begins) or "checkpoint"
+    (an audit every time the pen moves after an action: stricter and several times slower).
+    `triage_runners[i]` answers seat i's respond-or-pass questions, if given: a cheaper or
+    lower-effort runner than the one that plays the seat."""
     earlier = GameDirectory.open(resume) if resume else None
     if earlier:
         deck_paths = [earlier.path / "decks" / f"seat-{index}.txt" for index in range(len(earlier.read("config.json")["seats"]))]
@@ -97,7 +104,8 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
         return _play(earlier, Table.replay(earlier.read("config.json")["table"], earlier.events(),
                                            card_lookup=lambda n: (c := database.find(n)) and {"mana_value": c.mana_value}),
                      earlier.read("config.json")["seats"], decks, runners, auditor_runner, database, cycles, rules, echo,
-                     earlier=earlier.read("report.json") if (earlier.path / "report.json").is_file() else None)
+                     earlier=earlier.read("report.json") if (earlier.path / "report.json").is_file() else {"wakes": []},
+                     audit_every=audit_every, triage_runners=triage_runners)
     seed = seed if seed is not None else secrets.randbelow(2 ** 31)
     directory = GameDirectory(out_root, "pod_" + "-".join(names), seed)
     table = Table([{"name": name, "commanders": [c.name for c in deck.commanders], "library": [c.name for c in deck.library()]}
@@ -113,15 +121,18 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
                                     "auditor_model": auditor_runner.model,
                                     "auditor_backend": getattr(auditor_runner, "backend", "custom"),
                                     "deck_issues": [[i.to_dict() for i in validate_deck(d, database)] for d in decks]})
-    return _play(directory, table, names, decks, runners, auditor_runner, database, cycles, rules, echo)
+    return _play(directory, table, names, decks, runners, auditor_runner, database, cycles, rules, echo,
+                 audit_every=audit_every, triage_runners=triage_runners)
 
 
 def _play(directory: GameDirectory, table: Table, names: list[str], decks: list, runners: list, auditor_runner, database: CardDatabase,
-          cycles: int, rules: RulesReference | None, echo, *, earlier: dict | None = None) -> dict:
+          cycles: int, rules: RulesReference | None, echo, *, earlier: dict | None = None, audit_every: str = "turn",
+          triage_runners: list | None = None) -> dict:
     """Schedule seats and audits until the game ends or `cycles` more rounds have been played."""
     count, seed = len(names), table.config["seed"]
     table.on_event = directory.journal  # a replayed table was built without its journal
-    last_turn = (table.game.turn.number - 1 if earlier else 0) + cycles * count
+    last_turn = (table.game.turn.number - 1 if earlier is not None else 0) + cycles * count
+    table.card_lookup = lambda n: (c := database.find(n)) and {"mana_value": c.mana_value, "types": sorted(c.types)}
     auditor = Auditor(auditor_runner, database, context=f"A {count}-player Commander game. Seats, in turn order: "
                       + ", ".join(f"{name} (seat {i})" for i, name in enumerate(names)) + ".")
     systems = [SYSTEM.format(name=name, count=count) + "\n\nYOUR DECK (count, name, cost, type, text)\n"
@@ -129,12 +140,12 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
     current: dict = {}
     # Each seat's place in the log, so a wake can say what happened since its last one. After a
     # resume the players start from their notes and the board, not from the whole history again.
-    seen = [len(table.events) if earlier else 0] * count
+    seen = [len(table.events) if earlier is not None else 0] * count
     decisions: dict = {}  # triage answers for the stack as it currently stands
     report: dict = {"directory": str(directory.path), "seed": seed, "seats": names, "stopped": None,
                     "triage": list((earlier or {}).get("triage", [])),
                     "wakes": list((earlier or {}).get("wakes", [])), "audits": list((earlier or {}).get("audits", [])),
-                    "earlier_usage": [*(earlier or {}).get("earlier_usage", []), *([earlier["usage"]] if earlier else [])]}
+                    "earlier_usage": [*(earlier or {}).get("earlier_usage", []), *([earlier["usage"]] if (earlier or {}).get("usage") else [])]}
 
     def holds_pen(seat: int) -> bool:
         return not table.awaiting_audit and seat in table.game.control.seats
@@ -179,7 +190,7 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
     def news(seat: int) -> str:
         events = table.act(seat, "get_log", {"since": seen[seat]})["events"]
         lines = [f"[{e['step']}] " + " ".join(e["text"]) + (" (to you: " + " ".join(e["private"]) + ")" if e.get("private") else "")
-                 for e in events if e["text"] or e.get("private")][-40:]
+                 for e in events if (e["text"] or e.get("private")) and e["tool"] != "pass_priority"][-40:]  # passes are noise
         return "Since your last wake:\n" + "\n".join(lines) if lines else "Nothing has happened since your last wake."
 
     def triage(seats: list[int]) -> dict[int, bool]:
@@ -194,7 +205,7 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
                          f"{news(seat)}\n\n{briefing(seat)}" for seat in seats}
 
         def one(seat: int):
-            return seat, runners[seat].ask(systems[seat], prompts[seat], schema=_TRIAGE)
+            return seat, (triage_runners or runners)[seat].ask(systems[seat], prompts[seat], schema=_TRIAGE)
         with ThreadPoolExecutor(max_workers=len(seats)) as pool:
             replies = list(pool.map(one, seats))
         answers = {}
@@ -271,17 +282,28 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
             snapshot = auditor.snapshot(table)
             while table.game.control.kind != "over" and table.game.turn.number <= last_turn:
                 if table.awaiting_audit:
-                    audit(server, snapshot)
-                    table.release()
-                    snapshot = auditor.snapshot(table)
-                    directory.write("state.json", table.game.to_dict())
+                    # By default a turn is audited whole, before the next one begins: that is when its
+                    # hooks must exist. Checkpoints inside the turn are released at once.
+                    if audit_every == "checkpoint" or table.game.control.detail["resume"]["do"] == "next_turn":
+                        audit(server, snapshot)
+                        table.release()
+                        snapshot = auditor.snapshot(table)
+                        directory.write("state.json", table.game.to_dict())
+                    else:
+                        table.release()
                     continue
                 expected = table.expected()
                 if not expected:
                     break
                 seat, kind = expected[0]
-                if kind == "priority" and seat != table.game.turn.active and not table.game.stack:
-                    table.act(seat, "pass_priority")  # nothing to respond to on someone else's turn
+                if kind == "priority" and not table.game.stack and (seat != table.game.turn.active
+                                                                     or table.game.turn.step in ("upkeep", "draw")):
+                    # Nothing to respond to on someone else's turn; and nothing waiting in one's own
+                    # upkeep or draw step, or the table would be asking for a trigger, not priority.
+                    table.act(seat, "pass_priority")
+                    continue
+                if kind in ("priority", "declare_blockers") and _cannot_act(table, seat, kind):
+                    table.act(seat, _DEFAULTS[kind])  # an empty hand and nothing untapped; or nothing that could block
                     continue
                 if kind == "priority" and table.game.stack:
                     # A chance to respond. Ask everyone still to act at once, and remember the answers
@@ -316,6 +338,20 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
     directory.write("report.json", report)
     directory.write("report.md", render(report))
     return report
+
+
+def _cannot_act(table: Table, seat: int, kind: str) -> bool:
+    """True only when it is certain: for a response, no cards in hand and nothing untapped; for
+    blocks, no untapped permanent that is, or might be, a creature."""
+    game = table.game
+    mine = [game.objects[i] for i in game.battlefield if game.objects[i].controller == seat and not game.objects[i].tapped]
+    if kind == "priority":
+        return bool(game.stack) and not game.seats[seat].hand and not mine
+
+    def maybe_creature(obj) -> bool:
+        info = table.card_lookup(obj.name) if table.card_lookup and obj.token is None and not obj.face_down else None
+        return info is None or "Creature" in info.get("types", []) or bool(obj.annotations)
+    return not any(maybe_creature(obj) for obj in mine)
 
 
 def _default_action(table: Table, seat: int) -> str | None:

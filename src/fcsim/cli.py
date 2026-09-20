@@ -123,6 +123,10 @@ def main(argv: list[str] | None = None) -> int:
     pod = commands.add_parser("pod", help="A multiplayer game: one agent per deck, audited")
     pod.add_argument("decks", nargs="*", help="Two to four decklists, in turn order after a random start")
     pod.add_argument("--resume", metavar="GAME_DIR", help="Play --cycles more rounds of an existing game instead of starting one")
+    pod.add_argument("--audit-every", choices=["turn", "checkpoint"], default="turn",
+                     help="Audit each whole turn (default), or every time the pen moves after an action (stricter, much slower)")
+    pod.add_argument("--triage-model", help="Model for respond-or-pass questions (default: the players' model)")
+    pod.add_argument("--triage-effort", default="low", help="Reasoning effort for respond-or-pass questions (default: low)")
     pod.add_argument("--cycles", type=int, default=3, help="Turns per seat before the game is stopped")
     pod.add_argument("--seed", type=int)
     _model_options(pod, audited=True, cost_default=40.0)
@@ -250,7 +254,9 @@ def _pod(args: argparse.Namespace) -> int:
                                              budget=budget, timeout=1800) for _ in args.decks],
                       make_runner(args.audit_backend or args.backend, model=args.audit_model, effort=args.audit_effort,
                                   budget=budget), CardDatabase(), cycles=args.cycles,
-                      seed=args.seed, out_root=args.out, rules=rules, resume=args.resume)
+                      seed=args.seed, out_root=args.out, rules=rules, resume=args.resume, audit_every=args.audit_every,
+                      triage_runners=[make_runner(args.backend, model=args.triage_model or args.model, effort=args.triage_effort,
+                                                  budget=budget) for _ in args.decks])
     with open(f"{report['directory']}/report.md", encoding="utf-8") as text:
         print("\n" + text.read())
     print(f"Everything is in {report['directory']}")

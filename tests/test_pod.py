@@ -124,7 +124,7 @@ def test_a_pod_game_schedules_seats_audits_and_acts_on_findings(database, tmp_pa
             "transcript-seat-0.jsonl", "transcript-seat-2.jsonl"} <= {p.name for p in directory.iterdir()}
     assert "| Talrand | alive | 39 |" in (directory / "report.md").read_text()
     later = [p for p in seats[0].prompts if "Since your last wake:" in p and "Pir plays Forest" in p]
-    assert len(later) == 2   # each of Pir's two land plays reaches Talrand once, in whichever wake comes next
+    assert sum(p.count("Pir plays Forest") for p in later) == 2   # each of Pir's land plays reaches Talrand exactly once
 
 
 def test_a_pod_game_stops_at_its_budget(database, tmp_path):
