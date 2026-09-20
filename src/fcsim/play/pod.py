@@ -133,7 +133,10 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
     """Schedule seats and audits until the game ends or `cycles` more rounds have been played."""
     count, seed = len(names), table.config["seed"]
     table.on_event = directory.journal  # a replayed table was built without its journal
-    last_turn = (table.game.turn.number - 1 if earlier is not None else 0) + cycles * count
+    # A game's length is counted in rounds, each living player's own turns, so that eliminations do
+    # not shorten it. On a resume the turn in progress (or just begun) is the first of the new rounds.
+    game = table.game
+    last_round = (game.seats[game.turn.active].turns_taken - 1 if earlier is not None else 0) + cycles
     table.card_lookup = lambda n: (c := database.find(n)) and {"mana_value": c.mana_value, "types": sorted(c.types)}
     auditor = Auditor(auditor_runner, database, context=f"A {count}-player Commander game. Seats, in turn order: "
                       + ", ".join(f"{name} (seat {i})" for i, name in enumerate(names)) + ".")
@@ -183,6 +186,11 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
             return result
         return tools.definitions, call
 
+    def when() -> str:
+        game = table.game
+        return (f"Round {game.seats[game.turn.active].turns_taken}, {names[game.turn.active]}'s turn "
+                f"(table turn {game.turn.number}), {game.turn.step} step.")
+
     def briefing(seat: int) -> str:
         """Everything a seat would otherwise spend two or three round trips fetching."""
         view = table.view(seat)
@@ -228,7 +236,7 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
         question = (f"{names[top.controller]}'s {top.source_name} is on top of the stack and you have priority. Do you want to "
                     "respond before it resolves, by casting a spell or activating an ability? Answer respond=false to pass. "
                     "Answer respond=true only if you would actually act now; you will then be woken to do it.")
-        prompts = {seat: f"Table turn {game.turn.number}, {names[game.turn.active]}'s turn, {game.turn.step} step. {question}\n\n"
+        prompts = {seat: f"{when()} {question}\n\n"
                          f"{news(seat)}\n\n{briefing(seat)}" for seat in seats}
 
         def one(seat: int):
@@ -251,8 +259,7 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
         current.update(tools=SeatTools(table, seat, handle, database=database, rules=rules), token=token, wake=handle,
                        seat=seat, ended=False)
         game = table.game
-        prompt = (f"Table turn {game.turn.number}, {names[game.turn.active]}'s turn, {game.turn.step} step. "
-                  f"{extra or _WHY.get(kind, 'The table is waiting for you.')}\n\n{news(seat)}\n\n{briefing(seat)}")
+        prompt = f"{when()} {extra or _WHY.get(kind, 'The table is waiting for you.')}\n\n{news(seat)}\n\n{briefing(seat)}"
         echo(f"turn {game.turn.number} {game.turn.step}: {names[seat]} ({kind}) ...")
         started = len(table.events)
         reply = runners[seat].ask(systems[seat], prompt, tools=server.connection(
@@ -312,7 +319,7 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
         called from inside seat `me`'s wake and the pen has come back to it."""
         while True:
             game = table.game
-            if game.control.kind == "over" or game.turn.number > last_turn:
+            if game.control.kind == "over" or game.seats[game.turn.active].turns_taken > last_round:
                 return "over"
             if table.awaiting_audit:
                 # By default a turn is audited whole, before the next one begins: that is when its
@@ -378,6 +385,7 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
                             "commander_damage": s.commander_damage, "commander_casts": s.commander_casts} for s in game.seats]
     report["winner"] = names[game.winner] if game.winner is not None else None
     report["turns_played"] = game.turn.number
+    report["rounds"] = max(s.turns_taken for s in game.seats)
     report["usage"] = auditor_runner.budget.to_dict()
     directory.write("state.json", game.to_dict())
     directory.write("usage.json", report["usage"])
@@ -419,7 +427,7 @@ def _default_action(table: Table, seat: int) -> str | None:
 
 def render(report: dict) -> str:
     lines = [f"# Pod: {', '.join(report['seats'])}", "",
-             f"Seed {report['seed']}. {report['turns_played']} table turns. "
+             f"Seed {report['seed']}. {report.get('rounds', '?')} rounds ({report['turns_played']} table turns). "
              + (f"Winner: {report['winner']}." if report["winner"] else "No winner yet."),
              "", "| Seat | Status | Life | Hand | Permanents | Commander casts | Commander damage taken |", "| --- | --- | --- | --- | --- | --- | --- |"]
     lines += [f"| {s['name']} | {s['status']} | {s['life']} | {s['hand']} | {s['permanents']} | "

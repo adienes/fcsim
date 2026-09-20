@@ -186,6 +186,7 @@ class Table:
         self.game, self.rev = game, self.rev + 1
         event = {"n": len(self.events), "rev": self.rev, "seat": seat, "tool": tool, "args": args,
                  "turn": before.number, "step": before.step,  # when the call was made, not where it led
+                 "round": self.game.seats[before.active].turns_taken if before.number else 0,
                  "random": list(self.dice.recorded), "public": told.public,
                  "private": {str(s): lines for s, lines in told.private.items()}, "lints": lints}
         self.events.append(event)

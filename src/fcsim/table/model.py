@@ -124,6 +124,7 @@ class Seat:
     exile: list[int] = field(default_factory=list)
     command: list[int] = field(default_factory=list)
     mulligans: int = 0
+    turns_taken: int = 0       # this seat's own turn count: the "round" a player means by "turn five"
     kept: bool = False
     drew_from_empty: bool = False
     yield_to: dict | None = None   # {"turn", "step"}: pass by itself until that step, while the stack stays empty

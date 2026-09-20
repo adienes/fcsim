@@ -158,7 +158,7 @@ def describe(view: dict, database: CardDatabase | None = None) -> str:
     names = {obj["handle"]: obj.get("name", "a face-down permanent") for obj in view["battlefield"]}
     turn, pen = view["turn"], view["pen"]
     waiting = ", ".join(who(s) for s in pen["seats"]) or "nobody"
-    lines = [f"Turn {turn['number']}: {who(turn['active'])} is the active player. Step: {turn['step']}. "
+    lines = [f"Round {turn.get('round', '?')}, {who(turn['active'])}'s turn (table turn {turn['number']}). Step: {turn['step']}. "
              f"Lands played this turn: {turn['land_plays']}. The table is waiting for {waiting} "
              f"({pen.get('action') or pen.get('step') or pen['kind']})."]
 

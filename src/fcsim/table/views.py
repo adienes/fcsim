@@ -119,7 +119,8 @@ def view(game: Game, viewer: int | None, handles: Handles, rev: int) -> dict:
         })
     result = {
         "rev": rev, "you": viewer,
-        "turn": {"number": turn.number, "active": turn.active, "step": turn.step, "land_plays": turn.land_plays,
+        "turn": {"number": turn.number, "round": game.seats[turn.active].turns_taken, "active": turn.active,
+                 "step": turn.step, "land_plays": turn.land_plays,
                  "passed": turn.passed, "extra_turns": turn.extra_turns,
                  "attackers": [{"attacker": handles.of("c", a["attacker"]), "target": _target_view(game, a["target"], handles)}
                                for a in turn.attackers if a["attacker"] in game.objects],

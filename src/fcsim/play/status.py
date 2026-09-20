@@ -40,7 +40,8 @@ def status(game_dir: str | Path) -> dict:
                                                            "pass_priority", "write_notes") for c in w.get("calls", []))]
     return {
         "directory": str(directory.path), "seats": names, "events": len(events),
-        "at": {"table_turn": last["turn"], "step": last["step"]},
+        "at": {"round": max((s.get("turns_taken", 0) for s in state["seats"]), default=None) if state else None,
+               "table_turn": last["turn"], "step": last["step"]},
         "standings": [{"name": s["name"], "status": s["status"], "life": s["life"], "hand": len(s["hand"]),
                        "permanents": sum(1 for o in state["objects"].values() if o["zone"] == "battlefield" and o["controller"] == s["index"]),
                        "commander_casts": s["commander_casts"]} for s in state["seats"]] if state else [],
@@ -67,7 +68,7 @@ def status(game_dir: str | Path) -> dict:
 
 def render(report: dict) -> str:
     at, time = report["at"], report["time"]
-    lines = [f"{report['directory']}", f"{report['events']} events; at table turn {at['table_turn']}, {at['step']}"
+    lines = [f"{report['directory']}", f"{report['events']} events; round {at['round']} (table turn {at['table_turn']}), {at['step']}"
              + (f"; winner: {report['winner']}" if report["winner"] else ""), ""]
     lines += [f"  {s['name']:<18}{s['status']:<11}{s['life']:>4} life  {s['hand']} in hand  {s['permanents']:>2} permanents"
               + (f"  commander cast x{sum(s['commander_casts'].values())}" if s["commander_casts"] else "") for s in report["standings"]]
