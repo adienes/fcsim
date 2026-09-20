@@ -39,7 +39,7 @@ def test_every_scenario_sets_up_and_plays_as_written(scenario):
 
 
 def test_the_suite_has_both_tiers_and_clean_plays_to_catch_false_alarms():
-    assert {s["tier"] for s in SCENARIOS} == {"ordinary", "weird"} and len({s["id"] for s in SCENARIOS}) == len(SCENARIOS)
+    assert {s["tier"] for s in SCENARIOS} == {"ordinary", "weird", "hard"} and len({s["id"] for s in SCENARIOS}) == len(SCENARIOS)
     clean = [s for s in SCENARIOS if not s["expect"]["findings"]]
     assert len(clean) >= 8 and len(SCENARIOS) - len(clean) >= 16
 

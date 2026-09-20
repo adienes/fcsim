@@ -64,7 +64,7 @@ def main(argv: list[str] | None = None) -> int:
     shown.add_argument("scenario")
     suite = audit_actions.add_parser("suite", help="Run scenarios through the auditor (uses your Claude Code login)")
     suite.add_argument("--only", nargs="+", metavar="ID", help="Run just these scenarios")
-    suite.add_argument("--tier", choices=["ordinary", "weird"])
+    suite.add_argument("--tier", choices=["ordinary", "weird", "hard"])
     suite.add_argument("--model", default="claude-opus-5")
     suite.add_argument("--effort", choices=["low", "medium", "high", "xhigh", "max"])
     suite.add_argument("--max-calls", type=int, default=40, help="Hard limit on model calls for this run")

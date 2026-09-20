@@ -1,0 +1,820 @@
+[
+ {
+  "id": "two-missed-triggers-on-a-busy-board",
+  "about": "An opponent casts a creature into Rhystic Study and Soul Warden; neither trigger is put on the stack.",
+  "active": 1,
+  "battlefield": {
+   "Ann": [
+    "Soul Warden",
+    "Rhystic Study",
+    "Blood Artist",
+    "Phyrexian Arena",
+    "Sol Ring",
+    "Hill Giant",
+    {
+     "card": "Plains",
+     "count": 3
+    },
+    {
+     "card": "Island",
+     "count": 2
+    }
+   ],
+   "Bob": [
+    {
+     "card": "Forest",
+     "count": 2
+    }
+   ]
+  },
+  "hand": {
+   "Bob": [
+    "Grizzly Bears"
+   ]
+  },
+  "script": [
+   [
+    1,
+    "cast",
+    {
+     "card": "@Grizzly Bears",
+     "payment": {
+      "tap": [
+       "@Forest",
+       "@Forest#2"
+      ]
+     },
+     "resolves": "auto_permanent"
+    }
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "pass_priority"
+   ]
+  ],
+  "expect": {
+   "findings": [
+    {
+     "mentions": "Rhystic Study",
+     "kinds": [
+      "trigger"
+     ]
+    },
+    {
+     "mentions": "Soul Warden",
+     "kinds": [
+      "trigger"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "id": "two-errors-in-a-long-turn",
+  "about": "A land, a correctly resolved Rampant Growth, then an underpaid Hill Giant that attacks the turn it arrived.",
+  "battlefield": {
+   "Ann": [
+    {
+     "card": "Forest",
+     "count": 3
+    },
+    "Mountain"
+   ]
+  },
+  "hand": {
+   "Ann": [
+    "Forest",
+    "Rampant Growth",
+    "Hill Giant"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "play_land",
+    {
+     "card": "@Forest"
+    }
+   ],
+   [
+    0,
+    "cast",
+    {
+     "card": "@Rampant Growth",
+     "payment": {
+      "tap": [
+       "@Forest",
+       "@Forest#2"
+      ]
+     }
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "resolve",
+    {
+     "mutations": [
+      {
+       "op": "look",
+       "from": {
+        "seat": 0,
+        "zone": "library",
+        "count": 1
+       }
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "resolve",
+    {
+     "mutations": [
+      {
+       "op": "move",
+       "obj": "@Wastes",
+       "to": "battlefield",
+       "controller": 0,
+       "enters": {
+        "tapped": true
+       }
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "resolve",
+    {
+     "mutations": [
+      {
+       "op": "shuffle"
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "finish_resolution"
+   ],
+   [
+    0,
+    "cast",
+    {
+     "card": "@Hill Giant",
+     "payment": {
+      "tap": [
+       "@Forest#3",
+       "@Forest#4",
+       "@Mountain"
+      ]
+     },
+     "resolves": "auto_permanent"
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "declare_attackers",
+    {
+     "attacks": [
+      {
+       "attacker": "@Hill Giant",
+       "target": {
+        "seat": 1
+       }
+      }
+     ]
+    }
+   ]
+  ],
+  "expect": {
+   "findings": [
+    {
+     "mentions": "cost|mana|pay",
+     "kinds": [
+      "illegal"
+     ]
+    },
+    {
+     "mentions": "haste|summoning|continuously|302",
+     "kinds": [
+      "illegal"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "id": "long-legal-turn-with-warnings",
+  "about": "Two lands under Exploration, a commander cast with its tax paid by Sol Ring, and a haste attacker. All legal; three table warnings.",
+  "commanders": {
+   "Ann": [
+    "Isamaru, Hound of Konda"
+   ]
+  },
+  "commander_casts": {
+   "Ann": {
+    "Isamaru, Hound of Konda": 1
+   }
+  },
+  "battlefield": {
+   "Ann": [
+    "Exploration",
+    "Sol Ring",
+    {
+     "card": "Mountain",
+     "count": 2
+    },
+    "Plains"
+   ]
+  },
+  "hand": {
+   "Ann": [
+    "Plains",
+    "Mountain",
+    "Raging Goblin"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "play_land",
+    {
+     "card": "@Plains"
+    }
+   ],
+   [
+    0,
+    "play_land",
+    {
+     "card": "@Mountain"
+    }
+   ],
+   [
+    0,
+    "cast",
+    {
+     "card": "@Isamaru, Hound of Konda",
+     "payment": {
+      "tap": [
+       "@Plains",
+       "@Sol Ring"
+      ]
+     },
+     "resolves": "auto_permanent"
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "cast",
+    {
+     "card": "@Raging Goblin",
+     "payment": {
+      "tap": [
+       "@Mountain"
+      ]
+     },
+     "resolves": "auto_permanent"
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "declare_attackers",
+    {
+     "attacks": [
+      {
+       "attacker": "@Raging Goblin",
+       "target": {
+        "seat": 1
+       }
+      }
+     ]
+    }
+   ]
+  ],
+  "expect": {
+   "findings": []
+  }
+ },
+ {
+  "id": "protection-from-black",
+  "about": "Doom Blade targets White Knight, which has protection from black.",
+  "battlefield": {
+   "Ann": [
+    {
+     "card": "Swamp",
+     "count": 2
+    }
+   ],
+   "Bob": [
+    "White Knight"
+   ]
+  },
+  "hand": {
+   "Ann": [
+    "Doom Blade"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "cast",
+    {
+     "card": "@Doom Blade",
+     "payment": {
+      "tap": [
+       "@Swamp",
+       "@Swamp#2"
+      ]
+     },
+     "targets": [
+      {
+       "object": "@White Knight"
+      }
+     ]
+    }
+   ]
+  ],
+  "expect": {
+   "findings": [
+    {
+     "mentions": "protection",
+     "kinds": [
+      "illegal"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "id": "wrath-destroys-the-indestructible",
+  "about": "Wrath of God resolves and an indestructible creature is put into the graveyard with the rest.",
+  "battlefield": {
+   "Ann": [
+    {
+     "card": "Plains",
+     "count": 4
+    },
+    "Hill Giant"
+   ],
+   "Bob": [
+    "Darksteel Myr",
+    "Grizzly Bears"
+   ]
+  },
+  "hand": {
+   "Ann": [
+    "Wrath of God"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "cast",
+    {
+     "card": "@Wrath of God",
+     "payment": {
+      "tap": [
+       "@Plains",
+       "@Plains#2",
+       "@Plains#3",
+       "@Plains#4"
+      ]
+     }
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "resolve",
+    {
+     "mutations": [
+      {
+       "op": "move",
+       "objs": [
+        "@Hill Giant",
+        "@Darksteel Myr",
+        "@Grizzly Bears"
+       ],
+       "to": "graveyard"
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "finish_resolution"
+   ]
+  ],
+  "expect": {
+   "findings": [
+    {
+     "mentions": "indestructible",
+     "kinds": [
+      "misresolved",
+      "illegal"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "id": "exiled-is-not-dead",
+  "about": "A creature is exiled by Swords to Plowshares and a Blood Artist trigger is put on the stack for it.",
+  "battlefield": {
+   "Ann": [
+    "Blood Artist",
+    "Plains"
+   ],
+   "Bob": [
+    "Hill Giant"
+   ]
+  },
+  "hand": {
+   "Ann": [
+    "Swords to Plowshares"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "cast",
+    {
+     "card": "@Swords to Plowshares",
+     "payment": {
+      "tap": [
+       "@Plains"
+      ]
+     },
+     "targets": [
+      {
+       "object": "@Hill Giant"
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "resolve",
+    {
+     "mutations": [
+      {
+       "op": "move",
+       "obj": "@Hill Giant",
+       "to": "exile"
+      },
+      {
+       "op": "life",
+       "seat": 1,
+       "delta": 3
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "finish_resolution"
+   ],
+   [
+    0,
+    "add_trigger",
+    {
+     "source": "@Blood Artist",
+     "text": "A creature died: target player loses 1 life and you gain 1 life.",
+     "targets": [
+      {
+       "seat": 1
+      }
+     ]
+    }
+   ]
+  ],
+  "expect": {
+   "findings": [
+    {
+     "mentions": "exile|did ?n.t die|not die|dies",
+     "kinds": [
+      "illegal",
+      "misresolved"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "id": "torpor-orb-stops-the-trigger",
+  "about": "Elvish Visionary's enters trigger is put on the stack and resolved while an opponent controls Torpor Orb.",
+  "battlefield": {
+   "Bob": [
+    "Torpor Orb"
+   ],
+   "Ann": [
+    {
+     "card": "Forest",
+     "count": 2
+    }
+   ]
+  },
+  "hand": {
+   "Ann": [
+    "Elvish Visionary"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "cast",
+    {
+     "card": "@Elvish Visionary",
+     "payment": {
+      "tap": [
+       "@Forest",
+       "@Forest#2"
+      ]
+     },
+     "resolves": "auto_permanent"
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "add_trigger",
+    {
+     "source": "@Elvish Visionary",
+     "text": "When Elvish Visionary enters, draw a card.",
+     "targets": []
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "resolve",
+    {
+     "mutations": [
+      {
+       "op": "draw",
+       "count": 1
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "finish_resolution"
+   ]
+  ],
+  "expect": {
+   "findings": [
+    {
+     "mentions": "Torpor Orb",
+     "kinds": [
+      "illegal",
+      "misresolved"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "id": "rest-in-peace-replaces-dying",
+  "about": "With Rest in Peace out, a destroyed creature is put into the graveyard and Blood Artist triggers.",
+  "battlefield": {
+   "Bob": [
+    "Rest in Peace",
+    "Grizzly Bears"
+   ],
+   "Ann": [
+    "Blood Artist",
+    {
+     "card": "Swamp",
+     "count": 2
+    }
+   ]
+  },
+  "hand": {
+   "Ann": [
+    "Doom Blade"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "cast",
+    {
+     "card": "@Doom Blade",
+     "payment": {
+      "tap": [
+       "@Swamp",
+       "@Swamp#2"
+      ]
+     },
+     "targets": [
+      {
+       "object": "@Grizzly Bears"
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "pass_priority"
+   ],
+   [
+    1,
+    "pass_priority"
+   ],
+   [
+    0,
+    "resolve",
+    {
+     "mutations": [
+      {
+       "op": "move",
+       "obj": "@Grizzly Bears",
+       "to": "graveyard"
+      }
+     ]
+    }
+   ],
+   [
+    0,
+    "finish_resolution"
+   ],
+   [
+    0,
+    "add_trigger",
+    {
+     "source": "@Blood Artist",
+     "text": "A creature died: target player loses 1 life and you gain 1 life.",
+     "targets": [
+      {
+       "seat": 1
+      }
+     ]
+    }
+   ]
+  ],
+  "expect": {
+   "findings": [
+    {
+     "mentions": "Rest in Peace",
+     "kinds": [
+      "misresolved",
+      "illegal"
+     ]
+    }
+   ],
+   "tolerate": [
+    "Blood Artist"
+   ]
+  }
+ },
+ {
+  "id": "cast-from-the-graveyard",
+  "about": "A sorcery is cast from its owner's graveyard with nothing that allows it.",
+  "battlefield": {
+   "Ann": [
+    {
+     "card": "Island",
+     "count": 3
+    }
+   ]
+  },
+  "graveyard": {
+   "Ann": [
+    "Divination"
+   ]
+  },
+  "script": [
+   [
+    0,
+    "cast",
+    {
+     "card": "@Divination",
+     "payment": {
+      "tap": [
+       "@Island",
+       "@Island#2",
+       "@Island#3"
+      ]
+     }
+    }
+   ]
+  ],
+  "expect": {
+   "findings": [
+    {
+     "mentions": "graveyard|hand",
+     "kinds": [
+      "illegal"
+     ]
+    }
+   ]
+  }
+ }
+]
