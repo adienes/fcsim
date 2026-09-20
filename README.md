@@ -160,7 +160,7 @@ untapped, at half the time and a third of the usage.
 ## Goldfish
 
 ```sh
-uv run fcsim goldfish examples/talrand.txt --turns 10 --max-calls 30
+uv run fcsim goldfish examples/zuko.txt --turns 5 --max-calls 16
 ```
 
 One agent pilots the deck against a seat, Goldfish, that never acts and is passed

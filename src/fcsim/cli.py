@@ -75,7 +75,8 @@ def main(argv: list[str] | None = None) -> int:
 
     fish = commands.add_parser("goldfish", help="An agent pilots a deck alone, audited (uses your Claude Code login)")
     fish.add_argument("deck")
-    fish.add_argument("--turns", type=int, default=10)
+    fish.add_argument("--turns", type=int, default=5,
+                      help="Pilot turns to play. Past five or so a real game would have had interaction.")
     fish.add_argument("--seed", type=int)
     fish.add_argument("--model", default="claude-opus-5", help="The pilot's model")
     fish.add_argument("--audit-model", default="claude-opus-5")
