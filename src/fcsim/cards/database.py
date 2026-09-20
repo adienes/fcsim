@@ -18,6 +18,7 @@ from pathlib import Path
 from .model import Card
 
 BULK_DATA_URL = "https://api.scryfall.com/bulk-data/oracle-cards"
+RULINGS_URL = "https://api.scryfall.com/bulk-data/rulings"
 _HEADERS = {"User-Agent": "fcsim/0.1 (Commander playtesting)", "Accept": "application/json"}
 # Objects that share names with real cards but can never be in a deck.
 _SKIPPED_LAYOUTS = frozenset("token double_faced_token emblem art_series planar scheme vanguard".split())
@@ -26,6 +27,8 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE cards (oracle_id TEXT PRIMARY KEY, name TEXT NOT NULL, data TEXT NOT NULL);
 CREATE TABLE names (norm TEXT NOT NULL, oracle_id TEXT NOT NULL, rank INTEGER NOT NULL);
 CREATE INDEX names_norm ON names (norm, rank);
+CREATE TABLE rulings (oracle_id TEXT NOT NULL, published_at TEXT NOT NULL, comment TEXT NOT NULL);
+CREATE INDEX rulings_card ON rulings (oracle_id);
 """
 
 
@@ -100,6 +103,15 @@ class CardDatabase:
             raise CardsError(f"Unknown card {name!r}." + (f" Did you mean: {hint}?" if hint else ""))
         return card
 
+    def rulings(self, card: Card) -> list[dict]:
+        """Official rulings for a card, oldest first. Empty if the database predates rulings."""
+        try:
+            rows = self._db.execute("SELECT published_at, comment FROM rulings WHERE oracle_id = ? "
+                                    "ORDER BY published_at, rowid", (card.oracle_id,)).fetchall()
+        except sqlite3.OperationalError:
+            return []
+        return [{"date": date, "text": text} for date, text in rows]
+
     def suggest(self, name: str, limit: int = 3) -> list[str]:
         """Real card names close to a misspelled one."""
         if self._norms is None:
@@ -108,7 +120,8 @@ class CardDatabase:
         return [card.name for norm in close if (card := self.find(norm))]
 
     @staticmethod
-    def build(objects: Iterable[dict], path: str | Path, *, source: str, updated_at: str) -> int:
+    def build(objects: Iterable[dict], path: str | Path, *, source: str, updated_at: str,
+              rulings: Iterable[dict] = ()) -> int:
         """Write a fresh database, replacing any old one only once the new one is complete."""
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -132,6 +145,9 @@ class CardDatabase:
                 count += 1
             if not count:
                 raise CardsError("The card data contained no cards; keeping the existing database.")
+            db.executemany("INSERT INTO rulings VALUES (?, ?, ?)",
+                           ((r["oracle_id"], r.get("published_at", ""), r["comment"]) for r in rulings
+                            if r.get("oracle_id") and r.get("comment")))
             db.executemany("INSERT INTO meta VALUES (?, ?)", {
                 "cards": str(count), "source": source, "updated_at": updated_at,
                 "built_at": datetime.now(UTC).isoformat(timespec="seconds")}.items())
@@ -143,20 +159,26 @@ class CardDatabase:
         """Download Scryfall's current Oracle cards file and rebuild the index from it."""
         directory = Path(data_dir) if data_dir else default_data_dir() / "scryfall"
         directory.mkdir(parents=True, exist_ok=True)
-        try:
-            with urllib.request.urlopen(urllib.request.Request(BULK_DATA_URL, headers=_HEADERS), timeout=30) as r:
+
+        def download(listing_url: str, stem: str) -> tuple[Path, dict]:
+            with urllib.request.urlopen(urllib.request.Request(listing_url, headers=_HEADERS), timeout=30) as r:
                 bulk = json.load(r)
             url = bulk.get("jsonl_download_uri") or bulk["download_uri"]
-            download = directory / ("oracle-cards.jsonl.gz" if url.endswith(".gz") else "oracle-cards.json")
-            partial = download.with_suffix(download.suffix + ".partial")
+            target = directory / (f"{stem}.jsonl.gz" if url.endswith(".gz") else f"{stem}.json")
+            partial = target.with_suffix(target.suffix + ".partial")
             with urllib.request.urlopen(urllib.request.Request(url, headers=_HEADERS), timeout=120) as r, \
                     partial.open("wb") as out:
                 while chunk := r.read(1 << 20):
                     out.write(chunk)
-            partial.replace(download)
+            partial.replace(target)
+            return target, {**bulk, "url": url}
+
+        try:
+            cards, bulk = download(BULK_DATA_URL, "oracle-cards")
+            rulings, _ = download(RULINGS_URL, "rulings")
         except (OSError, KeyError, ValueError) as exc:
             raise CardsError(f"Could not download Scryfall card data: {exc}") from exc
-        cls.build(_card_objects(download), directory / "cards.sqlite", source=url,
-                  updated_at=bulk.get("updated_at", ""))
+        cls.build(_card_objects(cards), directory / "cards.sqlite", source=bulk["url"],
+                  updated_at=bulk.get("updated_at", ""), rulings=_card_objects(rulings))
         with closing(cls(directory / "cards.sqlite")) as database:
             return database.info()
