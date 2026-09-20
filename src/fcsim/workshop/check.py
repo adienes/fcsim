@@ -10,16 +10,16 @@ from .static import analyze
 
 
 def check_deck(path: str | Path, database: CardDatabase, *, commanders: tuple[str, ...] = (),
-               trials: int = 5000, turns: int = 10, seed: int | None = None) -> dict:
+               trials: int = 5000, turns: int = 10, seed: int | None = None, online: bool = False) -> dict:
     decklist = read_decklist(path, commanders=commanders)
-    deck = resolve(decklist, database)
+    deck = resolve(decklist, database, online=online)
     issues = validate_deck(deck, database)
     result = {
         "deck": str(path),
         "card_data": database.info()["scryfall_updated_at"],
         "legal": not any(issue.severity == "error" for issue in issues),
         "issues": [issue.to_dict() for issue in issues],
-        "parser_notes": list(decklist.notes),
+        "parser_notes": [*decklist.notes, *(f"Read {written!r} as {name}, its Oracle name." for written, name in deck.aliases)],
         "analysis": analyze(deck),
     }
     # Shuffling a deck with missing or unknown cards would give numbers about a different deck.

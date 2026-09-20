@@ -68,6 +68,7 @@ def test_failed_build_keeps_the_existing_database(database, tmp_path):
     "Commander\n1 Talrand, Sky Summoner\n\nDeck\n1x Sol Ring (C21) 263 *F*\n98 Island\n",  # Arena, Moxfield
     "1 Sol Ring [Ramp] ^Have,#37d67a^\n98 Island #land\nSB: 1 Talrand, Sky Summoner\n",  # Archidekt, SB:
     "// Sideboard\n1 Talrand, Sky Summoner\n\n// Deck\nSol Ring\n98 Island\n",          # headers, bare name
+    "1 Sol Ring\n98 Island\n\nSIDEBOARD:\n1 Opt\n\n1 Talrand, Sky Summoner\n",           # Moxfield's MTGO export
 ])
 def test_export_formats_parse_to_the_same_deck(text, database):
     decklist = parse_decklist(text)
@@ -180,3 +181,14 @@ def test_check_report_and_cli(database, tmp_path, capsys, monkeypatch):
     assert "3 problems" in capsys.readouterr().out
     assert main(["cards", "show", "opt"]) == 0
     assert json.loads(capsys.readouterr().out)["name"] == "Opt"
+
+
+def test_an_alternate_printed_name_is_read_from_the_alias_file_and_typos_are_not(database, tmp_path):
+    path = tmp_path / "cards.sqlite"
+    path.write_bytes(database.path.read_bytes())
+    (tmp_path / "aliases.json").write_text(json.dumps({"bayo, irritable instructor": "Opt", "nobody": None}))
+    local = CardDatabase(path)
+    assert local.alias("Bayo, Irritable Instructor").name == "Opt" and local.alias("Nobody") is None
+    assert local.alias("Sol Rign", online=True) is None   # close to a real name: reported as a typo, never asked about
+    deck = resolve(parse_decklist("1 Bayo, Irritable Instructor\n98 Island\n\n1 Talrand, Sky Summoner\n"), local)
+    assert deck.aliases == (("Bayo, Irritable Instructor", "Opt"),) and not deck.unknown and validate_deck(deck, local) == []

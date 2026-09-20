@@ -129,7 +129,7 @@ def _cards(args: argparse.Namespace) -> int:
 
 def _deck(args: argparse.Namespace) -> int:
     result = check_deck(args.path, CardDatabase(), commanders=tuple(args.commander), trials=args.trials,
-                        turns=args.turns, seed=args.seed)
+                        turns=args.turns, seed=args.seed, online=True)
     print(json.dumps(result, indent=2, ensure_ascii=False) if args.json else render(result, verbose=args.verbose))
     return 0 if result["legal"] else 1
 

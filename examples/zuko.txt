@@ -1,0 +1,92 @@
+1 Aggravated Assault
+1 Appa, Steadfast Guardian
+1 Arcane Signet
+1 Arid Mesa
+1 Avatar Roku, Firebender
+1 Avatar's Wrath
+1 Bayo, Irritable Instructor
+1 Blazing Crescendo
+1 Blazing Shoal
+1 Blood Crypt
+1 Bloodstained Mire
+1 Bojuka Bog
+1 Bonehoard Dracosaur
+1 Bulk Up
+1 Chandra's Ignition
+1 Clifftop Retreat
+1 Command Tower
+1 Commune with Lava
+1 Damning Verdict
+1 Delayed Blast Fireball
+1 Dragonskull Summit
+1 Dream Devourer
+1 Duelist's Flame
+1 Electrodominance
+1 Embercleave
+1 Emberheart Challenger
+1 Etali, Primal Storm
+1 Exotic Orchard
+1 Fire Nation Attacks
+1 Fire Nation Palace
+1 Fire Nation Turret
+1 Firebender Ascension
+1 Firebending Student
+1 Fires of Mount Doom
+1 Flawless Maneuver
+1 Goliath Daydreamer
+1 Great Train Heist
+1 Haste Magic
+1 Headliner Scarlett
+1 Heartfire Hero
+1 Hellkite Charger
+1 Hex Magic
+1 Improvisation Capstone
+1 Invoke Calamity
+1 Iroh, Dragon of the West
+1 Isochron Scepter
+1 Isshin, Two Heavens as One
+1 Laelia, the Blade Reforged
+1 Legion Leadership
+1 Leyline Tyrant
+1 Light Up the Stage
+1 Luxury Suite
+1 March of Reckless Joy
+1 Marsh Flats
+1 Mithril Coat
+10 Mountain
+1 Norin the Wary
+1 Opera Love Song
+1 Ozai, the Phoenix King
+1 Party Thrasher
+1 Pip-Boy 3000
+5 Plains
+1 Prosper, Tome-Bound
+1 Raucous Theater
+1 Redirect Lightning
+1 Renegade Bull
+1 Runehorn Hellkite
+1 Sacred Foundry
+1 Savai Triome
+1 Shinka, the Bloodsoaked Keep
+1 Sol Ring
+1 Sozin's Comet
+1 Spectator Seating
+1 Spikeshot Elder
+1 Spinerock Knoll
+1 Storm King's Thunder
+4 Swamp
+1 Swords to Plowshares
+1 Talisman of Conviction
+1 Talisman of Hierarchy
+1 Talisman of Indulgence
+1 Tavern Brawler
+1 The Last Agni Kai
+1 Two-Handed Axe
+1 Ultimate Magic: Holy
+1 Untimely Malfunction
+1 Valakut Awakening
+
+SIDEBOARD:
+1 Advanced Reconstruction
+
+1 Fire Lord Zuko

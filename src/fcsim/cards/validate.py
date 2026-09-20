@@ -35,6 +35,7 @@ class Deck:
     commanders: tuple[Card, ...]
     cards: tuple[tuple[Card, int], ...]
     unknown: tuple[Entry, ...] = ()
+    aliases: tuple[tuple[str, str], ...] = ()  # (the name as written, the Oracle name it was read as)
 
     @property
     def identity(self) -> frozenset[str]:
@@ -49,13 +50,17 @@ class Deck:
         return [card for card, count in self.cards for _ in range(count)]
 
 
-def resolve(decklist: Decklist, database: CardDatabase) -> Deck:
+def resolve(decklist: Decklist, database: CardDatabase, *, online: bool = False) -> Deck:
+    """With `online`, a name the local data lacks may be looked up at Scryfall as an alternate name."""
     unknown: list[Entry] = []
+    aliases: list[tuple[str, str]] = []
 
     def lookup(entries: tuple[Entry, ...]) -> list[tuple[Card, int]]:
         found: dict[str, tuple[Card, int]] = {}
         for entry in entries:
             card = database.find(entry.name)
+            if card is None and (card := database.alias(entry.name, online=online)) is not None:
+                aliases.append((entry.name, card.name))
             if card is None:
                 unknown.append(entry)
             else:  # two spellings of one card are still one card
@@ -64,7 +69,7 @@ def resolve(decklist: Decklist, database: CardDatabase) -> Deck:
 
     commanders = lookup(decklist.commanders)
     return Deck(commanders=tuple(card for card, _ in commanders), cards=tuple(lookup(decklist.main)),
-                unknown=tuple(unknown))
+                unknown=tuple(unknown), aliases=tuple(aliases))
 
 
 def _can_be_commander(card: Card, *, paired: bool) -> bool:

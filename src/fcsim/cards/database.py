@@ -9,6 +9,8 @@ import os
 import re
 import sqlite3
 import unicodedata
+import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Iterable, Iterator
 from contextlib import closing
@@ -19,6 +21,7 @@ from .model import Card
 
 BULK_DATA_URL = "https://api.scryfall.com/bulk-data/oracle-cards"
 RULINGS_URL = "https://api.scryfall.com/bulk-data/rulings"
+NAMED_URL = "https://api.scryfall.com/cards/named?fuzzy="
 _HEADERS = {"User-Agent": "fcsim/0.1 (Commander playtesting)", "Accept": "application/json"}
 # Objects that share names with real cards but can never be in a deck.
 _SKIPPED_LAYOUTS = frozenset("token double_faced_token emblem art_series planar scheme vanguard".split())
@@ -103,6 +106,28 @@ class CardDatabase:
             hint = ", ".join(self.suggest(name))
             raise CardsError(f"Unknown card {name!r}." + (f" Did you mean: {hint}?" if hint else ""))
         return card
+
+    def alias(self, name: str, *, online: bool = False) -> Card | None:
+        """A card known by another name on some printing, such as "Bayo, Irritable Instructor" for
+        Electro, Assaulting Battery. The Oracle data holds only Oracle names, so with `online` an
+        unfamiliar name is asked of Scryfall once and remembered beside the database. A name close
+        to a real card's is left alone: that is a typo to report, not an alias to guess."""
+        path = self.path.with_name("aliases.json")
+        known = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        norm = normalize_name(name)
+        if norm not in known and online and not self.suggest(name):
+            try:
+                request = urllib.request.Request(NAMED_URL + urllib.parse.quote(name), headers=_HEADERS)
+                with urllib.request.urlopen(request, timeout=20) as response:
+                    known[norm] = json.load(response).get("name")
+            except urllib.error.HTTPError as error:
+                if error.code != 404:
+                    return None
+                known[norm] = None  # Scryfall does not know it either; do not ask again
+            except (OSError, ValueError):
+                return None
+            path.write_text(json.dumps(known, indent=1, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+        return self.find(known[norm]) if known.get(norm) else None
 
     def rulings(self, card: Card) -> list[dict]:
         """Official rulings for a card, oldest first. Empty if the database predates rulings."""

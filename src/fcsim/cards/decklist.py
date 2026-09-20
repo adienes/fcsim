@@ -99,19 +99,21 @@ def parse_decklist(text: str, *, commanders: list[str] | tuple[str, ...] = ()) -
 
     sections: dict[str, list[Entry]] = {"commander": [], "main": [], "sideboard": [], "companion": []}
     notes: list[str] = []
-    unlabeled = [cards for section, cards in blocks if section == ""]
     for section, cards in blocks:
         if section:
             sections[section] += cards
-    if len(unlabeled) >= 2 and not sections["commander"] and not sections["sideboard"]:
-        # MTGO puts the command zone last, after a blank line; some sites put it first.
-        for index, place in ((-1, "final"), (0, "first")):
-            if sum(e.count for e in unlabeled[index]) <= 2:
-                sections["commander"] += unlabeled.pop(index)
+    unlabeled = [index for index, (section, _) in enumerate(blocks) if section == ""]
+    if not sections["commander"] and len(blocks) >= 2:
+        # MTGO puts the command zone last, after a blank line (Moxfield's MTGO export puts a
+        # SIDEBOARD: section before it); some sites put it first.
+        for index, place in ((len(blocks) - 1, "final"), (0, "first")):
+            if index in unlabeled and sum(e.count for e in blocks[index][1]) <= 2:
+                sections["commander"] += blocks[index][1]
+                unlabeled.remove(index)
                 notes.append(f"Read the {place} block of one or two cards as the command zone.")
                 break
-    for block in unlabeled:
-        sections["main"] += block
+    for index in unlabeled:
+        sections["main"] += blocks[index][1]
     if not sections["commander"] and 1 <= sum(e.count for e in sections["sideboard"]) <= 2:
         sections["commander"], sections["sideboard"] = sections["sideboard"], []
         notes.append("Read the one- or two-card sideboard as the command zone (MTGO convention).")

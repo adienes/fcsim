@@ -71,7 +71,7 @@ def goldfish(deck_path: str | Path, runner, auditor_runner, database: CardDataba
     """Play `turns` pilot turns. `runner` plays the pilot and `auditor_runner` audits; give both the
     same Budget to cap the whole run. Returns the report; everything is also written to a directory."""
     decklist = read_decklist(deck_path)
-    deck = resolve(decklist, database)
+    deck = resolve(decklist, database, online=True)
     issues = validate_deck(deck, database)
     if deck.unknown or not deck.commanders:
         raise ValueError("The deck has unrecognized cards or no commander; run `fcsim deck check` first.")
