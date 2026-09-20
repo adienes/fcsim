@@ -4,7 +4,6 @@
 1 Arid Mesa
 1 Avatar Roku, Firebender
 1 Avatar's Wrath
-1 Bayo, Irritable Instructor
 1 Blazing Crescendo
 1 Blazing Shoal
 1 Blood Crypt
@@ -21,6 +20,7 @@
 1 Dragonskull Summit
 1 Dream Devourer
 1 Duelist's Flame
+1 Electro, Assaulting Battery
 1 Electrodominance
 1 Embercleave
 1 Emberheart Challenger

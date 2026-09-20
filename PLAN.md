@@ -1,10 +1,12 @@
 # fcsim — playtest and tune Commander decks with LLM agents
 
-Status: design, 2026-09-20, revised once after an outside review. Built so far:
+Status: design, 2026-09-20, revised after an outside review and to bring deck
+projects and piloting knowledge into the near-term work. Built so far:
 the rules reference (`fcsim rules`), M0 (`fcsim cards`, `fcsim deck check`), M1
 (the table, `fcsim.table`), M2 (the auditor and its scenario suite, `fcsim audit`;
 event-trigger matching is still to do) and the goldfish half of M3 (`fcsim
-goldfish`); see README.md.
+goldfish`); see README.md. Deck projects, frozen guidance and the learning loop
+below are planned next in M3a/M3b; they are not implemented yet.
 
 ## 1. Goal
 
@@ -19,7 +21,9 @@ without finding three humans: one agent per seat plays to win — sequencing,
 threat assessment, politics and all — and each game leaves a directory with the
 full log, a report and a readable narrative. The **workshop** (§12) reads those
 games, evaluates both the deck and how it was played, and proposes changes to
-the list for you to accept or reject.
+the list for you to accept or reject. A **deck project** keeps the list, its
+design goals and its accumulated piloting knowledge together. Better play and
+better card choices are separate outcomes, with separate revision identities.
 
 Non-goals:
 
@@ -206,7 +210,7 @@ the log reads like a game.
 
 | Group | Tools |
 | --- | --- |
-| Read | `get_view`, `get_log(since)`, `lookup_card(name)` (oracle text and Scryfall rulings), `lookup_rule(query)` (Comprehensive Rules search), `get_notes` |
+| Read | `get_view`, `get_log(since)`, `lookup_card(name)` (oracle text and Scryfall rulings), `lookup_rule(query)` (Comprehensive Rules search), `get_notes`, `get_deck_guide(section?)` (this seat's frozen deck guidance) |
 | Flow | `pass_priority`, `set_watches`, `mulligan`, `keep(bottom[])`, `concede` |
 | Actions | `play_land(card, enters)`, `cast(card, targets, x, modes, payment)`, `activate(source, ability, targets, payment)`, `add_trigger(source, text, targets)`, `resolve(mutations[])`, `finish_resolution`, `declare_attackers`, `declare_blockers`, `combat_damage`, `declare_loop(description, iterations, net_effect)`, `act(mutations[], because)` |
 | Social | `say(text, to?)`, `ask_judge(question)`, `dispute(event, claim, remedy)`, `write_notes` |
@@ -248,8 +252,15 @@ instead of applying twice, so a retry after a timeout is safe.
 Invalid calls return a structured error that says what was wrong and what to do
 instead, so the agent corrects itself within the same wake.
 
-The auditor role gets the read tools plus `verdict(findings[], ledger_ops[])`.
-The judge role gets the read tools plus `get_dispute` and
+`get_deck_guide` lists the available sections when no section is given and
+returns one bounded section otherwise. It reads only the brief, primer and
+lines captured for this seat at game creation (§12.2). It takes a section ID,
+never an arbitrary path or another deck's ID. Players cannot edit the shared
+deck project from a live game; `write_notes` writes only their game notes.
+
+The auditor role gets public state/log and card/rules read tools plus
+`verdict(findings[], ledger_ops[])`; it does not receive pilots' notes or deck
+guidance. The judge role gets the same public read tools plus `get_dispute` and
 `rule(decision, remedy)`. The host role (you, or a Claude Code session) gets
 `new_game`, `status`, `spectate` (full information), `pause`, `abort`, `report`.
 
@@ -340,20 +351,30 @@ tools, no project settings, and no memory shared with other seats. The auditor
 and the judge are separate agents with a read-only public view. The deckbuilder
 never plays.
 
-All seats get the same prompt and none is told which deck is under test.
-Otherwise opponents either gang up on the test deck or go easy on it.
+All seats get the same role instructions, with their own deck list and guidance
+bound to their seat. None is told which deck is under test. Otherwise opponents
+either gang up on the test deck or go easy on it.
 
 ### 7.2 Sessions and memory
 
 The table holds all game truth, so an agent can be rebuilt at any point from:
 the static prefix (role, tool guide, its own decklist with oracle text, the
-deck's primer from §12.4), its private notes, the current view, and the recent
-log. That makes sessions
-disposable. The default is **one session per seat per turn**: wakes inside a
+frozen deck primer from §12.2), its private game notes, the current view, and
+the recent log. Longer combo and sequencing entries are fetched through
+`get_deck_guide` when relevant. Sessions are disposable. The default is **one
+session per seat per turn**: wakes inside a
 turn share context, so a sequencing plan survives from main phase to combat;
 at the turn boundary the session is dropped. `write_notes` is the durable
 memory — threat assessments, deals made and broken, cards opponents have
 revealed — and the last wake of each turn reminds the agent to update it.
+
+There are two lifetimes of memory. Private game notes last for that game and
+its resumes. Deck knowledge lasts across games, after postgame review (§12.4).
+Every wake of a game uses the same frozen guidance even if the deck project is
+edited or another playtest finishes concurrently. The brief defines design
+goals for the workshop; it does not ask a pilot to pull punches. Guidance is
+advice, and the auditor checks actions independently against card text and the
+rules.
 
 This keeps context near 20k tokens for the whole game instead of growing past
 100k, which matters because a seat is often idle for longer than the 5-minute
@@ -560,6 +581,25 @@ channel is much easier to read back afterwards.
 
 ## 10. Decks
 
+**A deck is a project with a stable identity.** `DeckProject` loads the deck
+directory (§12.2), owns its ID, editable list, brief and guidance, and can
+produce an immutable `DeckSnapshot` for a game. Moving or renaming a directory
+does not change the deck's ID. Forking it into a separate experiment creates a
+new ID with an optional parent snapshot reference.
+
+The existing `Deck` in `cards/validate.py` represents a resolved list of cards;
+rename it `ResolvedDeck` when introducing the project layer. Parsing,
+resolution and legality stay in `cards/`. Project metadata, guidance and
+snapshot storage live in `decks/`. The table consumes a resolved snapshot and
+does not load project files, follow Git branches or mutate a deck project.
+
+**Inputs.** `fcsim deck check`, goldfish and play accept either a deck directory
+or a plain list. A plain list still works without a project or Git; its game
+gets a snapshot with no project ID and explicit empty guidance. Planned
+`fcsim deck init decks/zuko --from examples/zuko.txt` creates a project with a
+stable ID and brief/primer templates, leaving the source list intact. Reusing
+a deck and accumulating knowledge is an explicit project operation.
+
 **Parsing.** MTGO text format: `N Card Name` lines, with the commander in the
 block after the blank line (or `Sideboard` header). Tolerate Moxfield and
 Archidekt exports (`1x`, set codes, foil markers). `commander:` in the game
@@ -581,14 +621,15 @@ deliberately illegal, and a rejection for a generated one.
 
 | You give | The opponent deck starts from |
 | --- | --- |
-| A deck name | That deck's current version, from the gauntlet or your own decks |
+| A deck name or directory | That project's current list and accepted guidance, frozen together for the game |
 | Full list | The list |
 | Commander only | EDHREC's average deck for that commander; if unavailable, an LLM deckbuilder with Scryfall search, looped against the validator |
 | Nothing | A deck sampled from the gauntlet; or, to grow the gauntlet, a commander sampled by EDHREC popularity — not yours, and preferably a different color identity from the other seats — then as above |
 
-Whatever its origin, a deck that has played becomes a deck directory (§12.2)
-with a version history, so a pod is reviewable, editable and reusable, and the
-seed list is only version one. Power sits around mid-to-high bracket 3 as a
+Generated opponents are saved as deck projects before their first game, so
+their seed lists and primers are reviewable, editable and reusable. A supplied
+plain list can be imported into a project later; the earlier game retains its
+original snapshot and provenance. Power sits around mid-to-high bracket 3 as a
 rough guide. The validator enforces legality only; what makes a deck right for
 these pods is how its games score on the rubric (§12.1).
 
@@ -602,9 +643,15 @@ Every game gets its own directory, named to be browsable:
 `games/2026-09-20_1405_<your-commander>_<short-id>/`.
 
 ```
-config.json            seats, seed, models, options
-decks/seat-N.txt       the exact lists played, generated ones included
-cards.json             oracle text of every card in the game, as of that day
+config.json            seats, deck snapshot IDs, seed, models, prompts, options
+decks/seat-N/          immutable deck snapshot for this seat (§12.2)
+  snapshot.json       project ID, hashes, guide index, schema and provenance
+  current.txt         the exact list played, generated ones included
+  brief.md            the design goals at game creation
+  primer.md           the exact short guide supplied to the pilot
+  lines.md            the detailed guidance available through its tools
+cards.json             pinned oracle text and rulings used by the game
+rules/                 self-contained pinned Comprehensive Rules reference
 events.jsonl           authoritative log, full information
 state.json             latest full snapshot (derived)
 public.json            what everyone sees
@@ -621,9 +668,12 @@ narrative.md           the story of the game (below)
 
 These are the state files from the original sketch. Agents cannot read them;
 you can, live, and `fcsim resume <game_dir>` rebuilds a crashed game from
-`events.jsonl`. The directory is self-contained: decklists and card text are
-copied in, so a game stays readable after errata and after you have edited the
-deck, and every later tool takes nothing but the directory.
+`events.jsonl`. The directory is self-contained: deck snapshots, card text,
+rulings and rules are copied in before play begins. A game stays readable
+after errata and after you have edited the deck or its primer. Resume reads
+these copies, never the current project or a Git branch, and every later tool
+takes nothing but the directory. Old games with `decks/seat-N.txt` and no guide
+remain readable as legacy snapshots with explicitly absent guidance.
 
 ### 11.1 Narrative
 
@@ -731,21 +781,76 @@ In play nothing changes: agents play to win. Fun is designed into the lists. A
 pilot that pulled punches to keep the game pleasant would make the test
 meaningless.
 
-### 12.2 A deck is a directory
+### 12.2 Deck projects, revisions and runbooks
 
 ```
 decks/<name>/
-  brief.md            what the deck is for, its limits, its locked cards
-  primer.md           how to pilot it; goes into the pilot's prompt
+  deck.toml           schema version, stable ID, display name, format
   current.txt         the list, MTGO format
-  versions/v001.txt   every version ever played
-  CHANGELOG.md        per version: swaps, reasons, evidence, who approved
-  track-record.json   per-card history across all games and versions
+  brief.md            what the deck is for, its limits, its locked cards
+  primer.md           concise accepted guidance; goes into the pilot's prompt
+  lines.md            detailed combos, synergies, sequencing and recovery plans
+  lessons.jsonl       observations and review decisions, with evidence
+  CHANGELOG.md        list, guidance and brief changes, with reasons and evidence
+  track-record.json   rebuildable per-card history, linked to game snapshots
   reviews/            one per review
   proposals/          pending changes
 ```
 
-Each game directory records the deck name and version in every seat.
+**Storage and Git.** Ordinary directories tracked alongside the simulator are
+the default. The loader also accepts a path in a separate deck-library
+repository. A Git submodule is optional when an independently maintained
+collection is useful; neither the runtime nor the snapshot format requires
+one. Git supplies editable history, branches and optional release tags. There
+is no second mandatory `versions/v001.txt` history to keep in sync. Game
+snapshots preserve what was actually played even outside Git.
+
+**Revision identity.** Every snapshot records `deck_id` (when there is a
+project), its display name, schema version and three independent hashes:
+
+- `list_hash`: canonical resolved card identities, quantities and their roles
+  (main deck, commander, companion). Comments, aliases and line order do not
+  create a different playable list; the exact input text is preserved too.
+- `guidance_hash`: the exact accepted primer and detailed lines available to
+  the pilot, including the section index used by its read tool.
+- `brief_hash`: the exact goals and constraints against which this revision
+  should be evaluated.
+
+A `snapshot_id` binds the project identity, format, schema, component hashes
+and hashes of the exact copied input files. This distinguishes an exact
+snapshot from its playable-list identity. New games also use canonical card
+order before seeded shuffling, so reformatting a list cannot change its draws;
+legacy replay keeps its recorded setup order.
+
+The game separately pins card/rules data, models and role prompts. Source path,
+Git commit and dirty status are provenance, not substitutes for the copied
+contents; timestamps and source locations do not determine snapshot identity.
+Uncommitted edits are allowed and captured. All bytes, hashes and resolved
+cards must come from the same captured input, even if the source files are
+edited while a run starts. The completed snapshot is immutable before the
+first agent wake.
+
+**The runbook.** The primer covers the intended gameplan, opening-hand keeps
+and mulligans, early development, commander timing, main and fallback routes
+to winning, interaction priorities and common mistakes. Start with a target
+of about 800 tokens, measured with the runner's tokenizer where available;
+excess length prompts editing, never silent truncation. Longer material goes
+in `lines.md`, with stable section IDs and a short index for discovery.
+
+Each detailed line states the cards and resources required, sequencing and
+costs, the expected result, interruption points, and a recovery or alternate
+line. It names relevant rules/rulings when a non-obvious interaction matters.
+These are decision aids: agents still check actual state and card text, and
+lines are never executed automatically as trusted mutation scripts. Entries
+identify card dependencies and the list/rules revisions against which they
+were checked, so a changed list or rules pin can flag stale advice for review.
+
+**Knowledge and ownership.** The brief is owner-controlled. A reviewer may
+improve accepted piloting guidance without changing the brief or approving a
+card swap. Raw observations, rejected suggestions and detailed game histories
+remain in the project; only accepted guidance is supplied to a pilot. Each
+seat sees its own frozen guide. An auditor receives no strategy runbook as a
+source of rules authority.
 
 ### 12.3 Evidence, cheapest first
 
@@ -763,7 +868,10 @@ kind it rests on.
 Per-card history accumulates in `track-record.json` across versions — drawn,
 cast, turns stuck in hand, present in wins and in losses, named in
 post-mortems — so evidence about a card builds up instead of starting again
-each round.
+each round. This is a derived index over referenced games, deduplicated by
+game and seat, with list, guidance and brief hashes retained. Reports separate
+results by those revisions, test mode, model and rules health before pooling
+them; a primer improvement must not silently become evidence for a card swap.
 
 ### 12.4 The loop
 
@@ -778,9 +886,36 @@ The same goes for a misruled one: the review reads each game's rules-health
 section (§11.2) and discounts evidence about any card caught up in a
 correction, a judge ruling or an unresolved auditor note, rather than
 recommending a cut because of an interaction the table got wrong.
-Pilot findings go into `primer.md` — what to mulligan, the key lines, what to
-hold and for what — and the pilot gets the primer in its prompt from then on.
-The deck is played better over time, and the primer is worth reading yourself.
+Pilot findings enter a separate knowledge loop:
+
+```
+completed game → observations → reviewed lessons → primer/lines revision
+```
+
+Each lesson has a stable ID, a specific claim, applicable list/card/rules
+revisions, evidence (game ID, seat, event numbers and audit findings), and a
+status: tentative, validated, rejected or superseded. Review decisions append
+to `lessons.jsonl` with the lesson ID and reason, preserving earlier claims and
+contradictory evidence. Re-reviewing the same events does not add independent
+support. A reproducible, rules-checked sequencing correction can be validated
+directly; a claim about consistency or card quality remains tentative until
+the evidence supports it. An agent's assertion of confidence is not evidence.
+
+The reviewer promotes useful validated lessons into the concise primer or a
+detailed line, records the evidence in the changelog, and produces a new
+guidance hash. It can make these guidance-only changes automatically after
+checking that they fit the brief and current list. Tentative lessons remain
+available to the workshop but are not taught to pilots as established facts.
+List changes flag entries whose card dependencies or assumptions no longer
+hold; excluded guidance stays in the history with its status and rationale.
+
+Only completed, reviewed games can update shared knowledge. Live or concurrent
+games keep their original snapshot. A postgame reviewer can use hindsight to
+explain a mistake, but promoted lessons must describe decisions available from
+the pilot's information at the time. Opponents' raw private notes and decklists
+never become future pilot context. Game notes are not copied wholesale into
+the runbook. This loop first works from existing goldfish events and audits;
+it gains pod narratives and richer reports as those become available.
 
 **`fcsim propose <deck>`.** A few swaps, five at most by default, so the deck
 keeps its identity and a change in results can be traced to a cause. Each swap
@@ -792,21 +927,37 @@ Proposals may lower power: if a deck dominates its pods or produces non-games,
 cutting fast mana or a tutor is an improvement.
 
 **`fcsim apply <deck>`.** A proposal is a markdown file with a checkbox per
-swap. You tick, edit or reject; `apply` writes the next version and the
-changelog entry. For your decks this step is always yours. For gauntlet decks,
-`--auto` applies without asking.
+swap. You tick, edit or reject; `apply` updates the project list, records the
+old and new list hashes and the changelog entry, and checks guidance affected
+by the changes. Git commits are explicit host actions; applying a proposal or
+starting a game does not silently commit unrelated work. For your decks this
+step is always yours. For gauntlet decks, `--auto` applies without asking.
 
 **`fcsim tune <deck> --games 4 --rounds 3`** chains play, review, propose and
 apply, stopping at each proposal unless `--auto`.
 
-**`fcsim compare <deck> v3 v4`** answers "did that change help?", which needs
-everything else held still. A comparison pins the opponents' deck versions,
-every primer including this deck's (both sides play with the newer one, so the
-list change is judged on its own), the models and prompts, and the pods. It
-rotates seat order across games, since going first matters, and reuses the
-same shuffle seeds for the opponents on both sides. Only one deck is tuned at a
-time; the rest of the gauntlet is frozen for the duration. Even so, a handful
-of games is weak evidence, and `compare` says so next to every number.
+**`fcsim compare <deck> <revision-a> <revision-b>`** accepts saved snapshot
+paths or Git refs such as `v3` and `v4`, resolves both to frozen snapshots, and
+states what changed before running games:
+
+- A list comparison holds the brief and compatible piloting guidance fixed.
+  The same guide may describe both alternatives conditionally. If no common
+  guide fits both, record the guidance change and label the result as a joint
+  list-and-guidance comparison.
+- A guidance comparison holds the list and brief fixed. This includes a
+  runbook/no-runbook baseline to measure whether guidance helps; the control
+  also has no guidance exposed through the read tool.
+- A changed brief means the success criteria changed. Evaluate against both
+  explicitly instead of reporting a single unqualified improvement.
+
+Comparisons pin the opponents' snapshots, card/rules data, models, role prompts
+and pods. They rotate seat order and reuse opponent shuffle seeds; guidance
+comparisons also reuse the tested deck's list and shuffle seeds. No shared
+learning is promoted during a comparison batch. Reports include wall time,
+input/output tokens, tool calls, corrections and unresolved audit findings
+alongside development and table-quality measures. Extra primer tokens count
+toward its cost; faster or better play is a measured hypothesis. A handful of
+games is weak evidence, and `compare` says so next to every number.
 
 ### 12.5 The gauntlet
 
@@ -818,8 +969,9 @@ graveyard, group hug — so that pods vary. A pod is sampled from the gauntlet
 and any of your own decks.
 
 Three guards against an arms race. First, a **reference set**: three or four
-decks that are never tuned, kept as a fixed yardstick. Balanced win rates
-inside the gauntlet prove nothing if every deck got stronger together, but
+deck snapshots, including their guidance, that are never tuned, kept as a fixed
+yardstick. Balanced win rates inside the gauntlet prove nothing if every deck
+got stronger together, but
 drift shows up against decks that did not move: every gauntlet deck's goldfish
 speed, and its results against the reference pod, are tracked over versions.
 Second, a power band within the gauntlet: over enough games each deck in a
@@ -875,9 +1027,11 @@ why §12.3 puts the free and cheap evidence first: static analysis and shuffle
 simulation cost nothing, a solo goldfish is about a tenth of a pod game, and
 pod games are kept for what only they can show.
 
-Levers, in the order I would reach for them: watches narrowed by the agents,
-triage, a turn cap, a cheaper model for triage and talk wakes only, a cheaper
-model for opponents than for the deck under test.
+Measure concise deck guidance early in M3b: fewer rediscovered lines and fewer
+corrections may save time, but the additional prompt tokens and postgame review
+also count. Further levers: watches narrowed by the agents, triage, a turn cap,
+a cheaper model for triage and talk wakes only, a cheaper model for opponents
+than for the deck under test.
 
 ## 14. Guards
 
@@ -909,16 +1063,17 @@ Scryfall and EDHREC, `pytest` plus property tests.
 ```
 src/fcsim/
   cards/    scryfall.py  decklist.py  validate.py  edhrec.py  deckgen.py
+  decks/    model.py  project.py  snapshot.py  guidance.py
   table/    model.py  events.py  mutations.py  visibility.py  turn.py  lints.py  replay.py
   tools/    registry.py  player.py  judge.py  host.py
   sched/    scheduler.py  wakes.py  watches.py  triage.py  audit.py
   agents/   runner.py  scripted.py  api_runner.py  sdk_runner.py  external.py  prompts/
   mcp/      host.py (start, status, report)  http_server.py  inproc.py
   report/   metrics.py  quality.py  render.py  aggregate.py  narrative.py
-  workshop/ static.py  shuffle.py  review.py  propose.py  apply.py  track_record.py
-  cli.py    fcsim deck check|gen · play · resume · summarize · report · serve
+  workshop/ static.py  shuffle.py  review.py  lessons.py  propose.py  apply.py  track_record.py
+  cli.py    fcsim deck init|check|gen · goldfish · play · resume · summarize · report · serve
             fcsim review · propose · apply · tune · compare
-decks/<name>/ (§12.2)  rubric.md  data/ (cache, gitignored)
+decks/<name>/ (§12.2; external directory paths also accepted)  rubric.md  data/ (cache, gitignored)
 games/  tests/  tests/rules/ (regression scenarios)
 ```
 
@@ -931,6 +1086,15 @@ handles, logs, tool results, error messages, wake prompts. Checking only that
 hidden card names never appear would miss leaks through identifiers, ordering
 and error text.
 
+Deck tests cover identity surviving directory renames; list hashes ignoring
+formatting while retaining counts and commander roles; independent list,
+guidance and brief changes; snapshots of uncommitted files; and resume staying
+identical after the source project is edited or removed. A scripted pilot
+verifies that guide reads are confined to its seat's snapshot. Knowledge-loop
+tests verify evidence deduplication, stale card dependencies, and that
+tentative or private game notes do not enter accepted guidance. Git-specific
+tests are optional integration coverage; ordinary directory play needs no Git.
+
 ## 16. Milestones
 
 | | Deliverable | Proves |
@@ -939,10 +1103,12 @@ and error text.
 | M1 | Table: state, handles and visibility, mutations, RNG, event log and replay, turn skeleton and priority checkpoint, resolutions, call contract, lints; `ScriptedRunner`; the non-interference test | Hidden information holds and the protocol is sound; no model needed yet |
 | M2 | Auditor with hooks and ledger, run against a **small rules suite of ordinary interactions**; hard spending limits | The riskiest assumption, tested first and cheaply: catch rate, false alarms, hook accuracy, cost and time per audit |
 | M3 | Tool registry as an MCP server, `ClaudeCodeRunner` seats, game directory, report. **An audited ten-turn solo goldfish of one supplied deck**, with measured cost. A minimal MCP host interface: `start`, `status`, `report` | Tool ergonomics, prompts, real cost per wake and per audit. The first useful artifact, usable from Claude Code |
+| M3a | **Next: first-class deck projects.** `DeckProject`/`ResolvedDeck`/`DeckSnapshot`, `deck init`, directory input for check/goldfish, brief and primer templates, frozen guidance and `get_deck_guide`, separate revision hashes, self-contained game capture; plain-list input still works | A pilot starts with the deck's intended gameplan; every game records exactly which list, goals and guidance it used, including uncommitted edits |
+| M3b | Postgame observations and reviewed lessons from goldfish logs/audits, guidance-only promotion, dependency checks; a measured runbook/no-runbook comparison on a fixed list | Piloting knowledge accumulates without live-game leakage or changing the experiment mid-run; its effect on cost, time and play quality is measured |
 | M4 | Scheduler, all wake kinds, default watches, combat, choices, corrections, disputes and judge, elimination, table talk. **One fixed pod of supplied lists**, audited; one run with `audit: off` for comparison | The core loop; whether agents play to win; how much the auditor is catching |
 | M5 | Metrics, table-quality rubric, rules health, post-mortems, `fcsim summarize` narrative, `--games N --parallel K`, aggregate report | Games you can read, compare, and know how far to trust |
-| M6 | EDHREC seeds, random commanders, LLM deckbuilder fallback, deck directories, reference set | Pods from partial input |
-| M7 | Workshop: briefs, primers, track record, `review`, `propose`, `apply`, `tune`, `compare`; first gauntlet decks | The point of the project: decks get better from their games |
+| M6 | EDHREC seeds, random commanders, LLM deckbuilder fallback, generated deck projects using M3a's format, fixed reference snapshots | Pods from partial input |
+| M7 | Full workshop: pod-aware `review`, track record, `propose`, `apply`, `tune`, list/guidance `compare`; first gauntlet decks, extending M3b's lesson loop | The point of the project: decks and piloting get better from their games, and the source of each improvement is traceable |
 | M8 | Narrowed watches, triage, model tiers; the wider rules suite | Affordable enough to tune routinely |
 | M9 | Full HTTP MCP server, external seats, human seat, simple board viewer | Play a seat yourself |
 
@@ -964,8 +1130,10 @@ Each has a default I will proceed with unless you say otherwise.
    narratives.
 5. **Card pool.** Should proposals be limited to cards you own, or to a price
    per card? Default: no limit unless the deck's brief sets one.
-6. **Approval.** Changes to your decks always wait for you; gauntlet decks tune
-   themselves. Say if you want to approve those too.
+6. **Approval.** Card-list and brief changes to your decks wait for you;
+   reviewed guidance-only improvements may be promoted automatically (§12.4).
+   Gauntlet decks tune themselves within their briefs. Say if you want to
+   approve those too.
 7. **Table talk.** Public only by default.
 8. **A human seat.** If you want to pilot your own deck against three agents,
    M9 moves up.
