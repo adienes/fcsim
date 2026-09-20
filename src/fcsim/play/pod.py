@@ -14,7 +14,7 @@ from pathlib import Path
 from ..agents import BudgetExceeded, Runner, RunnerError, cost_summary
 from concurrent.futures import ThreadPoolExecutor
 
-from ..audit import SERIOUS, Auditor, describe
+from ..audit import SERIOUS, Auditor, Judge, describe
 from ..audit.auditor import card_reference
 from ..cards import CardDatabase, read_decklist, resolve, validate_deck
 from ..mcp import McpServer
@@ -35,7 +35,9 @@ you hold. Deals are not binding. Never misstate the public game state or the rul
 How the table works. The table is a tabletop, not a rules engine: it knows zones, turns and \
 priority, and no card text. You carry out every rule and card effect yourself with your tools, \
 honestly and exactly, and a rules auditor checks each stretch of play. If it finds an error of \
-yours you will be asked to correct it. Read a card with lookup_card before relying on what it \
+yours you will be asked to correct it; if you are sure it is the auditor that is wrong, `contest` \
+the finding instead and a judge decides. If another player breaks a rule in a way that matters, \
+raise it with `dispute`. Read a card with lookup_card before relying on what it \
 does, including opponents' cards, and look a rule up when you are unsure.
 - get_view shows everything you may see. `pen` says who the table is waiting for and for what. \
 Cards are named by handles, which change whenever a card changes zones: look again after acting.
@@ -96,7 +98,8 @@ def _names(decks: list) -> list[str]:
 def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner: Runner, database: CardDatabase, *, cycles: int = 3,
              seed: int | None = None, out_root: str | Path = "games", rules: RulesReference | None = None,
              resume: str | Path | None = None, audit_every: str = "turn", triage_runners: list[Runner] | None = None,
-             refresh_before_blocks: bool = True, echo=lambda line: print(line, flush=True)) -> dict:
+             refresh_before_blocks: bool = True, judge_runner: Runner | None = None,
+             echo=lambda line: print(line, flush=True)) -> dict:
     """Play up to `cycles` turns per seat. `runners[i]` pilots seat i; share one Budget across all
     runners and the auditor to cap the whole game.
 
@@ -107,7 +110,8 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
     `triage_runners[i]` answers seat i's respond-or-pass questions, if given: a cheaper or
     lower-effort runner than the one that plays the seat. With `refresh_before_blocks` the auditor
     works out current power and toughness before blockers are chosen, if the battlefield has
-    changed since it last did."""
+    changed since it last did. `judge_runner` rules when a player contests an auditor's finding;
+    by default the auditor's runner does, as a separate call with the judge's own brief."""
     earlier = GameDirectory.open(resume) if resume else None
     if earlier:
         deck_paths = [earlier.path / "decks" / f"seat-{index}.txt" for index in range(len(earlier.read("config.json")["seats"]))]
@@ -121,7 +125,8 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
                                            card_lookup=_lookup(database)),
                      earlier.read("config.json")["seats"], decks, runners, auditor_runner, database, cycles, rules, echo,
                      earlier=earlier.read("report.json") if (earlier.path / "report.json").is_file() else {"wakes": []},
-                     audit_every=audit_every, triage_runners=triage_runners, refresh_before_blocks=refresh_before_blocks)
+                     audit_every=audit_every, triage_runners=triage_runners, refresh_before_blocks=refresh_before_blocks,
+                     judge_runner=judge_runner)
     seed = seed if seed is not None else secrets.randbelow(2 ** 31)
     directory = GameDirectory(out_root, "pod_" + "-".join(names), seed)
     table = Table([{"name": name, "commanders": [c.name for c in deck.commanders], "library": [c.name for c in deck.library()]}
@@ -138,12 +143,13 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
                                     "auditor_backend": getattr(auditor_runner, "backend", "custom"),
                                     "deck_issues": [[i.to_dict() for i in validate_deck(d, database)] for d in decks]})
     return _play(directory, table, names, decks, runners, auditor_runner, database, cycles, rules, echo,
-                 audit_every=audit_every, triage_runners=triage_runners, refresh_before_blocks=refresh_before_blocks)
+                 audit_every=audit_every, triage_runners=triage_runners, refresh_before_blocks=refresh_before_blocks,
+                 judge_runner=judge_runner)
 
 
 def _play(directory: GameDirectory, table: Table, names: list[str], decks: list, runners: list, auditor_runner, database: CardDatabase,
           cycles: int, rules: RulesReference | None, echo, *, earlier: dict | None = None, audit_every: str = "turn",
-          triage_runners: list | None = None, refresh_before_blocks: bool = True) -> dict:
+          triage_runners: list | None = None, refresh_before_blocks: bool = True, judge_runner=None) -> dict:
     """Schedule seats and audits until the game ends or `cycles` more rounds have been played."""
     count, seed = len(names), table.config["seed"]
     table.on_event = directory.journal  # a replayed table was built without its journal
@@ -151,8 +157,9 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
     # not shorten it. On a resume the turn in progress (or just begun) is the first of the new rounds.
     game = table.game
     last_round = (game.seats[game.turn.active].turns_taken - 1 if earlier is not None else 0) + cycles
-    auditor = Auditor(auditor_runner, database, context=f"A {count}-player Commander game. Seats, in turn order: "
-                      + ", ".join(f"{name} (seat {i})" for i, name in enumerate(names)) + ".")
+    context = f"A {count}-player Commander game. Seats, in turn order: " + ", ".join(f"{name} (seat {i})" for i, name in enumerate(names)) + "."
+    auditor = Auditor(auditor_runner, database, context=context)
+    judge = Judge(judge_runner or auditor_runner, database, rules=rules, context=context)
     systems = [SYSTEM.format(name=name, count=count) + "\n\nYOUR DECK (count, name, cost, type, text)\n"
                + _deck_reference(deck, database) for name, deck in zip(names, decks, strict=True)]
     current: dict = {}
@@ -163,6 +170,7 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
     waived: list[set] = [set() for _ in range(count)]  # per seat, the stack items it has said it will let resolve
     stamped: list = [None]  # what the battlefield looked like when power and toughness were last worked out
     report: dict = {"directory": str(directory.path), "seed": seed, "seats": names, "stopped": None,
+                    "rulings": list((earlier or {}).get("rulings", [])),
                     "triage": list((earlier or {}).get("triage", [])), "refreshes": list((earlier or {}).get("refreshes", [])),
                     "wakes": list((earlier or {}).get("wakes", [])), "audits": list((earlier or {}).get("audits", [])),
                     "earlier_usage": [*(earlier or {}).get("earlier_usage", []), *([earlier["usage"]] if (earlier or {}).get("usage") else [])]}
@@ -234,6 +242,8 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
                           describe(view, database), "", "YOUR HAND", *(hand or ["(empty)"]),
                           *(["", "YOUR TRIGGERS WAITING TO GO ON THE STACK", *waiting] if waiting else []),
                           *(["", "QUESTIONS FOR YOU", *asked] if asked else []),
+                          *(["", "THE JUDGE'S RULINGS IN THIS GAME (they bind everyone, the auditor included)",
+                             *(f"- {r['text']}" for r in view["rulings"])] if view["rulings"] else []),
                           "", "CARDS IN PLAY", card_reference([n for n in in_play if n], database, rulings_per_card=0) or "(none)",
                           "", "YOUR NOTES", table.notes[seat] or "(none yet)"])
 
@@ -293,6 +303,8 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
         current.update(tools=SeatTools(table, seat, handle, database=database, rules=rules), token=token, wake=handle,
                        seat=seat, ended=False)
         game = table.game
+        if kind == "correction" and not extra:
+            extra = _correction(game.control.detail)
         prompt = f"{when()} {extra or _WHY.get(kind, 'The table is waiting for you.')}\n\n{news(seat)}\n\n{briefing(seat)}"
         echo(f"turn {game.turn.number} {game.turn.step}: {names[seat]} ({kind}) ...")
         started = len(table.events)
@@ -339,13 +351,32 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
                 seat = seat if seat is not None else (actors[-1] if actors else None)
                 if seat is not None:
                     at_fault.setdefault(seat, []).append(f"{finding['summary']} Basis: {finding['basis']} What should happen: {finding['fix']}")
+        for answer in verdict.get("disputes") or []:
+            raised = table.events[answer["event"]] if 0 <= answer.get("event", -1) < len(table.events) else None
+            if raised is not None and raised["tool"] == "dispute":
+                table.answer_dispute(raised["seat"], answer["upheld"], answer["answer"])
         for seat, problems in at_fault.items():
             table.open_correction(seat, " | ".join(problems))
-            wake(server, seat, "correction", "The rules auditor found a problem with what you did. Put the table right with `act` "
-                 "(say what you are correcting in `because`), then call finish_step. If you are sure the auditor is wrong, "
-                 "explain why with `say` and call finish_step without changing anything.\n" + "\n".join(f"- {p}" for p in problems))
+            wake(server, seat, "correction")
+            if table.game.control.kind == "dispute":
+                adjudicate(snapshot[2])
+                if table.game.control.kind == "correction":
+                    wake(server, seat, "correction")  # the judge agreed there was a problem: no appeal this time
             if table.game.control.kind == "correction":
                 table.act(seat, "finish_step")
+
+    def adjudicate(since: int) -> None:
+        """A player has contested a finding. In the first real game nobody could, and two players gave
+        up a card each to a false alarm about the free mulligan."""
+        detail = dict(table.game.control.detail)
+        echo(f"         {names[detail['seat']]} contests the finding; the judge is ruling ...")
+        decision, reply = judge.rule(table, since)
+        table.rule(decision["decision"], decision["explanation"], ruling=decision.get("ruling", ""), fix=decision.get("fix", ""))
+        record = {"kind": "ruling", "turn": table.game.turn.number, "seat": detail["seat"], "finding": detail["finding"],
+                  "objection": detail["objection"], **decision, "seconds": round(reply.seconds, 1)}
+        report["rulings"].append(record)
+        directory.append("audits.jsonl", record)
+        echo(f"         the judge: {decision['decision']}. {decision['explanation']}")
 
     def refresh() -> None:
         """Work the creatures' power and toughness out again. Audits are a turn apart, and blocks are
@@ -384,6 +415,8 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
                     return "audit"
                 table.release()
                 continue
+            if game.control.kind == "dispute":
+                return "dispute"  # only after a resume: a ruling normally follows the contest at once
             expected = table.expected()
             if not expected:
                 return "stuck"
@@ -427,6 +460,9 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
                 why = settle()
                 if why in ("over", "stuck"):
                     break
+                if why == "dispute":
+                    adjudicate(snapshot[2])
+                    continue
                 if why == "audit":
                     audit(server, snapshot)
                     table.release()
@@ -477,6 +513,19 @@ def _must_lose(table: Table) -> list[tuple[int, str]]:
         if reason:
             lost.append((seat.index, reason))
     return lost
+
+
+def _correction(detail: dict) -> str:
+    """What a seat is told when the pen is handed to it to put the table right."""
+    if detail.get("final"):
+        return ("You contested the auditor's finding and the judge has ruled that there is something to correct. The ruling is "
+                "final. Put the table right with `act` (say what you are correcting in `because`), then call finish_step.\n- "
+                + detail["finding"])
+    return ("The rules auditor found a problem with what you did. If it is right, put the table right with `act` (say what you "
+            "are correcting in `because`), then call finish_step. If you are sure it is wrong, do not change anything: call "
+            "`contest` with your reason, quoting the card or the rule, and an independent judge will rule. The auditor does "
+            "raise false alarms, and a wrong correction damages the game as much as a missed one.\n"
+            + "\n".join(f"- {problem}" for problem in detail["finding"].split(" | ")))
 
 
 def _characteristics_print(table: Table) -> tuple:
@@ -545,11 +594,14 @@ def render(report: dict) -> str:
             lines.append(f"- Turn {entry['turn']}, **{report['seats'][entry['seat']]}** ({entry['kind']}): {summary}"
                          + (f" _({entry['forced']})_" if entry["forced"] else ""))
     serious = [(a["turn"], f) for a in report["audits"] for f in a.get("findings", []) if f["kind"] in SERIOUS]
+    rulings = report.get("rulings", [])
     lines += ["", "## Rules health", "",
               f"{len(report['audits'])} audits; {len(serious)} finding(s); "
+              + (f"{len(rulings)} contested ({', '.join(f'{n} {d}' for d in ('uphold', 'overrule', 'amend') if (n := sum(1 for r in rulings if r['decision'] == d)))}); " if rulings else "") +
               f"{sum(len(w['tool_errors']) for w in report['wakes'])} rejected tool call(s); "
               f"{sum(1 for w in report['wakes'] if w['forced'])} wake(s) the driver had to finish."]
     lines += [f"- Turn {turn}, {f['kind']}: {f['summary']}" for turn, f in serious]
+    lines += [f"- Turn {r['turn']}, the judge ({r['decision']}) on {report['seats'][r['seat']]}'s contest: {r['explanation']}" for r in rulings]
     if report.get("rubric"):
         lines += ["", rubric.render_markdown(report["rubric"]).rstrip()]
     usage = report["usage"]

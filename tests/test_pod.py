@@ -40,8 +40,9 @@ class ScriptedSeat:
     model = "scripted"
 
     def __init__(self, budget: Budget, *, cast_commander: bool = False, with_trigger: bool = False, triage: dict | None = None,
-                 attack: int | None = None):
-        self.budget, self.prompts, self.cast_commander, self.attack = budget, [], cast_commander, attack
+                 attack: int | None = None, contests: bool = False, disputes: str = ""):
+        self.budget, self.prompts, self.cast_commander, self.attack, self.contests = budget, [], cast_commander, attack, contests
+        self.disputes = disputes
         self.with_trigger, self.triage = with_trigger, triage or {}   # a made-up trigger on top of the commander; triage answers
 
     def ask(self, system: str, prompt: str, *, tools: McpConnection | None = None, schema: dict | None = None, **_) -> Reply:
@@ -69,10 +70,15 @@ class ScriptedSeat:
             if me not in view["pen"]["seats"]:
                 break
             land = next((c["handle"] for c in view["seats"][me]["hand"]["cards"] if c["name"] in ("Island", "Forest")), None)
+            if self.disputes and waiting_for == "priority":
+                tool("dispute", claim=self.disputes)
+                self.disputes = ""
             if waiting_for == "setup":
                 result = tool("keep")
             elif waiting_for == "triggers":
                 result = tool("add_trigger", pending=next(t["handle"] for t in view["waiting_triggers"] if t["seat"] == me))
+            elif waiting_for == "correction" and self.contests and not view["pen"].get("final"):
+                result = tool("contest", reason="I paid 1 life, as rule 119.4 says a payment of life is made. Rule 999.9z agrees.")
             elif waiting_for == "correction":
                 tool("act", because="correcting my life total", mutations=[{"op": "life", "seat": me, "set": 39}])
                 result = tool("finish_step")
@@ -408,3 +414,59 @@ def test_a_game_is_scored_against_the_rubric_from_its_log(combat_game, capsys):
     assert "## Against the rubric" in (directory / "report.md").read_text()
     assert main(["rubric", str(directory)]) == 0
     assert "Thrasios did nothing on 4 of 4 turns" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("decision, life, failed", [("overrule", 40, 0), ("uphold", 39, 1)])
+def test_a_player_can_contest_a_finding_and_a_judge_rules(database, tmp_path, decision, life, failed):
+    from fcsim.rules import RulesReference
+
+    budget = Budget(max_calls=300)
+    seats = [ScriptedSeat(budget, contests=True), ScriptedSeat(budget), ScriptedSeat(budget)]
+    wrong = {"kind": "illegal", "seat": 0, "summary": "Talrand paid no life", "basis": "rule 119.4", "fix": "set life to 39", "confidence": "high"}
+    auditor = FakeRunner([{"verdict": "findings", "findings": [wrong], "hooks": []}] + [OK] * 60, budget)
+    judge = FakeRunner([{"decision": decision, "explanation": "Nothing in the record cost life.", "fix": "",
+                         "ruling": "A land drop costs no life."}], budget)
+    report = play_pod(decks(tmp_path), seats, auditor, database, cycles=2, seed=4, out_root=tmp_path / "games", echo=lambda *_: None,
+                      judge_runner=judge, rules=RulesReference(Path(__file__).resolve().parents[1] / "rules"))
+    assert report["stopped"] is None and report["standings"][0]["life"] == life
+    ruling = report["rulings"][0]
+    assert (ruling["decision"], ruling["seat"], ruling["objection"][:17]) == (decision, 0, "I paid 1 life, as")
+    asked = judge.asked[0]["prompt"]
+    assert "THE AUDITOR'S FINDING (about Talrand)\nTalrand paid no life Basis: rule 119.4" in asked and "THE PLAYER'S OBJECTION\nI paid 1 life" in asked
+    assert "RULES CITED\n119.4" in asked and "999.9z: there is no rule with this number." in asked     # a rule number cannot be bluffed
+    assert "WHAT WAS DONE" in asked and "Pir plays Forest" in asked and judge.asked[0]["schema"]["required"][0] == "decision"
+    directory = Path(report["directory"])
+    log = (directory / "log.md").read_text()
+    assert "Talrand contests the auditor's finding" in log and f"The judge {decision}" in log.replace("upholds", "uphold").replace("overrules", "overrule")
+    # The ruling binds the rest of the game: every later audit and every later briefing carries it.
+    assert "RULINGS ALREADY MADE IN THIS GAME\n- (turn 1) A land drop costs no life." in auditor.asked[-1]["prompt"]
+    assert "THE JUDGE'S RULINGS IN THIS GAME" in seats[1].prompts[-1] and "- A land drop costs no life." in seats[1].prompts[-1]
+    corrections = [w for w in report["wakes"] if w["kind"] == "correction"]
+    assert len(corrections) == (1 if decision == "overrule" else 2)               # upheld: back to the player, with no appeal
+    if decision == "uphold":
+        assert "The ruling is final." in seats[0].prompts[[w["kind"] for w in report["wakes"] if w["seat"] == 0].index("correction") + 1]
+    state = json.loads((directory / "state.json").read_text())
+    assert state["seats"][0]["failed_disputes"] == failed and "1 contested (1 " + decision in (directory / "report.md").read_text()
+
+
+def test_a_players_dispute_is_put_to_the_auditor_and_answered_in_public(database, tmp_path):
+    import re
+
+    class Answering(FakeRunner):
+        def ask(self, system, prompt, *, schema=None, **_):
+            raised = re.search(r"event (\d+) \(Thrasios, dispute", prompt)
+            if raised:
+                self.answers.insert(0, {**OK, "disputes": [{"event": int(raised[1]), "upheld": False, "answer": "A land drop has no cost."}]})
+            return super().ask(system, prompt, schema=schema)
+
+    budget = Budget(max_calls=300)
+    seats = [ScriptedSeat(budget), ScriptedSeat(budget), ScriptedSeat(budget, disputes="Pir never paid for that Forest.")]
+    auditor = Answering([OK] * 60, budget)
+    report = play_pod(decks(tmp_path), seats, auditor, database, cycles=2, seed=4, out_root=tmp_path / "games", echo=lambda *_: None)
+    assert report["stopped"] is None
+    log = (Path(report["directory"]) / "log.md").read_text()
+    assert "Thrasios disputes what was done: Pir never paid for that Forest. The auditor will answer at its next check." in log
+    assert log.count("The auditor rejects Thrasios's dispute: A land drop has no cost.") == 1
+    state = json.loads((Path(report["directory"]) / "state.json").read_text())
+    assert [seat["failed_disputes"] for seat in state["seats"]] == [0, 0, 1]
+    assert "Disputes and rulings." in auditor.asked[0]["system"]

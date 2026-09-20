@@ -130,7 +130,7 @@ def view(game: Game, viewer: int | None, handles: Handles, rev: int) -> dict:
                  "blockers": [{"blocker": handles.of("c", b["blocker"]), "attacker": handles.of("c", b["attacker"])}
                               for b in turn.blockers if b["blocker"] in game.objects and b["attacker"] in game.objects]},
         "pen": {"kind": control.kind, "seats": control.seats,
-                **{k: v for k, v in control.detail.items() if k in ("action", "step", "because")}},
+                **{k: v for k, v in control.detail.items() if k in ("action", "step", "because", "finding", "final", "objection")}},
         "seats": seats,
         "battlefield": _zone(game, game.battlefield, viewer, handles),
         "stack": [item_view(game, item, handles) for item in game.stack],

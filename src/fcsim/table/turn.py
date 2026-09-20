@@ -88,6 +88,27 @@ def correction_done(game: Game) -> None:
     game.control = Control("audit", [], {"resume": game.control.detail["resume"]})
 
 
+def contest(game: Game, seat: int, objection: str) -> None:
+    """The seat asked to correct the table says the auditor is wrong. Nobody holds the pen until the judge rules."""
+    detail = game.control.detail
+    if detail.get("final"):
+        raise TableError("ruling_final", "The judge has already ruled on this, and the ruling is final. Make the correction and call finish_step.")
+    game.control = Control("dispute", [], {"seat": seat, "finding": detail["finding"], "objection": objection, "resume": detail["resume"]})
+
+
+def ruled(game: Game, decision: str, fix: str) -> None:
+    """The judge's decision on a contested finding: "overrule" ends the correction with nothing changed;
+    "uphold" and "amend" hand the pen back to the seat, this time with no appeal."""
+    if game.control.kind != "dispute":
+        raise TableError("not_waiting", "No contested finding is waiting for a ruling.")
+    detail = game.control.detail
+    if decision == "overrule":
+        game.control = Control("audit", [], {"resume": detail["resume"]})
+    else:
+        finding = fix if decision == "amend" and fix else detail["finding"] + (f" | The judge's instructions: {fix}" if fix else "")
+        game.control = Control("correction", [detail["seat"]], {"finding": finding, "resume": detail["resume"], "final": True})
+
+
 def release(game: Game) -> None:
     if game.control.kind != "audit":
         raise TableError("not_waiting", "The table is not waiting at an audit checkpoint.")

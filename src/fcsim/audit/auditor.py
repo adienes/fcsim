@@ -89,6 +89,12 @@ counters and notes, and the reason. List all of them each time: the list replace
 The table stamps these on the permanents, so that players do not each have to work out that a \
 3/3 Zombie beside Lord of the Undead is a 4/4.
 
+Disputes and rulings. A line in the record where a player disputes something is a request to \
+check it with particular care. Answer each under `disputes`: whether the player is right, and why, \
+in a sentence the table will read. If the player is right, also report the finding. RULINGS ALREADY \
+MADE IN THIS GAME are a judge's decisions on appeal: they bind you, so never report again what a \
+ruling has settled.
+
 Answer in the required JSON form. Seats are numbered from 0 in the order listed."""
 
 CHARACTERISTICS_SYSTEM = """\
@@ -147,6 +153,10 @@ VERDICT_SCHEMA = {
                     "event": {"type": "string", "enum": ["cast", "enters", "dies", "leaves", "attacks"]},
                     "who": {"type": "string", "enum": ["you", "opponent", "any"]},
                     "type": {"type": "string"}, "nontoken": {"type": "boolean"}, "other": {"type": "boolean"}}}}}},
+        "disputes": {"type": "array", "items": {
+            "type": "object", "additionalProperties": False, "required": ["event", "upheld", "answer"],
+            "properties": {"event": {"type": "integer", "description": "The number of the event in which the player raised the dispute."},
+                           "upheld": {"type": "boolean"}, "answer": {"type": "string"}}}},
         "computed": {"type": "array", "items": {
             "type": "object", "additionalProperties": False, "required": ["handle", "power", "toughness", "because"],
             "properties": {"handle": {"type": "string", "description": "The creature's handle, such as c12."},
@@ -273,11 +283,23 @@ def materials(table: Table, before: str, since_event: int, database: CardDatabas
               until_event: int | None = None) -> str:
     """The prompt for one audit: the table before, what was done, the table after, the cards."""
     after_view = table.view(None)
-    record, passing = [], []
+    rulings = [f"- (turn {r['turn']}) {r['text']}" for r in table.game.rulings]
+    return "\n\n".join([
+        *(["RULINGS ALREADY MADE IN THIS GAME\n" + "\n".join(rulings)] if rulings else []),
+        "THE TABLE BEFORE\n" + before,
+        "WHAT WAS DONE\n" + "\n".join(record(table, since_event, until_event)),
+        "THE TABLE NOW\n" + describe(after_view, database),
+        "CARDS\n" + card_reference(before_names + _names(after_view), database),
+        "Audit the record. Judge only the events listed under WHAT WAS DONE."])
+
+
+def record(table: Table, since_event: int, until_event: int | None = None) -> list[str]:
+    """The public record of a stretch of play, as the auditor and the judge read it."""
+    lines, passing = [], []
 
     def flush_passes() -> None:
         if passing:  # a run of passes is one line: who passed matters, a line each does not
-            record.append(f"events {passing[0][0]}-{passing[-1][0]} (during {passing[-1][2]}): "
+            lines.append(f"events {passing[0][0]}-{passing[-1][0]} (during {passing[-1][2]}): "
                           + ", ".join(dict.fromkeys(name for _, name, _ in passing)) + " passed priority.")
             passing.clear()
 
@@ -289,15 +311,10 @@ def materials(table: Table, before: str, since_event: int, database: CardDatabas
             continue
         flush_passes()
         actor = table.game.seats[event["seat"]].name if event["seat"] is not None else "the table"
-        record.append(f"event {event['n']} ({actor}, {event['tool']}, during {event['step']}): " + " ".join(event["public"]))
-        record += [f"    table warning: {lint}" for lint in event["lints"]]
+        lines.append(f"event {event['n']} ({actor}, {event['tool']}, during {event['step']}): " + " ".join(event["public"]))
+        lines += [f"    table warning: {lint}" for lint in event["lints"]]
     flush_passes()
-    return "\n\n".join([
-        "THE TABLE BEFORE\n" + before,
-        "WHAT WAS DONE\n" + "\n".join(record),
-        "THE TABLE NOW\n" + describe(after_view, database),
-        "CARDS\n" + card_reference(before_names + _names(after_view), database),
-        "Audit the record. Judge only the events listed under WHAT WAS DONE."])
+    return lines
 
 
 class Auditor:

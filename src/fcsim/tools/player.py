@@ -116,6 +116,14 @@ PLAYER_TOOLS = [
           "turn begins. Use it when you are tapped out or hold nothing to respond with: being asked costs time and "
           "changes nothing. Blocks, triggers and questions still come to you.",
           {"policy": {"type": "string", "enum": ["ask", "pass_unless_targeted", "pass_always"]}}, ("policy",)),
+    _tool("contest", "Only when the auditor has asked you to correct the table and you are sure it is wrong: say why, quoting "
+          "the card text or the rule. An independent judge rules, and the ruling is final: if it goes against you, you make "
+          "the correction. Do not correct the table and contest as well. After three lost contests or disputes you may raise no more.",
+          {"reason": {"type": "string"}}, ("reason",)),
+    _tool("dispute", "Say that another player broke the rules or carried an effect out wrongly: what was wrong and why, with "
+          "the event number from get_log if you have it. The auditor checks it at its next audit and answers in public; if "
+          "it agrees, the player has to put it right. For real rules errors, not for strategy or table talk.",
+          {"claim": {"type": "string"}, "event": {"type": "integer"}}, ("claim",)),
     _tool("get_notes", "Your private notes. They are your only memory between turns."),
     _tool("write_notes", "Replace your private notes: plans, threats, deals, what opponents have shown.",
           {"text": {"type": "string"}}, ("text",)),

@@ -26,7 +26,8 @@ def status(game_dir: str | Path) -> dict:
     wakes = [r for r in rows if r.get("kind") != "triage" and "seconds" in r]
     triage = [r for r in rows if r.get("kind") == "triage"]
     checks = _lines(directory.path / "audits.jsonl")
-    audits = [a for a in checks if a.get("kind") != "characteristics"]
+    audits = [a for a in checks if "kind" not in a]
+    rulings = [a for a in checks if a.get("kind") == "ruling"]      # a judge's decisions on contested findings
     refreshes = [a for a in checks if a.get("kind") == "characteristics"]  # power and toughness, before blocks
     last = events[-1]
     by_turn: dict[int, dict] = {}
@@ -59,11 +60,13 @@ def status(game_dir: str | Path) -> dict:
             "triage_questions": len(triage), "triage_said_respond": sum(1 for t in triage if t["respond"]),
             "audits": len(audits), "audit_seconds": round(sum(a.get("seconds") or 0 for a in audits)),
             "refreshes": len(refreshes), "refresh_seconds": round(sum(a.get("seconds") or 0 for a in refreshes)),
+            "rulings": len(rulings), "ruling_seconds": round(sum(a.get("seconds") or 0 for a in rulings)),
             "slowest_wakes": [{"seat": names[w["seat"]] if "seat" in w else names[0], "turn": w.get("table_turn", w["turn"]),
                                "kind": w["kind"], "seconds": w["seconds"], "tool_calls": w["tool_calls"]}
                               for w in sorted(wakes, key=lambda w: -w["seconds"])[:5]],
         },
         "by_turn": {turn: {k: round(v, 1) if isinstance(v, float) else v for k, v in row.items()} for turn, row in sorted(by_turn.items())},
+        "rulings": [{"turn": r["turn"], "seat": names[r["seat"]], "decision": r["decision"], "explanation": r["explanation"]} for r in rulings],
         "findings": [{"turn": a["turn"], "kind": f["kind"], "seat": f.get("seat"), "summary": f["summary"]}
                      for a in audits for f in a.get("findings", []) if f["kind"] != "note"],
     }
@@ -87,4 +90,6 @@ def render(report: dict) -> str:
     lines += [f"  {turn:>3}  {row['wakes']:>3} {row['seconds']:>7.0f}s {row['tool_calls']:>4} {row.get('audit_seconds', 0):>6.0f}s" for turn, row in report["by_turn"].items()]
     if report["findings"]:
         lines += ["", "AUDITOR FINDINGS"] + [f"  turn {f['turn']} {f['kind']} (seat {f['seat']}): {f['summary'][:150]}" for f in report["findings"]]
+    if report["rulings"]:
+        lines += ["", "THE JUDGE'S RULINGS"] + [f"  turn {r['turn']} {r['decision']} ({r['seat']} contested): {r['explanation'][:200]}" for r in report["rulings"]]
     return "\n".join(lines)

@@ -212,8 +212,12 @@ round-by-round accounts it was written from. `fcsim rubric <game_dir>` scores a 
 against the table-quality rubric from its log alone (length, participation, sitting
 out, interaction, threat rotation, turn weight, the ending); the same scores close
 every pod's `report.md`. `FINDINGS.md` logs what real games have
-shown about the harness. Not built yet: disputes and a judge, rewinds, and reply
-wakes for table talk.
+shown about the harness. A player asked to correct the table can `contest` the
+finding instead; a judge, given both sides and the text of every rule either cited,
+upholds, overrules or amends, and its ruling binds the auditor and the players for
+the rest of the game. Any player can `dispute` another's play, which the auditor
+must answer in public. Not built yet: rewinds as a judge's remedy, `ask_judge`, and
+reply wakes for table talk.
 
 ## Model backends
 

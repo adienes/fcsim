@@ -27,13 +27,15 @@ _ALLOWED = {
     "resolve": ("resolution",), "finish_resolution": ("resolution",),
     "answer": ("request",), "finish_step": ("held_step", "turn_action", "correction"),
     "declare_attackers": ("turn_action",), "declare_blockers": ("turn_action",), "combat_damage": ("turn_action",),
+    "contest": ("correction",),
 }
+_DISPUTES = 3  # contests and disputes a seat may lose before it may raise no more
 _READ_ONLY = frozenset({"get_view", "get_log", "get_notes"})
 # What a seat may still do once its wake has ended: nothing here touches the game.
 _AFTER_WAKE = frozenset({"write_notes", "get_notes", "set_response_policy", "get_view", "get_log"})
 # Calls that change nothing an auditor could judge. Every other seat call marks the table as unaudited.
 _NOT_AUDITABLE = frozenset({"pass_priority", "say", "write_notes", "mulligan", "keep", "concede", "answer", "finish_step",
-                            "set_response_policy"})
+                            "set_response_policy", "contest"})
 
 
 class Table:
@@ -496,6 +498,29 @@ class Table:
         address = f" (to {', '.join(game.seats[s].name for s in to)})" if to else ""
         return ops.Told(public=[f"{self._name(seat)}{address}: {text}"])
 
+    def _may_dispute(self, game: Game, seat: int) -> None:
+        if game.seats[seat].failed_disputes >= _DISPUTES:
+            raise TableError("no_more_disputes", f"{_DISPUTES} of your contests and disputes have failed; you may raise no more this game.")
+
+    def _do_contest(self, game: Game, seat: int, args: dict):
+        reason = str(args.get("reason", "")).strip()
+        if not reason:
+            raise TableError("empty", "Say why the auditor is wrong: quote the card or the rule.")
+        self._may_dispute(game, seat)
+        turn.contest(game, seat, reason)
+        return ops.Told(public=[f"{self._name(seat)} contests the auditor's finding: {reason} The judge will rule."])
+
+    def _do_dispute(self, game: Game, seat: int, args: dict):
+        claim = str(args.get("claim", "")).strip()
+        if not claim:
+            raise TableError("empty", "Say what was done wrongly, and why.")
+        self._may_dispute(game, seat)
+        about = args.get("event")
+        if about is not None and not (isinstance(about, int) and 0 < about < len(self.events)):
+            raise TableError("bad_event", "`event` is an event number from get_log.")
+        return ops.Told(public=[f"{self._name(seat)} disputes {f'event {about}' if about is not None else 'what was done'}: {claim} "
+                                "The auditor will answer at its next check."])
+
     def _do_set_response_policy(self, game: Game, seat: int, args: dict):
         policy = args.get("policy")
         if policy not in ("ask", "pass_unless_targeted", "pass_always"):
@@ -557,6 +582,37 @@ class Table:
     def _do_open_correction(self, game: Game, seat: None, args: dict):
         turn.open_correction(game, ops._seat(game, args["seat"]), str(args["finding"]))
         return ops.Told(public=[f"The auditor asks {self._name(args['seat'])} to correct the table: {args['finding']}"])
+
+    def rule(self, decision: str, explanation: str, *, ruling: str = "", fix: str = "") -> dict:
+        """The judge's decision on a contested finding: "uphold", "overrule" or "amend" (a problem, but
+        not the auditor's fix). `ruling` is kept for the rest of the game and shown to every player and
+        every audit, so the same question is not argued twice."""
+        if decision not in ("uphold", "overrule", "amend"):
+            raise TableError("bad_decision", "A ruling upholds, overrules or amends.")
+        return self._execute(None, "rule", {"decision": decision, "explanation": explanation, "ruling": ruling, "fix": fix})
+
+    def _do_rule(self, game: Game, seat: None, args: dict):
+        contesting = game.control.detail.get("seat")
+        turn.ruled(game, args["decision"], str(args.get("fix") or ""))
+        if args["decision"] == "uphold":
+            game.seats[contesting].failed_disputes += 1
+        if args.get("ruling"):
+            game.rulings.append({"turn": game.turn.number, "text": str(args["ruling"])})
+        words = {"uphold": "upholds the auditor's finding", "overrule": "overrules the auditor: nothing is to be corrected",
+                 "amend": "amends the auditor's finding"}[args["decision"]]
+        return ops.Told(public=[f"The judge {words}. {args['explanation']}"
+                                + (f" What {self._name(contesting)} must do: {args['fix']}" if args["decision"] != "overrule" and args.get("fix") else "")
+                                + (f" Ruling for the rest of this game: {args['ruling']}" if args.get("ruling") else "")])
+
+    def answer_dispute(self, seat: int, upheld: bool, answer: str) -> dict:
+        """The auditor's public answer to a player's dispute. One that fails counts against the seat."""
+        return self._execute(None, "answer_dispute", {"seat": seat, "upheld": bool(upheld), "answer": answer})
+
+    def _do_answer_dispute(self, game: Game, seat: None, args: dict):
+        who = ops._seat(game, args["seat"])
+        if not args["upheld"]:
+            game.seats[who].failed_disputes += 1
+        return ops.Told(public=[f"The auditor {'agrees with' if args['upheld'] else 'rejects'} {self._name(who)}'s dispute: {args['answer']}"])
 
     def apply_hooks(self, hooks: list[dict]) -> dict:
         """Write an auditor's hooks into the ledger. A hook lasts until its source leaves the battlefield.

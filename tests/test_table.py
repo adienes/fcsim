@@ -609,3 +609,69 @@ def test_a_trigger_put_on_the_stack_by_hand_is_not_asked_for_again():
     runner.step(0, "add_trigger", {"source": "@Lozhan", "text": "Lozhan deals 5 damage", "targets": [{"seat": 1}]})
     runner.step(0, "pass_priority")
     assert table.expected() == [(1, "priority")] and len(table.view(0)["stack"]) == 2 and table.game.pending_triggers == []
+
+
+def test_a_contested_finding_waits_for_the_judge_and_the_ruling_is_kept():
+    table = Table(seats(), seed=5, first=0, gated=True)
+    runner = ScriptedRunner(table)
+    for seat in range(3):
+        runner.step(seat, "keep")
+    for _ in range(12):
+        if table.game.turn.step == "main1":
+            break
+        runner.step(table.expected()[0][0], "pass_priority")
+
+    def wrong_finding(text: str) -> None:
+        for _ in range(12):  # round to Ann again
+            if table.awaiting_audit:
+                table.release()
+            elif table.expected()[0] == (0, "priority"):
+                break
+            else:
+                seat, kind = table.expected()[0]
+                runner.step(seat, {"priority": "pass_priority", "discard": "finish_step"}.get(kind, kind))
+        runner.step(0, "act", {"because": "a spell's effect", "mutations": [{"op": "life", "seat": 1, "delta": -1}]})
+        if not table.awaiting_audit:
+            runner.step(0, "pass_priority")
+        table.open_correction(0, text)
+
+    wrong_finding("Bob should have lost 3 life.")
+    runner.step(1, "contest", {"reason": "not mine"}, error="not_your_pen")     # only the seat the finding is about
+    runner.step(0, "contest", {"reason": ""}, error="empty")
+    runner.step(0, "contest", {"reason": "The card says 1 damage."})
+    assert table.game.control.kind == "dispute" and table.expected() == [] and not table.awaiting_audit
+    runner.step(0, "act", {"because": "x", "mutations": []}, error="not_your_pen")   # nobody holds the pen until the judge rules
+    assert "contests the auditor's finding: The card says 1 damage. The judge will rule." in table.events[-1]["public"][0]
+    table.rule("overrule", "The card deals 1 damage.", ruling="Shock-alike deals 1 damage.")
+    assert table.awaiting_audit and table.view(2)["rulings"] == [{"turn": 1, "text": "Shock-alike deals 1 damage."}]
+    assert table.game.seats[0].failed_disputes == 0 and "overrules the auditor" in table.events[-1]["public"][0]
+    table.release()
+
+    wrong_finding("Bob should have lost 2 life.")
+    runner.step(0, "contest", {"reason": "It says 1."})
+    table.rule("uphold", "The card says 2.")
+    assert table.expected() == [(0, "correction")] and table.game.control.detail["final"] and table.game.seats[0].failed_disputes == 1
+    runner.step(0, "contest", {"reason": "Still 1."}, error="ruling_final")     # the ruling is final
+    runner.step(0, "act", {"because": "the judge's ruling", "mutations": [{"op": "life", "seat": 1, "delta": -1}]})
+    runner.step(0, "finish_step")
+    table.release()
+
+    wrong_finding("Bob should have gained life.")
+    runner.step(0, "contest", {"reason": "No lifelink here."})
+    table.rule("amend", "There is a problem, but not that one.", fix="Bob loses 1 more life.")
+    assert table.game.control.detail["finding"] == "Bob loses 1 more life." and table.game.seats[0].failed_disputes == 1
+    assert "What Ann must do: Bob loses 1 more life." in table.events[-1]["public"][0]
+    runner.step(0, "finish_step")
+    table.release()
+
+    runner.step(2, "dispute", {"claim": "Ann never paid for that.", "event": 9999}, error="bad_event")
+    runner.step(2, "dispute", {"claim": "Ann never paid for that.", "event": 5})
+    assert "Cat disputes event 5: Ann never paid for that." in table.events[-1]["public"][0] and table.game.audit_pending
+    table.answer_dispute(2, False, "Nothing had a cost.")
+    assert table.game.seats[2].failed_disputes == 1 and "The auditor rejects Cat's dispute" in table.events[-1]["public"][0]
+    table.answer_dispute(2, False, "No.")
+    table.answer_dispute(2, False, "No.")
+    runner.step(2, "dispute", {"claim": "And another thing."}, error="no_more_disputes")
+    with pytest.raises(ValueError, match="No contested finding"):
+        table.rule("uphold", "nothing to rule on")
+    assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()
