@@ -211,7 +211,17 @@ one file, `narrative.md`: the story of the game told with full information, then
 round-by-round accounts it was written from. `fcsim rubric <game_dir>` scores a game
 against the table-quality rubric from its log alone (length, participation, sitting
 out, interaction, threat rotation, turn weight, the ending); the same scores close
-every pod's `report.md`. `FINDINGS.md` logs what real games have
+every pod's `report.md`.
+
+`fcsim review <decklist> <game_dir>...` is the first piece of the workshop: a
+reviewer with full information reads how the deck fared (the rubric scores, the
+round accounts, what happened to every card its pilot saw, the pilot's notes, rules
+findings, and your own `feedback.md` if the game has one), separates the deck from
+the pilot, the pod and the draws, and proposes at most five swaps. It is told that
+better means better games, not more power. Swaps are checked against the card data
+(in the list, legal, in color identity, not a duplicate) and written beside the
+list as checkboxes; `fcsim deck apply <decklist> <review> -o <new list>` makes the
+ones you tick. `FINDINGS.md` logs what real games have
 shown about the harness. A player asked to correct the table can `contest` the
 finding instead; a judge, given both sides and the text of every rule either cited,
 upholds, overrules or amends, and its ruling binds the auditor and the players for

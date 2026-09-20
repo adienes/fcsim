@@ -19,6 +19,8 @@ from .play.status import render as render_status
 from .play.status import status
 from .rules import RulesError, RulesReference
 from .workshop.check import check_deck, render
+from .workshop.review import apply as apply_review
+from .workshop.review import review as review_deck
 
 
 def _cost_limit(value: str) -> float | None:
@@ -99,6 +101,13 @@ def main(argv: list[str] | None = None) -> int:
     check.add_argument("--seed", type=int)
     check.add_argument("--json", action="store_true", help="Print the full result as JSON")
     check.add_argument("--verbose", action="store_true", help="List the cards in each role and the policy")
+    applied = deck_actions.add_parser("apply", help="Make the ticked swaps of a review; writes a new list, never the old one unless told to")
+    applied.add_argument("path")
+    applied.add_argument("review")
+    where_to = applied.add_mutually_exclusive_group(required=True)
+    where_to.add_argument("-o", "--out", help="Where to write the new list")
+    where_to.add_argument("--in-place", action="store_true", help="Overwrite the list")
+    applied.add_argument("--all", action="store_true", help="Make every proposed swap, ticked or not")
     average = deck_actions.add_parser("average", help="Write EDHREC's average deck for a commander: a placeholder opponent")
     average.add_argument("commander")
     average.add_argument("--out", help="File to write (default: print)")
@@ -131,6 +140,14 @@ def main(argv: list[str] | None = None) -> int:
     story.add_argument("--max-calls", type=int, default=30, help="Hard limit on model calls for this run")
     _model_options(story, audited=False, cost_default=5.0)
 
+    reviewed = commands.add_parser("review", help="Review how a deck fared in its games and propose a few swaps (uses the model)")
+    reviewed.add_argument("deck", help="The decklist that was played")
+    reviewed.add_argument("game_dirs", nargs="+", help="Games it played in; run `fcsim summarize` on them first for a better review")
+    reviewed.add_argument("--swaps", type=int, default=5, help="The most swaps to propose")
+    reviewed.add_argument("--out", help="Where to write the review (default: beside the list, as <list>.review.md)")
+    reviewed.add_argument("--max-calls", type=int, default=5, help="Hard limit on model calls for this run")
+    _model_options(reviewed, audited=False, cost_default=5.0)
+
     scored = commands.add_parser("rubric", help="Score a game against the table-quality rubric, from its log; no model call")
     scored.add_argument("game_dir")
     scored.add_argument("--json", action="store_true")
@@ -153,9 +170,9 @@ def main(argv: list[str] | None = None) -> int:
     pod.add_argument("--out", default="games")
 
     args = parser.parse_args(argv)
-    if args.command in ("cards", "deck", "audit", "goldfish", "pod", "status", "summarize", "rubric"):
+    if args.command in ("cards", "deck", "audit", "goldfish", "pod", "status", "summarize", "rubric", "review"):
         try:
-            return {"cards": _cards, "deck": _deck, "audit": _audit, "goldfish": _goldfish, "pod": _pod, "status": _status, "summarize": _summarize, "rubric": _rubric}[args.command](args)
+            return {"cards": _cards, "deck": _deck, "audit": _audit, "goldfish": _goldfish, "pod": _pod, "status": _status, "summarize": _summarize, "rubric": _rubric, "review": _review}[args.command](args)
         except (CardsError, RunnerError, ValueError, OSError) as exc:
             print(json.dumps({"error": {"code": "cards_error", "message": str(exc)}}), file=sys.stderr)
             return 2
@@ -197,6 +214,20 @@ def _cards(args: argparse.Namespace) -> int:
 
 
 def _deck(args: argparse.Namespace) -> int:
+    if args.action == "apply":
+        decklist, made, refused = apply_review(args.path, args.review, CardDatabase(), everything=args.all)
+        for swap in made:
+            print(f"cut {swap['cut']}, add {swap['add']}")
+        for line in refused:
+            print(f"refused: {line}")
+        if not made:
+            print("No swaps to make: tick the ones you want in the review, or pass --all.")
+            return 1
+        target = args.path if args.in_place else args.out
+        with open(target, "w", encoding="utf-8") as out:
+            out.write(decklist.to_mtgo())
+        print(f"Wrote {target}; check it with `fcsim deck check {target}`.")
+        return 0
     if args.action == "average":
         text = average_deck(args.commander)
         if args.out:
@@ -285,6 +316,15 @@ def _pod(args: argparse.Namespace) -> int:
 def _status(args: argparse.Namespace) -> int:
     report = status(args.game_dir)
     print(json.dumps(report, indent=2, ensure_ascii=False) if args.json else render_status(report))
+    return 0
+
+
+def _review(args: argparse.Namespace) -> int:
+    runner = make_runner(args.backend, model=args.model, effort=args.effort, budget=_budget(args))
+    result = review_deck(args.deck, args.game_dirs, runner, CardDatabase(), swaps=args.swaps, out=args.out)
+    with open(result["review"], encoding="utf-8") as text:
+        print("\n" + text.read())
+    print(f"Written to {result['review']}")
     return 0
 
 

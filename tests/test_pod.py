@@ -472,3 +472,50 @@ def test_a_players_dispute_is_put_to_the_auditor_and_answered_in_public(database
     state = json.loads((Path(report["directory"]) / "state.json").read_text())
     assert [seat["failed_disputes"] for seat in state["seats"]] == [0, 0, 1]
     assert "Disputes and rulings." in auditor.asked[0]["system"]
+
+
+def test_a_deck_is_reviewed_over_its_games_and_only_sound_swaps_are_offered(combat_game, database, tmp_path, capsys):
+    from fcsim.cli import main
+    from fcsim.play.cardlog import card_record
+    from fcsim.workshop.review import apply, review
+
+    report = combat_game[0]
+    record = card_record(report["directory"])
+    talrand = record["seats"][0]["cards"]
+    assert [r["name"] for r in talrand if r["seen_round"] == 0] == ["Island"] * 7 and record["rounds"] == report["rounds"]
+    commander = next(r for r in talrand if r["commander"])
+    assert (commander["played_round"], commander["times_cast"], commander["ended_in"], commander["seen_round"]) == (4, 1, "battlefield", None)
+    assert sum(1 for r in talrand if r["played_as"] == "land or put into play") == 6 and max(r["rounds_in_hand"] for r in talrand) >= 4
+
+    deck = tmp_path / "talrand.txt"
+    deck.write_text("98 Island\n1 Opt\n\n1 Talrand, Sky Summoner\n", encoding="utf-8")
+    proposed = [{"cut": "Island", "add": "counterspell", "reason": "No interaction.", "evidence": "Rounds 1 to 6: nothing but lands.", "expected_effect": "More interaction."},
+                {"cut": "Island", "add": "Cultivate", "reason": "Ramp.", "evidence": "-", "expected_effect": "-"},
+                {"cut": "Island", "add": "Black Lotus", "reason": "Speed.", "evidence": "-", "expected_effect": "-"},
+                {"cut": "Talrand, Sky Summoner", "add": "Rhystic Study", "reason": "-", "evidence": "-", "expected_effect": "-"},
+                {"cut": "Island", "add": "Opt", "reason": "-", "evidence": "-", "expected_effect": "-"},
+                {"cut": "Island", "add": "Conterspell of Doom", "reason": "-", "evidence": "-", "expected_effect": "-"},
+                {"cut": "Island", "add": "Time Warp", "reason": "One too many.", "evidence": "-", "expected_effect": "-"}]
+    reviewer = FakeRunner([{"review": "## What happened\nLands.", "causes": {"deck": "All lands.", "pilot": "Fine.", "pod": "Quiet.", "variance": "None."},
+                            "lessons": ["Cast the commander sooner."], "swaps": proposed}])
+    result = review(deck, [report["directory"]], reviewer, database, swaps=6, echo=lambda *_: None)
+    assert [(s["cut"], s["add"]) for s in result["swaps"]] == [("Island", "Counterspell")]          # the Oracle name; the seventh was over the limit
+    assert len(result["refused"]) == 5 and "outside the commander's color identity" in result["refused"][0]
+    assert "not legal in Commander" in result["refused"][1] and "it is the commander" in result["refused"][2]
+    assert "already in the list" in result["refused"][3] and "no card named" in result["refused"][4]
+    asked = reviewer.asked[0]
+    assert "not the strongest deck" in asked["system"] and "6 at most" in asked["system"]
+    for heading in ("THE LIST", "MEASURED FROM THE LOG", "WHAT HAPPENED TO EACH CARD THE PILOT SAW", "THE GAME, ROUND BY ROUND",
+                    "WHAT THE PILOT SAID IT WAS DOING", "RULES FINDINGS ABOUT THIS SEAT", "this deck sat at seat 0 as Talrand"):
+        assert heading in asked["prompt"]
+    written = Path(result["review"])
+    assert written == tmp_path / "talrand.review.md" and "- [ ] cut **Island**, add **Counterspell**: No interaction." in written.read_text()
+    assert apply(deck, written, database)[1] == []                                                  # nothing is ticked yet
+    written.write_text(written.read_text().replace("- [ ] cut **Island**", "- [x] cut **Island**"))
+    assert main(["deck", "apply", str(deck), str(written), "-o", str(tmp_path / "next.txt")]) == 0
+    assert (tmp_path / "next.txt").read_text() == "97 Island\n1 Counterspell\n1 Opt\n\n1 Talrand, Sky Summoner\n"
+    assert deck.read_text().startswith("98 Island") and "cut Island, add Counterspell" in capsys.readouterr().out
+    with pytest.raises(ValueError, match="did not play in"):
+        other = tmp_path / "pirless.txt"
+        other.write_text("99 Forest\n\n1 Wilson, Refined Grizzly\n", encoding="utf-8")
+        review(other, [report["directory"]], reviewer, database, echo=lambda *_: None)

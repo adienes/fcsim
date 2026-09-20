@@ -55,6 +55,22 @@ one to three minutes. Busy turns are still six to fifteen, which is what S3 and 
 | F9 | Nobody can act at instant speed on an empty stack in another player's turn. | The driver passes for every seat there (S1), so "at the end of your turn, I cast" cannot happen: flash creatures and instant-speed draw are weaker than they should be | **Open**: a private standing watch ("wake me in the end step of the player before me", "wake me when X attacks"), reset at one's own turn like the response policy |
 | F8 | No narrative or rubric score at the end. | Only `report.md` standings and each player's own account | **Partly built**: `fcsim summarize <game_dir>` condenses each round with full information (the log, private draws, each player's own account, audit findings), then writes one file, `narrative.md`: the story, with a closing section that judges the game against the group's rubric, followed by the round accounts it was written from. Finished rounds are read back from that file, so another style costs two calls. Building it showed that the turn's own draw was recorded nowhere: every draw is now told privately to its seat. **Rubric scores built**: `fcsim rubric <game_dir>` replays the journal and scores length, participation, sitting out, interaction, threat rotation, turn weight and the ending, each with its threshold stated, plus a row per seat. The scores go into `report.md` and `rubric.json` at the end of a game and into the narrative's prompt. On the first pod they say what a reader said: Lathril idle on 3 of 4 turns, a 50-action turn against a typical 4, and three players killed in one turn from 27, 37 and 28 life. Spotlight and salt stay with the reader |
 
+## Second pod: what the new driver did
+
+Three rounds (12 table turns) of the same four decks, every player at medium effort:
+
+| | First pod, rounds 1-3 | Second pod, rounds 1-3 |
+| --- | --- | --- |
+| Player wakes | 98 | 16 (one a turn, and four to keep hands) |
+| Model time in wakes | about 50 min | 5 min 51 s (22 s a wake) |
+| Wakes that only looked and passed | 59 | 0 |
+| Respond-or-pass questions | 148 over the game, none answered yes | 5: players set a standing policy 8 times |
+| Audits | 22, one per checkpoint | 12, one per turn, 14 s each |
+| Wall time per table turn | about 5 min | about 45 s |
+
+The session-continuity change (S3) did what it was for: a turn is one session. It also caused the
+one rules error of the three rounds (R9), now fixed.
+
 ## What the pod says about the decks
 
 EDHREC's average Miirym list killed two players from 27 and 37 life in one main phase on its fifth
