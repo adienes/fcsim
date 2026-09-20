@@ -166,6 +166,7 @@ def simulate(deck: Deck, *, trials: int = 5000, turns: int = 10, seed: int | Non
                 lands_played += 1
                 land_drop_made[turn] += 1
 
+            castable_now = [_payable(cost, pips, battlefield, 0) for _, cost, pips in commanders]
             spent = 0
             progress = True
             while progress:
@@ -185,7 +186,7 @@ def simulate(deck: Deck, *, trials: int = 5000, turns: int = 10, seed: int | Non
             colors_now = frozenset().union(*(card.colors for card in battlefield))
             all_colors[turn] += wanted <= colors_now
             for index, (_, cost, pips) in enumerate(commanders):
-                if not castable_on[index] and _payable(cost, pips, battlefield, 0):
+                if not castable_on[index] and (castable_now[index] or _payable(cost, pips, battlefield, spent)):
                     castable_on[index] = turn + 1
             if turn == 3:
                 stuck_on_two += lands_played <= 2

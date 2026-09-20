@@ -33,7 +33,7 @@ class ScriptedPilot:
         self.budget, self.prompts, self.systems = budget, [], []
 
     def ask(self, system: str, prompt: str, *, mcp_config: dict, allowed_tools: tuple[str, ...], **_) -> Reply:
-        self.budget.check()
+        self.budget.begin()
         self.prompts.append(prompt), self.systems.append(system)
         server = mcp_config["mcpServers"]["fcsim"]
         count = [0]

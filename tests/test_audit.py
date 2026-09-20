@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from fcsim.agents import Budget, BudgetExceeded, FakeRunner
+from fcsim.agents import Budget, BudgetExceeded, FakeRunner, RunnerError
 from fcsim.audit import VERDICT_SCHEMA, Auditor, build, load_scenarios, materials, play, run_suite, score
 from fcsim.cards import CardDatabase
 from fcsim.cli import main
@@ -112,3 +112,10 @@ def test_the_audit_command_lists_shows_and_runs(database, tmp_path, capsys, monk
     printed = capsys.readouterr().out
     assert "pass  ordinary second-land " in printed and "2 of 2 scenarios passed" in printed
     assert json.loads(out.read_text())["summary"]["catch_rate"] == 1.0
+
+
+def test_a_failed_model_call_still_counts_against_the_limit(database):
+    chosen = [s for s in SCENARIOS if s["tier"] == "ordinary"][:3]
+    runner = FakeRunner([RunnerError("timed out"), RunnerError("timed out"), OK], Budget(max_calls=2))
+    report = run_suite(Auditor(runner, database), chosen)
+    assert runner.budget.calls == 2 and [("error" in r, "skipped" in r) for r in report["results"]] == [(True, False), (True, False), (False, True)]

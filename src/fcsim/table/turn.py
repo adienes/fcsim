@@ -83,6 +83,18 @@ def advance(game: Game) -> None:
 def _perform(game: Game, step: str) -> bool:
     """Do a step's mechanical part. True when a seat now holds the pen."""
     turn, active = game.turn, game.turn.active
+    if game.seats[active].status != "alive":
+        # Rule 800.4j: the turn of a player who has left runs to its end without an active player.
+        # They draw, attack and discard nothing; priority goes to the next player in turn order.
+        if step == "declare_attackers":
+            turn.remaining[:] = [s for s in turn.remaining if s not in ("declare_blockers", "combat_damage")]
+        if step == "cleanup":
+            return _cleanup(game)
+        if step in _PRIORITY_STEPS:
+            _queue_step_triggers(game, step)
+            grant_priority(game, active)
+            return True
+        return False
     if step == "untap":
         for obj_id in game.battlefield:
             obj = game.objects[obj_id]
@@ -151,7 +163,7 @@ def grant_priority(game: Game, seat: int) -> None:
         if candidate in owed:
             game.control = Control("triggers", [candidate], {"then": seat})
             return
-    _give_priority(game, seat if game.seats[seat].status == "alive" else game.turn.active)
+    _give_priority(game, game.turn_order_from(seat)[0])  # the seat itself, or the next living one in turn order
 
 
 def _yielding(game: Game, seat: int) -> bool:
@@ -289,12 +301,7 @@ def repair_after_elimination(game: Game) -> None:
         request["waiting"][:] = [s for s in request["waiting"] if s in alive]
     if game.resolution and game.resolution["item"].controller not in alive:
         game.resolution = None
-        control = game.control = Control("priority", [turn.active])
-    if turn.active not in alive:
-        game.stack.clear()
-        game.pending_triggers.clear()
-        game.resolution = None
-        return _next_turn(game)
+        return grant_priority(game, turn.active)
     if control.seats and not set(control.seats) & alive:
         if control.kind == "priority":
             return pass_priority(game, control.seats[0])

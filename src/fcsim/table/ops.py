@@ -99,7 +99,7 @@ def apply_op(game: Game, dice: Dice, actor: int, op: dict, told: Told) -> None:
             holder.counters[name] = value
             if value <= 0:
                 del holder.counters[name]
-            label = holder.name if isinstance(holder, Obj) and holder.public else getattr(holder, "name", "a card")
+            label = _named(holder) if isinstance(holder, Obj) else holder.name
             told.public.append(f"{label} now has {max(value, 0)} {name} counter(s){because}.")
         case "life":
             player = game.seats[_seat(game, op.get("seat"))]

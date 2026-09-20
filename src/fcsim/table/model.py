@@ -37,9 +37,16 @@ class Dice:
     def begin(self, recorded: list | None = None) -> None:
         self.recorded = []
         self._replaying = list(recorded) if recorded is not None else None
+        self._at_begin = self._rng.getstate()
+
+    def rollback(self) -> None:
+        """The call was rejected: it used no randomness, as it changed nothing else."""
+        self._rng.setstate(self._at_begin)
 
     def _outcome(self, make):
-        value = self._replaying.pop(0) if self._replaying is not None else make()
+        value = make()  # always drawn, so a replayed table's generator is where the original's was
+        if self._replaying is not None:
+            value = self._replaying.pop(0)
         self.recorded.append(value)
         return value
 

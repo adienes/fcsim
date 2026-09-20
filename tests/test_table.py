@@ -377,3 +377,75 @@ def test_a_wrong_commander_damage_total_can_be_corrected():
     assert table.view(2)["seats"][1]["commander_damage"] == {"Ann's Commander (Ann)": 8}
     runner.step(0, "act", {"because": "x", "mutations": [{"op": "commander_damage", "seat": 1, "commander": commander, "amount": -8}]},
                 error="bad_count")
+
+
+def test_a_face_down_permanents_name_never_reaches_another_seat():
+    table, runner = started()
+    pass_until(table, runner, "begin_combat")
+    secret = spell_in_hand(table, 0)
+    runner.step(0, "act", {"because": "morph", "mutations": [{"op": "move", "obj": f"@{secret}", "to": "battlefield", "face_down": True}]})
+    mine = table.view(0)["battlefield"][0]
+    assert mine["name"] == secret and "name" not in table.view(1)["battlefield"][0]
+    runner.step(0, "act", {"because": "x", "mutations": [{"op": "counters", "obj": mine["handle"], "kind": "+1/+1", "delta": 1},
+                                                         {"op": "tap", "objs": [mine["handle"]]}, {"op": "untap", "objs": [mine["handle"]]}]})
+    table.game.objects[table.game.battlefield[0]].entered_turn = 0          # as if it had been there a turn
+    runner.step(0, "pass_priority"), runner.step(1, "pass_priority"), runner.step(2, "pass_priority")
+    runner.step(0, "declare_attackers", {"attacks": [{"attacker": mine["handle"], "target": {"seat": 1}, "tap": False}]})
+    assert not table.view(0)["battlefield"][0]["tapped"]                    # `tap: false` is vigilance, not a handle
+    for seat in (0, 1, 2):
+        runner.step(seat, "pass_priority")
+    face_down = table.view(1)["battlefield"][0]["handle"]
+    runner.step(1, "declare_blockers", {"blocks": []})
+    for seat in (0, 1, 2):
+        runner.step(seat, "pass_priority")
+    runner.step(0, "combat_damage", {"assignments": [{"source": mine["handle"], "target": {"seat": 1}, "amount": 2}]})
+    assert face_down.startswith("c") and secret not in json.dumps([table.act(1, "get_log"), table.view(1), table.view(None)])
+    assert "a face-down card deals 2 to Bob" in json.dumps(table.act(1, "get_log"))
+
+
+def test_the_record_keeps_what_was_declared_when_a_spell_was_cast():
+    logs = []
+    for x in (1, 5):
+        table, runner = started()
+        pass_until(table, runner, "main1")
+        runner.step(0, "cast", {"card": f"@{spell_in_hand(table, 0)}", "x": x, "modes": ["second"], "targets": [{"seat": 1}],
+                                "text": "X damage divided as I choose"})
+        logs.append(" ".join(table.events[-1]["public"]))
+    assert logs[0] != logs[1] and "[X=5; modes: second; announced: \"X damage divided as I choose\"]" in logs[1]
+
+
+def test_a_rejected_call_uses_no_randomness_and_a_replayed_table_rolls_on_as_the_original_would():
+    def rolls(table: Table) -> list:
+        return table.act(0, "act", {"because": "x", "mutations": [{"op": "roll", "sides": 100, "count": 6}]})["values"]
+
+    table, runner = started()
+    pass_until(table, runner, "main1")
+    other, other_runner = started()
+    pass_until(other, other_runner, "main1")
+    runner.step(0, "act", {"because": "x", "mutations": [{"op": "roll", "sides": 100, "count": 9}, {"op": "nonsense"}]},
+                error="unknown_op")
+    assert rolls(table) == rolls(other)                     # the rejected batch consumed nothing
+    copy = Table.replay(table.config, table.events)
+    assert rolls(copy) == rolls(table)                      # and a replay continues with the same dice
+
+
+def test_the_turn_goes_on_without_its_active_player():
+    table, runner = started()
+    pass_until(table, runner, "main1")
+    runner.step(0, "pass_priority")
+    bolt = spell_in_hand(table, 1)
+    runner.step(1, "cast", {"card": f"@{bolt}", "targets": [{"seat": 2}]})
+    runner.step(0, "concede")                               # Ann leaves during her own turn, with Bob's spell on the stack
+    view = table.view(2)
+    assert [item["source"] for item in view["stack"]] == [bolt] and view["turn"]["active"] == 0 and view["turn"]["number"] == 1
+    assert table.expected() == [(1, "priority")]
+    runner.step(1, "pass_priority"), runner.step(2, "pass_priority")
+    assert table.expected() == [(1, "resolution")]
+    runner.step(1, "finish_resolution")
+    assert table.expected() == [(1, "priority")]            # the next player in turn order, in place of the missing active player
+    for _ in range(40):                                     # the turn runs to its end with no attack and no discard
+        if table.game.turn.number == 2:
+            break
+        runner.step(table.expected()[0][0], "pass_priority")
+    assert table.game.turn.number == 2 and table.game.turn.active == 1 and table.game.turn.step == "upkeep"
+    assert all(obj.zone != "stack" for obj in table.game.objects.values())

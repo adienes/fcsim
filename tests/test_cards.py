@@ -192,3 +192,17 @@ def test_an_alternate_printed_name_is_read_from_the_alias_file_and_typos_are_not
     assert local.alias("Sol Rign", online=True) is None   # close to a real name: reported as a typo, never asked about
     deck = resolve(parse_decklist("1 Bayo, Irritable Instructor\n98 Island\n\n1 Talrand, Sky Summoner\n"), local)
     assert deck.aliases == (("Bayo, Irritable Instructor", "Opt"),) and not deck.unknown and validate_deck(deck, local) == []
+
+
+def test_two_copies_of_the_commander_are_counted_and_refused(database):
+    assert codes("99 Island\n\n2 Talrand, Sky Summoner\n", database) == ["deck_size", "singleton"]
+
+
+def test_mana_spent_on_ramp_is_not_spent_again_on_the_commander(database):
+    from fcsim.workshop import shuffle
+    deck = resolve(parse_decklist("1 Sol Ring\n98 Island\n\n1 Talrand, Sky Summoner\n"), database)   # Talrand costs four
+    cards = [shuffle.SimCard.of(card, deck.identity) for card in deck.library()]
+    ring, island = next(c for c in cards if c.name == "Sol Ring"), next(c for c in cards if c.name == "Island")
+    assert shuffle._payable(4, (), [island, island, ring], spent=0)
+    assert not shuffle._payable(4, (), [island, island, ring], spent=1)     # 4 mana in play, 1 already used on the ring
+    assert shuffle.simulate(deck, trials=50, turns=4, seed=2)["commanders"][0]["mana_value"] == 4

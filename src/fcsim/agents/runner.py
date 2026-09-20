@@ -40,8 +40,12 @@ class Budget:
         if self.cost_usd >= self.max_cost_usd:
             raise BudgetExceeded(f"The run's limit of ${self.max_cost_usd:.2f} (estimated) is used up.")
 
-    def record(self, reply: Reply) -> None:
+    def begin(self) -> None:
+        """Count the attempt before it is launched, so a call that fails still uses up the limit."""
+        self.check()
         self.calls += 1
+
+    def record(self, reply: Reply) -> None:
         self.cost_usd += reply.cost_usd
         self.seconds += reply.seconds
         for key, value in reply.tokens.items():
@@ -71,9 +75,9 @@ class ClaudeCodeRunner:
     def ask(self, system: str, prompt: str, *, schema: dict | None = None, mcp_config: dict | None = None,
             allowed_tools: tuple[str, ...] = ()) -> Reply:
         """One fresh session. With `schema`, the reply's `data` is validated JSON of that shape."""
-        self.budget.check()
         if shutil.which(self.executable) is None:
             raise RunnerError(f"`{self.executable}` is not on PATH. Install Claude Code and log in.")
+        self.budget.begin()
         with tempfile.TemporaryDirectory(prefix="fcsim-") as scratch:  # an empty directory: no CLAUDE.md to find
             command = [self.executable, "--print", "--output-format", "json", "--model", self.model,
                        "--system-prompt", system, "--tools", "", "--strict-mcp-config",
@@ -92,11 +96,13 @@ class ClaudeCodeRunner:
                 done = subprocess.run(command, input=prompt, capture_output=True, text=True, cwd=scratch,
                                       timeout=self.timeout, check=False)
             except subprocess.TimeoutExpired as exc:
+                self.budget.seconds += time.monotonic() - started  # its cost is unknown; its time and the attempt count
                 raise RunnerError(f"The model did not answer within {self.timeout} seconds.") from exc
             seconds = time.monotonic() - started
         try:
             result = json.loads(done.stdout)
         except ValueError as exc:
+            self.budget.seconds += seconds
             raise RunnerError(f"Claude Code did not return JSON (exit {done.returncode}): "
                               f"{(done.stderr or done.stdout)[:500]}") from exc
         usage = result.get("usage") or {}
@@ -120,8 +126,11 @@ class FakeRunner:
         self.model = "fake"
 
     def ask(self, system: str, prompt: str, *, schema: dict | None = None, **_) -> Reply:
-        self.budget.check()
+        self.budget.begin()
         self.asked.append({"system": system, "prompt": prompt, "schema": schema})
-        reply = Reply(data=self.answers.pop(0), text="", cost_usd=0.01, seconds=0.0, model="fake")
+        answer = self.answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        reply = Reply(data=answer, text="", cost_usd=0.01, seconds=0.0, model="fake")
         self.budget.record(reply)
         return reply

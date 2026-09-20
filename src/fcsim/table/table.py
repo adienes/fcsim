@@ -129,8 +129,8 @@ class Table:
             return {_RENAMED.get(k, k): self._resolve(seat, v, _RENAMED.get(k, k)) for k, v in value.items()}
         if isinstance(value, list):
             return [self._resolve(seat, v, key) for v in value]
-        if value is None or (key not in _OBJECT_KEYS and key not in _OTHER_KEYS):
-            return value
+        if value is None or isinstance(value, bool) or (key not in _OBJECT_KEYS and key not in _OTHER_KEYS):
+            return value  # `tap: false` on an attacker is a flag; `tap: [handles]` in a payment is a list of cards
         kind = "c" if key in _OBJECT_KEYS else _OTHER_KEYS[key]
         internal = self.handles[seat].resolve(kind, value)
         if internal is None:
@@ -164,7 +164,11 @@ class Table:
     def _commit(self, seat: int | None, tool: str, args: dict, run: Callable, recorded: list | None = None) -> dict:
         game, before = copy.deepcopy(self.game), self.game.turn
         self.dice.begin(recorded)
-        outcome = run(game) or ops.Told()
+        try:
+            outcome = run(game) or ops.Told()
+        except Exception:
+            self.dice.rollback()
+            raise
         told = outcome if isinstance(outcome, ops.Told) else outcome[0]
         lints = [] if isinstance(outcome, ops.Told) else outcome[1]
         turn.repair_after_elimination(game)
@@ -232,7 +236,7 @@ class Table:
             if obj.tapped:
                 raise TableError("already_tapped", f"{obj.name} is already tapped.")
             obj.tapped = True
-        parts = ([f"tapping {', '.join(o.name for o in tapped)}"] if tapped else []) + \
+        parts = ([f"tapping {', '.join(ops._named(o) for o in tapped)}"] if tapped else []) + \
                 ([str(payment["note"])] if payment.get("note") else [])
         return "; ".join(parts)
 
@@ -295,8 +299,16 @@ class Table:
         game.stack.append(item)
         turn.acted(game)
         told = ops.Told(public=[f"{self._name(seat)} casts {item.source_name} from {origin}"
-                                f"{self._targets_text(game, item.targets)}" + (f", {paid}" if paid else "") + "."])
+                                f"{self._targets_text(game, item.targets)}" + (f", {paid}" if paid else "")
+                                + self._declared(item, hide_text=face_down) + "."])
         return told, lints
+
+    @staticmethod
+    def _declared(item: StackItem, *, hide_text: bool = False) -> str:
+        """X, modes and the announced text, which an auditor needs once the item is off the stack."""
+        parts = ([f"X={item.x}"] if item.x is not None else []) + ([f"modes: {', '.join(map(str, item.modes))}"] if item.modes else [])
+        parts += [f"announced: \"{item.text}\""] if item.text and not hide_text else []
+        return f" [{'; '.join(parts)}]" if parts else ""
 
     def _do_activate(self, game: Game, seat: int, args: dict):
         source = mutations.get(game, args["source"])
@@ -313,7 +325,8 @@ class Table:
         game.stack.append(item)
         if game.control.kind == "priority":
             turn.acted(game)
-        return ops.Told(public=[f"{self._name(seat)} activates {label}{self._targets_text(game, item.targets)}."])
+        return ops.Told(public=[f"{self._name(seat)} activates {label}{self._targets_text(game, item.targets)}"
+                                + (f" [X={item.x}]" if item.x is not None else "") + "."])
 
     def _do_add_trigger(self, game: Game, seat: int, args: dict):
         source = mutations.get(game, args["source"]) if args.get("source") is not None else None
@@ -383,11 +396,11 @@ class Table:
         for attack in args.get("attacks", []):
             attacker = self._own(game, seat, attack["attacker"], "attack")
             if attacker.entered_turn == game.turn.number:
-                lints.append(f"{attacker.name} came under your control this turn; it needs haste to attack.")
+                lints.append(f"{ops._named(attacker)} came under your control this turn; it needs haste to attack.")
             if attack.get("tap", True):
                 attacker.tapped = True
             game.turn.attackers.append({"attacker": attacker.id, "target": attack["target"]})
-            names.append(f"{attacker.name}{self._targets_text(game, [attack['target']]).replace(' targeting', ' at')}")
+            names.append(f"{ops._named(attacker)}{self._targets_text(game, [attack['target']]).replace(' targeting', ' at')}")
         turn.turn_action_done(game)
         return ops.Told(public=[f"{self._name(seat)} attacks with {', '.join(names) or 'nothing'}."]), lints
 
@@ -399,7 +412,7 @@ class Table:
             if block["attacker"] not in attacking:
                 raise TableError("not_attacking", "You can only block a creature that is attacking.")
             game.turn.blockers.append({"blocker": blocker.id, "attacker": block["attacker"]})
-            names.append(f"{blocker.name} blocks {mutations.get(game, block['attacker']).name}")
+            names.append(f"{ops._named(blocker)} blocks {ops._named(mutations.get(game, block['attacker']))}")
         turn.turn_action_done(game)
         return ops.Told(public=[f"{self._name(seat)}: {', '.join(names) or 'no blocks'}."])
 
@@ -411,14 +424,14 @@ class Table:
             if "seat" in hit["target"]:
                 player = game.seats[ops._seat(game, hit["target"]["seat"])]
                 player.life -= amount
-                told.public.append(f"{source.name} deals {amount} to {player.name} ({player.life} life).")
+                told.public.append(f"{ops._named(source)} deals {amount} to {player.name} ({player.life} life).")
                 if source.is_commander and amount:
                     ops.apply_op(game, self.dice, seat, {"op": "commander_damage", "seat": player.index,
                                                          "commander": source.id, "amount": amount}, told)
             else:
                 victim = mutations.get(game, hit["target"]["obj"])
                 victim.damage += amount
-                told.public.append(f"{source.name} deals {amount} to {victim.name}.")
+                told.public.append(f"{ops._named(source)} deals {amount} to {ops._named(victim)}.")
         if args.get("then"):
             followup = ops.apply_batch(game, self.dice, seat, args["then"])
             told.public += followup.public

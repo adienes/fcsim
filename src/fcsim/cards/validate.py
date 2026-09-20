@@ -68,7 +68,10 @@ def resolve(decklist: Decklist, database: CardDatabase, *, online: bool = False)
         return list(found.values())
 
     commanders = lookup(decklist.commanders)
-    return Deck(commanders=tuple(card for card, _ in commanders), cards=tuple(lookup(decklist.main)),
+    cards = lookup(decklist.main)
+    # Extra copies listed in the command zone are cards too: count them, so the singleton rule sees them.
+    cards += [(card, count - 1) for card, count in commanders if count > 1]
+    return Deck(commanders=tuple(card for card, _ in commanders), cards=tuple(cards),
                 unknown=tuple(unknown), aliases=tuple(aliases))
 
 
