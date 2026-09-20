@@ -287,5 +287,5 @@ def _summarize(args: argparse.Namespace) -> int:
     result = summarize(args.game_dir, runner, CardDatabase(), style=args.style)
     with open(result["narrative"], encoding="utf-8") as text:
         print("\n" + text.read())
-    print(f"Written to {result['narrative']}; round accounts are in {result['directory']}/narrative/")
+    print(f"Written to {result['narrative']}")
     return 0

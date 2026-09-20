@@ -256,8 +256,9 @@ def test_summarize_condenses_each_round_once_and_writes_the_story(database, tmp_
     writer = Writer()
     result = summarize(game["directory"], writer, database, style="recap", echo=lambda *_: None)
     directory = Path(game["directory"])
-    assert result["rounds"] == 2 and (directory / "narrative.md").read_text() == "An account (3).\n"   # two rounds, then the story
-    assert (directory / "narrative" / "round-01.md").read_text() == "An account (1).\n"
+    written = (directory / "narrative.md").read_text()
+    assert result["rounds"] == 2 and written.startswith("An account (3).\n\n## Appendix")           # two rounds, then the story
+    assert "### Round 1\n\nAn account (1).\n\n### Round 2\n\nAn account (2).\n" in written and not (directory / "narrative").exists()
     first = writer.asked[0][1]
     assert first.startswith("ROUND 1 (table turns 1 to 3)") and "Pir plays Forest" in first and "[private to Pir: Drew" in first
     assert "passes priority" not in first and "THE PLAYERS' OWN ACCOUNTS" in first and "- Pir (turn 1, priority): Played a land" in first
@@ -304,3 +305,14 @@ def test_the_driver_applies_a_loss_before_anyone_gets_priority(database, tmp_pat
     after = log.split("Thrasios loses")[1]
     assert "Thrasios passes priority" not in after and "Thrasios plays" not in after      # it never acted again
     assert report["stopped"] is None and report["standings"][0]["permanents"] == 2
+
+
+def test_notes_and_a_response_policy_can_still_be_saved_after_a_wake_has_ended():
+    from fcsim.table import Table
+    table = Table([{"name": n, "commanders": [], "library": ["Island"] * 40} for n in ("Ann", "Bob")], seed=1, first=0)
+    wake = table.open_wake(0)
+    table.call(wake, "1", "keep")
+    table.close_wake(wake)
+    assert table.call(wake, "2", "write_notes", {"text": "Bob is the threat."})["ok"] and table.notes[0] == "Bob is the threat."
+    assert table.call(wake, "3", "set_response_policy", {"policy": "pass_always"})["ok"]
+    assert "seats" in table.call(wake, "4", "get_view") and table.call(wake, "5", "pass_priority")["error"]["code"] == "stale_wake"

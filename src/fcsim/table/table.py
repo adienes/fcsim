@@ -29,6 +29,8 @@ _ALLOWED = {
     "declare_attackers": ("turn_action",), "declare_blockers": ("turn_action",), "combat_damage": ("turn_action",),
 }
 _READ_ONLY = frozenset({"get_view", "get_log", "get_notes"})
+# What a seat may still do once its wake has ended: nothing here touches the game.
+_AFTER_WAKE = frozenset({"write_notes", "get_notes", "set_response_policy", "get_view", "get_log"})
 # Calls that change nothing an auditor could judge. Every other seat call marks the table as unaudited.
 _NOT_AUDITABLE = frozenset({"pass_priority", "say", "write_notes", "mulligan", "keep", "concede", "answer", "finish_step",
                             "set_response_policy"})
@@ -81,6 +83,8 @@ class Table:
         """A call made inside a wake. A dead wake cannot act, and a repeated call id returns the
         first result instead of acting twice."""
         wake = self._wakes.get(token)
+        if wake is not None and not wake["alive"] and tool in _AFTER_WAKE:
+            return self.act(wake["seat"], tool, args)  # a player's last act is often to save its notes
         if wake is None or not wake["alive"]:
             return TableError("stale_wake", "This wake has ended or the table was corrected under it. "
                                             "Stop; you will be woken again if you are needed.").to_dict()

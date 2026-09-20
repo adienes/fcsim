@@ -3,7 +3,8 @@
 Unlike `log.md`, which is the table as the players saw it, the narrative is written with full
 information: every hand and draw, each player's own account of each wake, and the auditor's
 findings. Rounds are condensed one at a time, then the story is written from those, so a long
-game is never narrated in one pass and another style is cheap to produce.
+game is never narrated in one pass. Everything goes in one file, `narrative.md`: the story, then
+the round accounts it was written from, which are reused when the story is rewritten.
 """
 
 from __future__ import annotations
@@ -29,7 +30,8 @@ cards drawn and looked at in private, each player's own account of what it did a
 rules auditor's findings. Condense ONE ROUND into a faithful account of 150 to 300 words in plain \
 prose: what each player did on their turn and why, anything said at the table, anything the \
 auditor corrected, and anything that with hindsight was a mistake or a turning point. Name cards \
-exactly. Do not invent anything that is not in the record, and do not pad a quiet round."""
+exactly. Do not invent anything that is not in the record, and do not pad a quiet round. Write \
+paragraphs only, with no headings."""
 
 STORY_SYSTEM = """\
 You are writing up a multiplayer game of Magic: The Gathering (Commander) played by AI agents, for \
@@ -51,6 +53,21 @@ strength. Say plainly which decks helped or hurt that, and what you would change
 
 Style: {style}
 Do not invent anything that is not in the round accounts."""
+
+
+_APPENDIX = "## Appendix: the round accounts this was written from"
+
+
+def _accounts_in(path: Path) -> dict[int, str]:
+    """The round accounts at the end of an existing narrative, by round number."""
+    if not path.is_file() or _APPENDIX not in (text := path.read_text(encoding="utf-8")):
+        return {}
+    accounts = {}
+    for section in text.split(_APPENDIX, 1)[1].split("\n### Round ")[1:]:
+        number, _, body = section.partition("\n")
+        if number.strip().isdigit():
+            accounts[int(number)] = body.strip()
+    return accounts
 
 
 def _jsonl(path: Path) -> list[dict]:
@@ -80,8 +97,8 @@ def _round_material(round_number: int, events: list[dict], wakes: list[dict], au
 
 
 def summarize(game_dir: str | Path, runner, database: CardDatabase, *, style: str = "story", echo=print) -> dict:
-    """Write `narrative.md` and `narrative/round-NN.md` into the game directory. Round accounts that
-    already exist are reused, so only a new style or new rounds cost anything."""
+    """Write `narrative.md` into the game directory. The accounts of finished rounds in an existing
+    `narrative.md` are reused, so only a new style or new rounds cost anything."""
     if style not in STYLES:
         raise ValueError(f"The style is one of: {', '.join(STYLES)}.")
     directory = GameDirectory.open(game_dir)
@@ -92,18 +109,16 @@ def summarize(game_dir: str | Path, runner, database: CardDatabase, *, style: st
     rows = [row for index in range(len(names)) for row in _jsonl(directory.path / f"transcript-seat-{index}.jsonl")]
     wakes = [{"seat": row.get("seat", 0), **row, "turn": row.get("table_turn", row.get("turn"))} for row in rows]
     audits = _jsonl(directory.path / "audits.jsonl")
-    (directory.path / "narrative").mkdir(exist_ok=True)
+    existing = _accounts_in(directory.path / "narrative.md")
     accounts = []
     for number in sorted({e["round"] for e in events}):
-        name = f"narrative/round-{number:02d}.md"
         in_round = [e for e in events if e["round"] == number]
         finished = number < max(e["round"] for e in events) or table.game.control.kind == "over"
-        if (directory.path / name).is_file() and finished:
-            accounts.append((number, (directory.path / name).read_text(encoding="utf-8")))
+        if number in existing and finished:
+            accounts.append((number, existing[number]))
             continue
         echo(f"condensing round {number} ({len(in_round)} events) ...")
         reply = runner.ask(ROUND_SYSTEM, _round_material(number, in_round, wakes, audits, names))
-        directory.write(name, reply.text.strip() + "\n")
         accounts.append((number, reply.text.strip()))
     game = table.game
     standings = "\n".join(f"- {s.name}: {s.status}, {s.life} life; commander: "
@@ -113,5 +128,6 @@ def summarize(game_dir: str | Path, runner, database: CardDatabase, *, style: st
     reply = runner.ask(STORY_SYSTEM.format(style=STYLES[style]),
                        f"THE POD\n{standings}\n\nTHE RESULT\n{result} {len(accounts)} rounds were played.\n\n"
                        + "\n\n".join(f"ROUND {number}\n{text}" for number, text in accounts))
-    directory.write("narrative.md", reply.text.strip() + "\n")
+    directory.write("narrative.md", reply.text.strip() + "\n\n" + _APPENDIX + "\n\n"
+                    + "\n\n".join(f"### Round {number}\n\n{text}" for number, text in accounts) + "\n")
     return {"directory": str(directory.path), "rounds": len(accounts), "style": style, "narrative": str(directory.path / "narrative.md")}

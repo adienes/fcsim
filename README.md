@@ -207,11 +207,10 @@ returns the table as it now stands and the same wake carries on, so a turn is a 
 sessions rather than twenty. `fcsim pod --resume <game_dir> --cycles N` plays N more
 rounds of a saved game by replaying its journal, and `fcsim status <game_dir>` shows
 where a game stands and where its time went, and `fcsim summarize <game_dir>` writes
-`narrative.md`, the story of the game told with full information, round by round. `FINDINGS.md` logs what real games have
-shown about the harness. Not built yet: disputes and a judge,
-rewinds, reply wakes for table talk, narrower watches and triage, and the
-postgame narrative. It has been tested with scripted seats only, not yet with
-models.
+one file, `narrative.md`: the story of the game told with full information, then the
+round-by-round accounts it was written from. `FINDINGS.md` logs what real games have
+shown about the harness. Not built yet: disputes and a judge, rewinds, and reply
+wakes for table talk.
 
 ## Model backends
 
