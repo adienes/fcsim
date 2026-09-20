@@ -67,6 +67,10 @@ _TRIAGE = {"type": "object", "additionalProperties": False, "required": ["respon
            "properties": {"respond": {"type": "boolean"}, "ask_again": {"type": "boolean"},
                           "policy": {"type": "string", "enum": ["ask", "pass_unless_targeted", "pass_always"]},
                           "why": {"type": "string", "description": "One short sentence."}}}
+_OPENING = {"type": "object", "additionalProperties": False, "required": ["keep", "bottom", "why"],
+            "properties": {"keep": {"type": "boolean"}, "why": {"type": "string", "description": "One short sentence."},
+                           "bottom": {"type": "array", "items": {"type": "string"},
+                                      "description": "Handles of the cards to put on the bottom of your library, if you keep after more than one mulligan."}}}
 _DEFAULTS = {"priority": "pass_priority", "mulligan": "keep", "declare_attackers": "declare_attackers",
              "declare_blockers": "declare_blockers", "combat_damage": "combat_damage", "discard": "finish_step",
              "held_step": "finish_step", "resolution": "finish_resolution", "correction": "finish_step"}
@@ -298,6 +302,44 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
              + ", ".join(f"{names[s]} {'RESPONDS' if a else 'passes'}" for s, a in answers.items()))
         return answers
 
+    def opening_hands(server: McpServer) -> None:
+        """Every seat decides on its opening hand at the same time, with one question and no tools:
+        the decisions are independent, and four sessions one after another took minutes before turn 1.
+        A seat whose answer the table refuses gets an ordinary wake instead."""
+        while table.game.control.kind == "setup":
+            deciding = list(table.game.control.seats)
+
+            def question(seat: int) -> str:
+                taken = table.game.seats[seat].mulligans
+                return (f"The game is about to begin. You are number {table.game.turn_order_from(table.game.turn.active).index(seat) + 1} of "
+                        f"{count} in turn order. This is your opening hand, after {taken} mulligan(s). Keep it (keep=true) or mulligan "
+                        "(keep=false): a mulligan shuffles it away and draws seven new cards. The first mulligan is free; for each one "
+                        f"after that you put a card on the bottom when you keep. If you keep this hand you owe {max(0, taken - 1)}: list "
+                        f"exactly that many handles in `bottom`.\n\n{briefing(seat)}")
+            prompts = {seat: question(seat) for seat in deciding}  # built here: the card database is not for several threads at once
+
+            def one(seat: int):
+                return seat, runners[seat].ask(systems[seat], prompts[seat], schema=_OPENING)
+            with ThreadPoolExecutor(max_workers=len(deciding)) as pool:
+                replies = list(pool.map(one, deciding))
+            for seat, reply in replies:
+                data, started = reply.data or {}, len(table.events)
+                result = table.act(seat, "mulligan") if data.get("keep") is False else table.act(seat, "keep", {"bottom": data.get("bottom") or []})
+                echo(f"turn 0 setup: {names[seat]} {'mulligans' if data.get('keep') is False else 'keeps'}: {data.get('why', '')}")
+                entry = {"seat": seat, "turn": 0, "kind": "mulligan", "summary": data.get("why", ""), "events": [started, len(table.events)],
+                         "tool_calls": 0, "tool_errors": [], "forced": None, "seconds": round(reply.seconds, 1),
+                         "estimated_cost_usd": reply.estimated_cost_usd}
+                report["wakes"].append(entry)
+                directory.append(f"transcript-seat-{seat}.jsonl", {**entry, "calls": []})
+                if "error" in result:
+                    wake(server, seat, "mulligan")
+                    if seat in table.game.control.seats and len(table.events) == started:
+                        # Still undecided, and nothing it tried was accepted: keep for it, so that a game always starts.
+                        hand = table.view(seat)["seats"][seat]["hand"]["cards"]
+                        table.act(seat, "keep", {"bottom": [c["handle"] for c in hand[:max(0, table.game.seats[seat].mulligans - 1)]]})
+                        report["wakes"][-1]["forced"] = "the driver kept the hand and chose what went on the bottom"
+                seen[seat] = len(table.events)
+
     def wake(server: McpServer, seat: int, kind: str, extra: str = "") -> None:
         token, handle = secrets.token_hex(16), table.open_wake(seat, kind)
         current.update(tools=SeatTools(table, seat, handle, database=database, rules=rules), token=token, wake=handle,
@@ -458,6 +500,7 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
 
     with McpServer(tools_for) as server:
         try:
+            opening_hands(server)
             snapshot = auditor.snapshot(table)
             while True:
                 why = settle()

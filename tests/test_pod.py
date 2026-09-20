@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import urllib.request
 from pathlib import Path
 
@@ -40,16 +41,22 @@ class ScriptedSeat:
     model = "scripted"
 
     def __init__(self, budget: Budget, *, cast_commander: bool = False, with_trigger: bool = False, triage: dict | None = None,
-                 attack: int | None = None, contests: bool = False, disputes: str = ""):
+                 attack: int | None = None, contests: bool = False, disputes: str = "", mulligans: int = 0, bottoms: bool = True):
         self.budget, self.prompts, self.cast_commander, self.attack, self.contests = budget, [], cast_commander, attack, contests
-        self.disputes = disputes
+        self.disputes, self.mulligans, self.bottoms = disputes, mulligans, bottoms
         self.with_trigger, self.triage = with_trigger, triage or {}   # a made-up trigger on top of the commander; triage answers
 
     def ask(self, system: str, prompt: str, *, tools: McpConnection | None = None, schema: dict | None = None, **_) -> Reply:
         self.budget.begin()
         self.prompts.append(prompt)
-        if tools is None:  # a triage question: this scripted player never responds
-            reply = Reply(data={"respond": False, "why": "scripted", **self.triage}, text="", cost_usd=0.01, seconds=0.5, model=self.model)
+        if tools is None:  # one question and no tools: this scripted player keeps every hand and never responds
+            if "keep" in (schema or {}).get("properties", {}):
+                owed = int(re.search(r"you owe (\d+)", prompt)[1]) if self.bottoms else 0
+                data = {"keep": self.mulligans <= 0, "bottom": re.findall(r"^- \[(c\d+)\]", prompt.split("YOUR HAND")[1], re.M)[:owed], "why": "scripted"}
+                self.mulligans -= 1
+            else:
+                data = {"respond": False, "why": "scripted", **self.triage}
+            reply = Reply(data=data, text="", cost_usd=0.01, seconds=0.5, model=self.model)
             self.budget.record(reply)
             return reply
         count = [0]
@@ -131,8 +138,9 @@ def test_a_pod_game_schedules_seats_audits_and_acts_on_findings(database, tmp_pa
     kinds = {(w["seat"], w["kind"]) for w in report["wakes"]}
     assert {(0, "mulligan"), (1, "mulligan"), (2, "mulligan"), (2, "triggers"), (0, "correction")} <= kinds
     assert not any(w["forced"] for w in report["wakes"]) and report["standings"][0]["life"] == 39
-    # The last player to keep is not handed priority in its own upkeep by the same session: it keeps, and its wake ends.
-    assert [w["tool_calls"] for w in report["wakes"] if w["kind"] == "mulligan"] == [2, 2, 2]
+    # Opening hands are decided by all seats at once, with no tools; nobody is handed priority in an upkeep.
+    assert [w["tool_calls"] for w in report["wakes"] if w["kind"] == "mulligan"] == [0, 0, 0]
+    assert "This is your opening hand, after 0 mulligan(s)." in seats[0].prompts[0] and "YOUR HAND\n- [c" in seats[0].prompts[0]
     assert [s["permanents"] for s in report["standings"]] == [2, 2, 2]          # a land on each of two turns, for every seat
     # A seat is not woken to pass on someone else's turn when nothing is on the stack ...
     priority_wakes = [w for w in report["wakes"] if w["kind"] == "priority"]
@@ -519,3 +527,18 @@ def test_a_deck_is_reviewed_over_its_games_and_only_sound_swaps_are_offered(comb
         other = tmp_path / "pirless.txt"
         other.write_text("99 Forest\n\n1 Wilson, Refined Grizzly\n", encoding="utf-8")
         review(other, [report["directory"]], reviewer, database, echo=lambda *_: None)
+
+
+def test_opening_hands_are_decided_together_and_a_game_always_starts(database, tmp_path):
+    budget = Budget(max_calls=300)
+    seats = [ScriptedSeat(budget, mulligans=2), ScriptedSeat(budget), ScriptedSeat(budget, mulligans=2, bottoms=False)]
+    report = play_pod(decks(tmp_path), seats, FakeRunner([OK] * 60, budget), database, cycles=1, seed=4, out_root=tmp_path / "games", echo=lambda *_: None)
+    assert report["stopped"] is None
+    log = (Path(report["directory"]) / "log.md").read_text()
+    assert log.count("Talrand mulligans") == 2 and "Talrand keeps 6 cards" in log and "Pir keeps 7 cards" in log
+    # Thrasios never names the card it owes, in its answer or in the wake it is then given: the driver keeps for it.
+    assert "Thrasios keeps 6 cards" in log
+    forced = [w for w in report["wakes"] if w["forced"]]
+    assert [(w["seat"], w["kind"]) for w in forced] == [(2, "mulligan")] and "chose what went on the bottom" in forced[0]["forced"]
+    opening = [w for w in report["wakes"] if w["kind"] == "mulligan" and not w["tool_calls"]]
+    assert sorted(w["seat"] for w in opening) == [0, 0, 0, 1, 2, 2, 2]            # three rounds of questions; Pir was asked once
