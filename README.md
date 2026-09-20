@@ -4,7 +4,8 @@ Playtest and tune Commander decks with LLM agents; `PLAN.md` is the design. Buil
 so far, each described below: an offline Comprehensive Rules reference, a deck
 check, the game table, a rules auditor with a scenario suite that measures it, and
 an audited solo goldfish in which an agent pilots a deck through tools served over
-MCP. Multiplayer games, corrections and the deck workshop are not built yet. There
+MCP, and a first multiplayer driver. Disputes, rewinds and the deck workshop are not
+built yet. There
 are no runtime dependencies outside Python 3.12+ and its SQLite FTS5 support; model
 calls go through your local Claude Code login.
 
@@ -181,6 +182,24 @@ the event log, a readable `log.md`, state, audits, the pilot's notes and
 transcript, usage, and `report.md`: lands, spells and attacks by turn, the pilot's
 own account of each turn, and rules health. Findings are recorded but not yet
 corrected. A three-turn run took about four minutes and seven model calls.
+
+## Pod
+
+```sh
+uv run fcsim pod examples/zuko.txt examples/talrand.txt --cycles 3 --max-calls 80
+```
+
+A multiplayer game: one agent per deck, each a headless Claude Code session with
+only its own seat's tools. The scheduler wakes whichever seat the table is waiting
+for and tells it what has happened since its last wake. A seat with priority on
+someone else's turn and nothing on the stack is passed for without a wake. At every
+checkpoint where something auditable happened, the auditor reviews it before the
+game goes on: its hooks go into the ledger, a trigger it reports is put in front of
+its controller, and a seat whose action it faults gets a correction wake to put
+the table right. Players can talk with `say`. Not built yet: disputes and a judge,
+rewinds, reply wakes for table talk, narrower watches and triage, and the
+postgame narrative. It has been tested with scripted seats only, not yet with
+models.
 
 ```sh
 uv run pytest

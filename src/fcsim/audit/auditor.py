@@ -81,6 +81,8 @@ VERDICT_SCHEMA = {
             "properties": {
                 "kind": {"type": "string", "enum": [*SERIOUS, "note"]},
                 "event": {"type": "integer", "description": "The number of the log event at fault, if one is."},
+                "seat": {"type": "integer", "description": "The seat that must act on this: the controller of a trigger, "
+                                                           "or the player whose action was wrong."},
                 "summary": {"type": "string", "description": "One or two sentences: what is wrong."},
                 "basis": {"type": "string", "description": "The quoted oracle text, ruling or rule number it rests on."},
                 "fix": {"type": "string", "description": "What should happen instead, concretely."},

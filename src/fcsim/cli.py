@@ -9,7 +9,7 @@ from .agents import Budget, ClaudeCodeRunner, RunnerError
 from .audit import Auditor, build, load_scenarios, materials, play, run_suite
 from .audit import render as render_report
 from .cards import CardDatabase, CardsError
-from .play import goldfish
+from .play import goldfish, play_pod
 from .rules import RulesError, RulesReference
 from .workshop.check import check_deck, render
 
@@ -84,10 +84,20 @@ def main(argv: list[str] | None = None) -> int:
     fish.add_argument("--max-cost", type=float, default=15.0, help="Hard limit on estimated cost at list prices, USD")
     fish.add_argument("--out", default="games", help="Directory to create the game directory in")
 
+    pod = commands.add_parser("pod", help="A multiplayer game: one agent per deck, audited (uses your Claude Code login)")
+    pod.add_argument("decks", nargs="+", help="Two to four decklists, in turn order after a random start")
+    pod.add_argument("--cycles", type=int, default=3, help="Turns per seat before the game is stopped")
+    pod.add_argument("--seed", type=int)
+    pod.add_argument("--model", default="claude-opus-5", help="Every player's model")
+    pod.add_argument("--audit-model", default="claude-opus-5")
+    pod.add_argument("--max-calls", type=int, default=120, help="Hard limit on model calls for this game")
+    pod.add_argument("--max-cost", type=float, default=40.0, help="Hard limit on estimated cost at list prices, USD")
+    pod.add_argument("--out", default="games")
+
     args = parser.parse_args(argv)
-    if args.command in ("cards", "deck", "audit", "goldfish"):
+    if args.command in ("cards", "deck", "audit", "goldfish", "pod"):
         try:
-            return {"cards": _cards, "deck": _deck, "audit": _audit, "goldfish": _goldfish}[args.command](args)
+            return {"cards": _cards, "deck": _deck, "audit": _audit, "goldfish": _goldfish, "pod": _pod}[args.command](args)
         except (CardsError, RunnerError, ValueError, OSError) as exc:
             print(json.dumps({"error": {"code": "cards_error", "message": str(exc)}}), file=sys.stderr)
             return 2
@@ -175,6 +185,23 @@ def _goldfish(args: argparse.Namespace) -> int:
     report = goldfish(args.deck, ClaudeCodeRunner(model=args.model, budget=budget, timeout=1800),
                       ClaudeCodeRunner(model=args.audit_model, budget=budget), CardDatabase(),
                       turns=args.turns, seed=args.seed, out_root=args.out, rules=rules)
+    with open(f"{report['directory']}/report.md", encoding="utf-8") as text:
+        print("\n" + text.read())
+    print(f"Everything is in {report['directory']}")
+    return 0 if not report["stopped"] else 1
+
+
+def _pod(args: argparse.Namespace) -> int:
+    if not 2 <= len(args.decks) <= 4:
+        raise ValueError("A pod is two to four decks.")
+    budget = Budget(max_calls=args.max_calls, max_cost_usd=args.max_cost)
+    try:
+        rules = RulesReference()
+    except RulesError:
+        rules = None
+    report = play_pod(args.decks, [ClaudeCodeRunner(model=args.model, budget=budget, timeout=1800) for _ in args.decks],
+                      ClaudeCodeRunner(model=args.audit_model, budget=budget), CardDatabase(), cycles=args.cycles,
+                      seed=args.seed, out_root=args.out, rules=rules)
     with open(f"{report['directory']}/report.md", encoding="utf-8") as text:
         print("\n" + text.read())
     print(f"Everything is in {report['directory']}")
