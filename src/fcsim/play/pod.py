@@ -71,7 +71,7 @@ def _names(decks: list) -> list[str]:
 
 def play_pod(deck_paths: list[str | Path], runners: list, auditor_runner, database: CardDatabase, *, cycles: int = 3,
              seed: int | None = None, out_root: str | Path = "games", rules: RulesReference | None = None,
-             echo=print) -> dict:
+             echo=lambda line: print(line, flush=True)) -> dict:
     """Play up to `cycles` turns per seat. `runners[i]` pilots seat i; share one Budget across all
     runners and the auditor to cap the whole game."""
     decks = [resolve(read_decklist(path), database, online=True) for path in deck_paths]

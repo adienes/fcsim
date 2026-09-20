@@ -67,7 +67,7 @@ _MECHANICAL = {"priority": "pass_priority", "mulligan": "keep", "declare_attacke
 
 def goldfish(deck_path: str | Path, runner, auditor_runner, database: CardDatabase, *, turns: int = 5,
              seed: int | None = None, out_root: str | Path = "games", rules: RulesReference | None = None,
-             echo=print) -> dict:
+             echo=lambda line: print(line, flush=True)) -> dict:
     """Play `turns` pilot turns. `runner` plays the pilot and `auditor_runner` audits; give both the
     same Budget to cap the whole run. Returns the report; everything is also written to a directory."""
     decklist = read_decklist(deck_path)

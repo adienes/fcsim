@@ -31,6 +31,9 @@ note. Judge whether the tapped permanents could have produced the cost, includin
 many warned actions are legal.
 - Hidden cards appear as counts. Never ask for or guess hidden information. The table itself \
 guarantees a player really had the cards they used.
+- What the table enforces is not yours to audit and does not appear in the record: that cards \
+are conserved, whose turn and priority it is, and mulligans. (In multiplayer the first mulligan \
+is free, rule 103.5c, so a player who mulligans twice keeps six cards.)
 - When a creature should die or another state-based action applies, a player must carry it \
 out. State-based actions are checked before any player would receive priority, so a player \
 receiving or using priority while one is outstanding is an error.
@@ -203,8 +206,8 @@ def materials(table: Table, before: str, since_event: int, database: CardDatabas
     after_view = table.view(None)
     record = []
     for event in table.events[since_event:until_event]:
-        if not event["public"] and not event["lints"]:
-            continue  # the table's own bookkeeping, such as releasing a checkpoint
+        if (not event["public"] and not event["lints"]) or event["tool"] in ("setup", "mulligan", "keep"):
+            continue  # the table's own bookkeeping, and the mulligans it enforces itself
         actor = table.game.seats[event["seat"]].name if event["seat"] is not None else "the table"
         record.append(f"event {event['n']} ({actor}, {event['tool']}, during {event['step']}): " + " ".join(event["public"]))
         record += [f"    table warning: {lint}" for lint in event["lints"]]

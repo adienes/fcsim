@@ -125,3 +125,20 @@ def test_a_failed_model_call_still_counts_against_the_limit(database):
     runner = FakeRunner([RunnerError("timed out"), RunnerError("timed out"), OK], Budget(max_calls=2))
     report = run_suite(Auditor(runner, database), chosen)
     assert runner.budget.calls == 2 and [("error" in r, "skipped" in r) for r in report["results"]] == [(True, False), (True, False), (False, True)]
+
+
+def test_mulligans_the_table_enforces_never_reach_the_auditor(database):
+    from fcsim.audit import SYSTEM_PROMPT
+    from fcsim.table import Table
+    table = Table([{"name": n, "commanders": [], "library": ["Island"] * 40} for n in ("Ann", "Bob")], seed=1, first=0)
+    auditor = Auditor(FakeRunner([OK]), database)
+    snapshot = auditor.snapshot(table)
+    for seat, tools in ((0, ["mulligan", "mulligan"]), (1, [])):
+        for tool in tools:
+            table.act(seat, tool)
+    table.act(0, "keep", {"bottom": [table.view(0)["seats"][0]["hand"]["cards"][0]["handle"]]})
+    table.act(1, "keep")
+    table.act(0, "say", {"text": "good luck"})
+    record = materials(table, snapshot[0], snapshot[2], database, snapshot[1]).split("WHAT WAS DONE")[1].split("THE TABLE NOW")[0]
+    assert "mulligan" not in record and "keeps" not in record and "good luck" in record
+    assert "the first mulligan is free" in " ".join(SYSTEM_PROMPT.split())
