@@ -205,13 +205,25 @@ def materials(table: Table, before: str, since_event: int, database: CardDatabas
               until_event: int | None = None) -> str:
     """The prompt for one audit: the table before, what was done, the table after, the cards."""
     after_view = table.view(None)
-    record = []
+    record, passing = [], []
+
+    def flush_passes() -> None:
+        if passing:  # a run of passes is one line: who passed matters, a line each does not
+            record.append(f"events {passing[0][0]}-{passing[-1][0]} (during {passing[-1][2]}): "
+                          + ", ".join(dict.fromkeys(name for _, name, _ in passing)) + " passed priority.")
+            passing.clear()
+
     for event in table.events[since_event:until_event]:
-        if (not event["public"] and not event["lints"]) or event["tool"] in ("setup", "mulligan", "keep"):
-            continue  # the table's own bookkeeping, and the mulligans it enforces itself
+        if (not event["public"] and not event["lints"]) or event["tool"] in ("setup", "mulligan", "keep", "write_notes"):
+            continue  # the table's own bookkeeping, private notes, and the mulligans it enforces itself
+        if event["tool"] == "pass_priority" and not event["lints"]:
+            passing.append((event["n"], table.game.seats[event["seat"]].name, event["step"]))
+            continue
+        flush_passes()
         actor = table.game.seats[event["seat"]].name if event["seat"] is not None else "the table"
         record.append(f"event {event['n']} ({actor}, {event['tool']}, during {event['step']}): " + " ".join(event["public"]))
         record += [f"    table warning: {lint}" for lint in event["lints"]]
+    flush_passes()
     return "\n\n".join([
         "THE TABLE BEFORE\n" + before,
         "WHAT WAS DONE\n" + "\n".join(record),

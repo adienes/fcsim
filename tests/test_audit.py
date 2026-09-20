@@ -141,4 +141,8 @@ def test_mulligans_the_table_enforces_never_reach_the_auditor(database):
     table.act(0, "say", {"text": "good luck"})
     record = materials(table, snapshot[0], snapshot[2], database, snapshot[1]).split("WHAT WAS DONE")[1].split("THE TABLE NOW")[0]
     assert "mulligan" not in record and "keeps" not in record and "good luck" in record
+    for seat in (0, 1, 0, 1):
+        table.act(seat, "pass_priority")
+    record = materials(table, snapshot[0], snapshot[2], database, snapshot[1]).split("WHAT WAS DONE")[1].split("THE TABLE NOW")[0]
+    assert record.count("passed priority") == 1 and "Ann, Bob passed priority." in record   # a run of passes is one line
     assert "the first mulligan is free" in " ".join(SYSTEM_PROMPT.split())
