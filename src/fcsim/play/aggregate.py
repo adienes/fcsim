@@ -76,7 +76,7 @@ def render(report: dict, *, deck: str | None = None) -> str:
     lines += [f"  {name:<18}{d['games']:>3}{d['wins']:>6}{d['turns']:>7}{d['idle_turns']:>6}{d['spells']:>8}{d['damage_to_players']:>19}"
               f"{d['aimed_at_others']:>17}{d['responses']:>18}  {', '.join(map(str, d['left_in_rounds'])) or '-'}" for name, d in report["decks"].items()]
     lines += ["", "PILOTS  what was played, not what was in the list: sevens kept on two mana sources or fewer; land drops missed in the first six turns;",
-              "        turns ended with a castable card and the mana for it; turns with attackers and no attack; turns attackers stayed home from an open player",
+              "        turns ended with a castable card, the mana for it and no instant to hold it for; turns with attackers and no attack; turns attackers stayed home from an open player",
               "  deck               games  thin keeps  land drops missed  castable left  no attack  held back"]
     lines += [f"  {name:<18}{p['games']:>6}{p['thin_keeps']:>12}{p['land_drops_missed']:>19}{p['castable_left']:>15}{p['no_attack']:>11}{p['held_back']:>11}"
               for name, p in report.get("pilots", {}).items()]

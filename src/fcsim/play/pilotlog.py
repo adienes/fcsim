@@ -109,7 +109,9 @@ def pilot_record(game_dir: str | Path) -> dict:
         seat["totals"] = {
             "turns": len(turns),
             "land_drops_missed_in_first_six": sum(1 for t in turns if t["round"] <= 6 and not t["played_land"]),
-            "turns_ended_with_a_castable_card_and_the_mana_for_it": sum(1 for t in turns if t.get("castable_left")),
+            # Mana left open beside an instant is how interaction is held up; with nothing at instant speed in hand it is mana unspent.
+            "turns_ended_with_a_castable_card_and_the_mana_for_it": sum(1 for t in turns if t.get("castable_left") and not t.get("castable_left_at_instant_speed")),
+            "turns_ended_holding_mana_for_an_instant": sum(1 for t in turns if t.get("castable_left_at_instant_speed") and t.get("untapped_sources")),
             "turns_with_attackers_held_back_from_a_player_without_blockers": sum(
                 1 for t in turns if len(t["could_attack"] or []) > t["attacked_with"] and any(n == 0 for n in t["untapped_blockers"].values())),
             "turns_with_attackers_and_no_attack": sum(1 for t in turns if (t["could_attack"] or []) and not t["attacked_with"]),
@@ -139,7 +141,8 @@ def render_pilot(record: dict, seat: int) -> str:
     if row["left"]:
         lines.append(f"  left the game in round {row['left']['round']} (table turn {row['left']['turn']}, {row['left']['on_the_turn_of']}'s turn)")
     lines.append(f"  in all: {totals['turns']} turns; {totals['land_drops_missed_in_first_six']} land drop(s) missed in the first six; "
-                 f"{totals['turns_ended_with_a_castable_card_and_the_mana_for_it']} turn(s) ended with a castable card and the mana for it; "
+                 f"{totals['turns_ended_with_a_castable_card_and_the_mana_for_it']} turn(s) ended with a castable card, the mana for it and no instant to hold it for "
+                 f"({totals['turns_ended_holding_mana_for_an_instant']} more with mana open beside an instant); "
                  f"{totals['turns_with_attackers_and_no_attack']} turn(s) with attackers and no attack; "
                  f"{totals['turns_with_attackers_held_back_from_a_player_without_blockers']} turn(s) when attackers stayed home though some player had no untapped blocker; "
                  f"{totals['turns_ended_with_creatures_but_none_untapped']} turn(s) it attacked and left no creature untapped, losing {totals['life_lost_after_such_turns']} life "
