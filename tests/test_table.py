@@ -1428,3 +1428,33 @@ def test_a_pool_is_left_alone_while_its_owners_own_effect_speaks_of_unspent_mana
     assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()
     old = Table(seats(), seed=5, first=0, mechanics=5)
     assert old.game.mechanics == 5
+
+
+def test_an_additional_combat_made_during_combat_comes_after_that_combat_not_in_the_middle_of_it():
+    table, runner = started()
+    pass_until(table, runner, "main1")
+    pass_until(table, runner, "declare_attackers")
+    assert table.game.turn.step == "declare_attackers"
+    combat = ["begin_combat", "declare_attackers", "declare_blockers", "combat_damage", "end_combat"]
+    before = list(table.game.turn.remaining)
+    rest = before.index("end_combat") + 1                  # what is left of this combat
+    assert rest >= 1 and before[rest:] == ["main2", "end", "cleanup"]
+    runner.step(0, "act", {"because": "Great Train Heist: after this phase, there is an additional combat phase", "mutations": [{"op": "extra_combat"}]})
+    assert table.game.turn.remaining == before[:rest] + combat + ["main2"] + before[rest:]
+    runner.step(0, "act", {"because": "Hellkite Charger again", "mutations": [{"op": "extra_combat"}]})       # a second one also waits for this combat to end
+    assert table.game.turn.remaining == before[:rest] + (combat + ["main2"]) * 2 + before[rest:]
+    assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()
+    main = Table(seats(), seed=5, first=0)
+    other = ScriptedRunner(main)
+    for seat in range(3):
+        other.step(seat, "keep")
+    pass_until(main, other, "main1")
+    other.step(0, "act", {"because": "Aggravated Assault: after this main phase", "mutations": [{"op": "extra_combat"}]})
+    assert main.game.turn.remaining[:7] == ["begin_combat", "declare_attackers", "declare_blockers", "combat_damage", "end_combat", "main2", "begin_combat"]
+    old = Table(seats(), seed=5, first=0, mechanics=5)      # a journal from before replays as it was played, wrong as that was
+    before = ScriptedRunner(old)
+    for seat in range(3):
+        before.step(seat, "keep")
+    pass_until(old, before, "declare_attackers")
+    before.step(0, "act", {"because": "as it was", "mutations": [{"op": "extra_combat"}]})
+    assert old.game.turn.remaining[:2] == ["begin_combat", "declare_attackers"]

@@ -195,9 +195,21 @@ def eliminate(game: Game, seat: int, status: str = "eliminated") -> None:
         game.control.kind, game.control.seats, game.control.detail = "over", [], {}
 
 
+_PHASES = (("untap", "upkeep", "draw"), ("main1",), tuple(_COMBAT_PHASE), ("main2",), ("end", "cleanup"))
+
+
 def insert_combat(game: Game) -> None:
-    """An additional combat phase after the current phase, followed by an additional main phase."""
-    game.turn.remaining[:0] = [*_COMBAT_PHASE, "main2"]
+    """An additional combat phase after the current phase, followed by an additional main phase.
+
+    After the phase, not after the step. Put at the front of what remained of the turn, a combat made during combat (Great
+    Train Heist cast with attackers declared, Hellkite Charger's attack trigger) cut the first combat off where it stood, and
+    its blocks and damage were played after the second one, with the same attackers: a player died of damage dealt twice."""
+    at = 0
+    if game.mechanics >= 6:
+        phase = next((p for p in _PHASES if game.turn.step in p), ())
+        while at < len(game.turn.remaining) and game.turn.remaining[at] in phase and (at == 0 or game.turn.remaining[at] != phase[0]):
+            at += 1  # the rest of this phase comes first; a second combat already waiting is another phase, and begins with its first step
+    game.turn.remaining[at:at] = [*_COMBAT_PHASE, "main2"]
 
 
 def end_turn(game: Game) -> None:
