@@ -11,7 +11,7 @@ import copy
 from collections.abc import Callable
 
 from . import mana, mechanics, mutations, ops, scripts, triggers, turn
-from .model import MECHANICS, STEPS, Dice, Game, Obj, Seat, StackItem, TableError
+from .model import MECHANICS, STEPS, Control, Dice, Game, Obj, Seat, StackItem, TableError
 from .views import Handles, obj_view, view
 
 _OBJECT_KEYS = frozenset({"card", "source", "obj", "objs", "attacker", "blocker", "attached_to", "copy_of",
@@ -737,6 +737,17 @@ class Table:
     def release(self) -> dict:
         """Let the game go on from an audit checkpoint."""
         return self._execute(None, "release", {})
+
+    def checkpoint(self) -> dict:
+        """An audit checkpoint where the table would not have stopped by itself: the driver calls one before it removes
+        a player, because nothing brings a player back. Whoever was about to get priority gets it when the table is released."""
+        return self._execute(None, "checkpoint", {})
+
+    def _do_checkpoint(self, game: Game, seat: None, args: dict):
+        if game.control.kind != "priority":
+            raise TableError("not_now", "A checkpoint is called while a player is about to get priority.")
+        game.control = Control("audit", [], {"resume": {"do": "give", "seat": game.control.seats[0]}})
+        return ops.Told()
 
     def upgrade(self) -> dict:
         """Bring a game recorded under older table rules up to the current ones, from this point on. The

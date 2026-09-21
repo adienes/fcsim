@@ -1093,28 +1093,55 @@ def test_a_missed_trigger_written_as_text_alone_unmarks_its_card_so_the_next_aud
 
 
 @pytest.mark.parametrize("held", [False, True])
-def test_the_stretch_that_ended_the_game_is_audited_and_the_report_says_whether_the_ending_stands(database, tmp_path, monkeypatch, held):
+def test_the_turn_so_far_is_audited_and_put_right_before_the_driver_removes_a_player(database, tmp_path, monkeypatch, held):
+    """Nothing brings a player back. Zaxara was removed at 0 life by combat damage dealt twice; the audit a turn later had
+    the damage undone, and the player stayed out."""
     from fcsim.play import pod
     budget = Budget(max_calls=200)
-    calls = {"n": 0}
 
     def two_lose_in_the_second_turn(table):
-        calls["n"] += 1
         acted = any(e["tool"] == "act" and e["turn"] == 2 for e in table.events)
         return [(0, "test"), (2, "test")] if acted and table.game.control.kind != "over" and table.game.seats[0].status == "alive" else []
     monkeypatch.setattr(pod, "_must_lose", two_lose_in_the_second_turn)
-    finding = {"kind": "misresolved", "seat": 1, "summary": "the spell that won was countered", "basis": "test", "fix": "none now", "confidence": "high"}
+    finding = {"kind": "misresolved", "seat": 1, "summary": "the damage was dealt twice", "basis": "test", "fix": "undo it", "confidence": "high"}
     last = {"verdict": "findings", "findings": [finding], "hooks": []} if held else OK
     auditor = FakeRunner([OK, last] + [OK] * 5, budget)
     report = play_pod(decks(tmp_path), [ScriptedSeat(budget, fidgets=True) for _ in range(3)], auditor, database, cycles=3, seed=4,
                       out_root=tmp_path / "games", echo=lambda *_: None)
-    assert report["winner"] == "Pir" and report["stopped"] is None and len(auditor.asked) == 2   # the first turn, and the stretch that ended the game
-    assert report["audits"][-1]["final"] and "Tapping and untapping my land" in auditor.asked[-1]["prompt"]
-    text = (Path(report["directory"]) / "report.md").read_text()
+    assert report["winner"] == "Pir" and report["stopped"] is None and report["journal"] == "replays to the same game"
+    assert "Tapping and untapping my land" in auditor.asked[1]["prompt"]          # the turn so far, read before anybody goes
+    log = (Path(report["directory"]) / "log.md").read_text()
     if held:
-        assert report["ending"].startswith("contested: the spell that won was countered") and "Nothing can be corrected in a game that is over" in text
-    else:
-        assert report["ending"].startswith("stands") and "**The ending stands" in text
+        assert log.index("The auditor asks Pir to correct the table: the damage was dealt twice") < log.index("Talrand is out of the game")
+    assert report["ending"].startswith("stands: everything up to the last loss had been audited") and "**The ending stands" in (Path(report["directory"]) / "report.md").read_text()
+
+
+def test_a_game_a_player_ended_by_hand_has_its_last_stretch_audited_and_the_report_says_what_is_held_against_it(database, tmp_path):
+    from fcsim.cards import read_decklist, resolve
+    from fcsim.play.gamedir import GameDirectory
+    from fcsim.play.pod import _lookup, _Pod
+    from fcsim.table import Table
+
+    lists = [resolve(read_decklist(path), database) for path in decks(tmp_path)]
+    names = ["Talrand", "Pir", "Thrasios"]
+    directory = GameDirectory(tmp_path / "games", "pod_ended-by-hand", 4)
+    table = Table([{"name": n, "commanders": [c.name for c in d.commanders], "library": [c.name for c in d.library()]} for n, d in zip(names, lists, strict=True)],
+                  seed=4, first=0, gated="turn", on_event=directory.journal, card_lookup=_lookup(database))
+    budget = Budget(max_calls=10)
+    finding = {"kind": "misresolved", "seat": 0, "summary": "the spell that won was countered", "basis": "test", "fix": "none now", "confidence": "high"}
+    auditor = FakeRunner([{"verdict": "findings", "findings": [finding], "hooks": []}], budget)
+    pod = _Pod(directory, table, names, lists, [ScriptedSeat(budget) for _ in names], auditor, database, 1, None, lambda *_: None)
+    for seat in range(3):
+        table.act(seat, "keep")
+    snapshot = pod.auditor.snapshot(table)
+    while table.game.turn.step != "main1":
+        table.act(table.expected()[0][0], "pass_priority")
+    table.act(0, "act", {"because": "Crackle with Power for 40 each", "mutations": [{"op": "eliminate", "seat": 1, "reason": "0 life"}, {"op": "eliminate", "seat": 2, "reason": "0 life"}]})
+    assert table.game.control.kind == "over"
+    pod.last_audit(snapshot)
+    assert pod.report["audits"][-1]["final"] and "Crackle with Power" in auditor.asked[0]["prompt"]
+    assert pod.report["ending"].startswith("contested: the spell that won was countered")
+
 
 
 def test_a_game_stopped_by_the_session_limit_can_wait_for_the_reset_and_take_itself_up_again(combat_game, monkeypatch, capsys, tmp_path):

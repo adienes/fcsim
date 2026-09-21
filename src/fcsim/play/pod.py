@@ -263,6 +263,7 @@ class _Pod:
                         self.table.rewrite_hooks(self.table.handles[None].of("c", obj.id), _absolute(self.known_hooks[obj.name], obj, self.database))
                     except ValueError:
                         pass
+        self.cleared = -1  # how long the journal was when the turn so far was last audited because a player stood to lose
         self.greeted: set[int] = set()  # permanents whose controller has had its chance to see to them on someone else's turn
         self.windows: dict = {}  # (table turn, step) -> the seats that said they would act in that empty-stack window
         self.stamped: list = [None]  # what the battlefield looked like when power and toughness were last worked out
@@ -710,6 +711,7 @@ class _Pod:
         gone = self.table.undone(self.table.events)
         unit = [e for e in self.table.events[snapshot[2]:] if e["n"] not in gone]
         if not any(e["seat"] is not None and e["tool"] not in ("pass_priority", "say", "write_notes", "set_response_policy") for e in unit):
+            self.report["ending"] = "stands: everything up to the last loss had been audited before it was applied"
             return
         self.echo(f"         auditing the {len(unit)} events that ended the game ...")
         verdict, reply = self.auditor.audit(self.table, snapshot)
@@ -790,6 +792,8 @@ class _Pod:
             lost = _must_lose(self.table)
             if lost and me is not None:
                 return "wake"  # end this wake first: correcting the table kills open wakes
+            if lost and self.audit_every == "turn" and game.control.kind == "priority" and self.cleared != len(self.table.events):
+                return "loss"  # nothing brings a player back: what led here is audited, and corrected if need be, first
             if lost:
                 # Losing the game is a state-based action the table can see for itself, and nobody
                 # should receive priority first (rule 704.3). In the first real game two players sat
@@ -894,10 +898,16 @@ class _Pod:
                     if why == "dispute":
                         self.adjudicate(snapshot[2])
                         continue
-                    if why == "audit":
+                    if why in ("audit", "loss"):
+                        if why == "loss":
+                            # A player stands to be removed. In the second batch Zaxara went from 9 life to 0 by combat damage the
+                            # table's own bug dealt twice; the audit a turn later had the damage undone, and no tool could bring
+                            # the player back. So the turn so far is audited before anybody goes, while it can still be put right.
+                            self.table.checkpoint()
                         self.audit(server, snapshot)
                         self.table.release()
                         snapshot = self.auditor.snapshot(self.table)
+                        self.cleared = len(self.table.events)  # if the loss still stands with nothing new to read, it is applied
                         self.directory.write("state.json", self.table.game.to_dict())
                         continue
                     seat, kind = self.table.expected()[0]

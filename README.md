@@ -278,9 +278,11 @@ has changed. A seat it faults is asked to correct the table, or may `contest`: a
 both sides and the text of every rule either cited, upholds, overrules or amends, and its ruling
 binds the auditor and the players for the rest of the game. Any player can `dispute` another's
 play, which the auditor must answer in public. The driver itself removes a player at 0 life, 10
-poison, 21 commander damage or a draw from an empty library before anyone gets priority. The
-stretch that ends a game is audited too; nothing can be corrected then, so the report says whether
-the ending stands or what is held against it.
+poison, 21 commander damage or a draw from an empty library before anyone gets priority; since
+nothing brings a player back, the turn so far is audited and put right first, and the loss is
+applied only if it still stands. A game a player ends by hand has its last stretch audited
+afterwards; nothing can be corrected then, so the report says whether the ending stands or what is
+held against it.
 
 A game can stop anywhere (a budget, a bug, a closed laptop) and be resumed: the journal holds every
 accepted call. A resumed game is first owed the audit of everything played since the last one that
