@@ -37,7 +37,16 @@ turned out; must name the cards it depends on; and must quote its evidence: whic
 round, what happened. Lessons about the playing tools themselves are not wanted. Three to eight \
 lessons, and fewer if the games support fewer: a lesson taught to every later pilot has to be right.
 
-Facts. The sections headed MEASURED, THIS SEAT TURN BY TURN, WHAT HAPPENED TO EACH CARD and THE LIST \
+Start from HOW THIS SEAT WAS PILOTED, MEASURED. It is where a pilot's mistakes show without anyone's \
+opinion: the hand it kept (the first mulligan in Commander is free: a seven with two lands and \
+nothing cheap is rarely a keep), the land drops it missed afterwards, the turns it ended with mana \
+untapped beside a card it could have cast, the turns it had attackers and sent none, or kept them \
+home from a player with no untapped blocker. Each of those is a lesson only if the pilot had no good \
+reason at the time (a held instant, a swing into first strikers): read what it said it was doing, \
+and say which it was. A loss that followed from a hand that should have gone back teaches about \
+mulligans, not about the cards that were stuck in it.
+
+Facts. The sections headed MEASURED, THIS SEAT TURN BY TURN, HOW THIS SEAT WAS PILOTED, WHAT HAPPENED TO EACH CARD and THE LIST \
 IN NUMBERS are computed from the log and the card data. Never state anything they contradict, and \
 do not repeat a claim from a round account or a pilot's note that they contradict. Your lessons are \
 checked against them. Answer in the required JSON form."""

@@ -7,15 +7,16 @@ from collections import Counter
 from pathlib import Path
 
 from .cardlog import card_record
+from .pilotlog import pilot_record
 from .rubric import measure
 from .status import status
 
 
 def aggregate(game_dirs: list[str | Path]) -> dict:
-    games, decks, cards, unread = [], {}, {}, []
+    games, decks, cards, unread, pilots = [], {}, {}, [], {}
     for game_dir in game_dirs:
         try:
-            scored, seen = measure(game_dir), card_record(game_dir)
+            scored, seen, piloted = measure(game_dir), card_record(game_dir), pilot_record(game_dir)
         except Exception as error:  # noqa: BLE001 - one journal that does not replay must not cost the report of the others
             unread.append({"directory": Path(game_dir).name, "error": f"{type(error).__name__}: {error}"[:300]})
             continue
@@ -31,6 +32,13 @@ def aggregate(game_dirs: list[str | Path]) -> dict:
                 deck[key] += seat[key]
             if seat["left_in_round"]:
                 deck["left_in_rounds"].append(seat["left_in_round"])
+            flown, kept = piloted["seats"][index]["totals"], piloted["seats"][index]["kept"] or {}
+            hands = pilots.setdefault(seat["name"], {"games": 0, "thin_keeps": 0, "land_drops_missed": 0, "castable_left": 0, "no_attack": 0, "held_back": 0})
+            hands["games"] += 1
+            hands["thin_keeps"] += len(kept.get("cards", [])) >= 7 and kept.get("lands", 9) + len(kept.get("mana_rocks", [])) <= 2
+            for key, measured in (("land_drops_missed", "land_drops_missed_in_first_six"), ("castable_left", "turns_ended_with_a_castable_card_and_the_mana_for_it"),
+                                  ("no_attack", "turns_with_attackers_and_no_attack"), ("held_back", "turns_with_attackers_held_back_from_a_player_without_blockers")):
+                hands[key] += flown[measured]
             for row in seen["seats"][index]["cards"]:
                 card = cards.setdefault(seat["name"], {}).setdefault(row["name"], {"seen": 0, "played": 0, "rounds_held": 0, "stuck_at_end": 0})
                 card["seen"] += 1
@@ -38,8 +46,8 @@ def aggregate(game_dirs: list[str | Path]) -> dict:
                 card["rounds_held"] += row["rounds_in_hand"]
                 card["stuck_at_end"] += row["ended_in"] == "hand" and row["rounds_in_hand"] >= 2
     tally = {measure_: dict(Counter(g["verdicts"].get(measure_, "-") for g in games)) for measure_ in
-             ("length", "participation", "sitting out", "interaction", "threat rotation", "turn weight", "ending")}
-    return {"games": games, "decks": decks, "cards": cards, "verdicts": tally, "unread": unread}
+             ("length", "participation", "interaction", "threat rotation", "turn weight", "ending")}
+    return {"games": games, "decks": decks, "cards": cards, "verdicts": tally, "unread": unread, "pilots": pilots}
 
 
 def _pace(game_dir: str | Path) -> dict:
@@ -67,6 +75,11 @@ def render(report: dict, *, deck: str | None = None) -> str:
     lines += ["", "DECKS   games  wins  turns  idle  spells  damage to players  aimed at others  at instant speed  left in round"]
     lines += [f"  {name:<18}{d['games']:>3}{d['wins']:>6}{d['turns']:>7}{d['idle_turns']:>6}{d['spells']:>8}{d['damage_to_players']:>19}"
               f"{d['aimed_at_others']:>17}{d['responses']:>18}  {', '.join(map(str, d['left_in_rounds'])) or '-'}" for name, d in report["decks"].items()]
+    lines += ["", "PILOTS  what was played, not what was in the list: sevens kept on two mana sources or fewer; land drops missed in the first six turns;",
+              "        turns ended with a castable card and the mana for it; turns with attackers and no attack; turns attackers stayed home from an open player",
+              "  deck               games  thin keeps  land drops missed  castable left  no attack  held back"]
+    lines += [f"  {name:<18}{p['games']:>6}{p['thin_keeps']:>12}{p['land_drops_missed']:>19}{p['castable_left']:>15}{p['no_attack']:>11}{p['held_back']:>11}"
+              for name, p in report.get("pilots", {}).items()]
     for name, rows in report["cards"].items():
         if deck is None or deck.casefold() not in name.casefold():
             continue

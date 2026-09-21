@@ -128,9 +128,10 @@ def _scores(names: list[str], seats: list[dict], turns: dict, pressure: dict, ou
 
     waits = [(names[i], rounds - o["round"]) for i, o in out.items() if over]
     longest = max((w for _, w in waits), default=0)
-    score("sitting out", "bad" if longest > 2 else "mixed" if longest > 1 else "good",
+    # Told, not scored: somebody going out well before the end is how Commander goes, and no fault of the game or the decks.
+    score("sitting out", "noted",
           "; ".join(f"{name} was out for {w} round{'s' * (w != 1)} before the end" for name, w in waits if w) or "nobody was out for a whole round before the end",
-          "rounds between a seat's elimination and the end; good: at most 1, bad: more than 2")
+          "rounds between a seat's elimination and the end; told for the record, not held against the game")
 
     acts = sum(s["aimed_at_others"] + s["blockers"] for s in seats)
     replies = sum(s["responses"] for s in seats)

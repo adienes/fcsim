@@ -14,6 +14,7 @@ from pathlib import Path
 from ..cards import CardDatabase, read_decklist, resolve
 from ..cards.decklist import Decklist, Entry
 from ..play.cardlog import card_record
+from ..play.pilotlog import pilot_record, render_pilot
 from ..play.cardlog import render as render_cards
 from ..play.gamedir import GameDirectory
 from ..play.goldfish import _deck_reference
@@ -52,7 +53,14 @@ round, what happened), and the effect you expect on the games. Keep the deck's i
 cards that did not pull their weight for this plan, not the pet cards that make it this deck. \
 Never cut a commander.
 
-Facts. The sections headed MEASURED, THIS SEAT TURN BY TURN, WHAT HAPPENED TO EACH CARD and THE \
+Tell the pilot from the deck. HOW THIS SEAT WAS PILOTED, MEASURED gives the hand that was kept, the \
+land drops missed, the turns that ended with mana untapped beside a castable card, and the turns \
+attackers stayed home. A card stuck in hand in a game where the pilot kept two lands and never had \
+a fourth says nothing against the card; a deck that dealt no damage because its pilot never \
+attacked has not shown that it lacks reach. Where a loss was the pilot's, say so under The pilot, \
+and propose no swap on its evidence.
+
+Facts. The sections headed MEASURED, THIS SEAT TURN BY TURN, HOW THIS SEAT WAS PILOTED, WHAT HAPPENED TO EACH CARD and THE \
 LIST IN NUMBERS are computed from the log and the card data. Never state anything they contradict, \
 and do not repeat a claim from a round account or a pilot's note that they contradict: say how many \
 lands the deck had from the turn-by-turn lines, and count cards from the list, not from memory. \
@@ -67,7 +75,7 @@ reviewer was given, and the review it wrote. Find every statement of fact in the
 causes, its lessons and its swaps that the record contradicts or does not support: how many lands \
 the deck had and when, what was cast or held and when, life totals, who did what, how many cards \
 of some kind the list contains, what a card does. The sections computed from the log (MEASURED, \
-THIS SEAT TURN BY TURN, WHAT HAPPENED TO EACH CARD, THE LIST IN NUMBERS) and the card texts in THE \
+THIS SEAT TURN BY TURN, HOW THIS SEAT WAS PILOTED, WHAT HAPPENED TO EACH CARD, THE LIST IN NUMBERS) and the card texts in THE \
 LIST outrank the round accounts and the pilot's notes. Judgements and recommendations are not \
 your business: only facts. For each problem quote the claim and say what the record shows. An \
 empty list is the right answer when the review is sound."""
@@ -128,6 +136,7 @@ def _game_material(game_dir: Path, seat: int) -> str:
         *([f"THE OWNER'S OWN REACTION TO THIS GAME (the strongest evidence you have)\n{feedback.read_text(encoding='utf-8').strip()}"] if feedback.is_file() else []),
         "MEASURED FROM THE LOG\n" + render_rubric(scored := measure(directory.path)),
         "THIS SEAT TURN BY TURN\n" + render_turns(scored, seat),
+        "HOW THIS SEAT WAS PILOTED, MEASURED\n" + render_pilot(pilot_record(directory.path), seat),
         "WHAT HAPPENED TO EACH CARD THE PILOT SAW\n" + render_cards(card_record(directory.path), seat),
         "THE GAME, ROUND BY ROUND\n" + story,
         "WHAT THE PILOT SAID IT WAS DOING\n" + ("\n".join(said) or "(nothing recorded)"),

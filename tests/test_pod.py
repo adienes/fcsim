@@ -943,6 +943,8 @@ def test_a_deck_project_teaches_its_pilot_what_earlier_games_learned(combat_game
     assert [(k["id"], k["status"], k["games"], k["stale"]) for k in kept] == [("L001", "tentative", [Path(game).name], False)]
     assert "Cast Talrand on four lands" in project.primer() and "studied 1 game(s)" in (project.path / "CHANGELOG.md").read_text()
     assert "[tentative, 1 game(s), commander_timing]" in teacher.asked[-1]["prompt"]
+    studied = teacher.asked[0]["prompt"]   # the learner starts from how the seat was piloted, which nobody has to guess at
+    assert "HOW THIS SEAT WAS PILOTED, MEASURED" in studied and "opening hand kept after 0 mulligan(s):" in studied and "Start from HOW THIS SEAT WAS PILOTED" in teacher.asked[0]["system"]
 
     # the same games studied again are not a second witness; a different game is, and the lesson becomes validated
     again = Writes([{"lessons": [lesson]}, {"problems": []}])
@@ -1056,6 +1058,9 @@ def test_a_resumed_game_can_be_taken_up_from_an_earlier_event_and_nobody_counts_
     told = "\n".join(record(table, back + 1))
     assert f"event {back + 1} " not in told and "The table is rewound to just after event" in told      # the auditor is not shown the abandoned line
     assert "WHAT WAS DONE" in auditor.asked[0]["prompt"] and f"event {back} " in auditor.asked[0]["prompt"]   # the turn it went back into is audited from its start
+    from fcsim.play.pilotlog import pilot_record
+    for seat in pilot_record(directory)["seats"]:   # a turn the game went back into is one turn in the piloting record too
+        assert len({t["turn"] for t in seat["turns"]}) == len(seat["turns"])
     played = sum(1 for e in events if e["tool"] == "play_land" and e["n"] not in gone)
     assert sum(1 for turn in measure(directory)["turns"] if turn["land"]) == played <= lands_before + 3   # the scores count each land once
 
@@ -1164,3 +1169,30 @@ def test_a_game_stopped_by_the_session_limit_can_wait_for_the_reset_and_take_its
     assert "waiting" in capsys.readouterr().out
     calls.clear()
     assert cli.main(["pod", "a.txt", "b.txt", "c.txt", "--cycles", "10"]) == 1 and len(calls) == 1      # not asked to wait: it stops, as before
+
+
+def test_how_each_seat_was_piloted_is_measured_from_the_journal(combat_game):
+    """A deck that loses has not shown it is weak. What its pilot kept, left unused and held back is in the journal."""
+    from fcsim.play.pilotlog import pilot_record, render_pilot
+    record = pilot_record(combat_game[0]["directory"])
+    talrand, pir, thrasios = record["seats"]
+    assert [s["name"] for s in record["seats"]] == ["Talrand", "Pir", "Thrasios"]
+    assert talrand["kept"]["mulligans"] == 0 and len(talrand["kept"]["cards"]) == 7 and talrand["kept"]["lands"] == sum(1 for c in talrand["kept"]["cards"] if c in ("Island", "Forest"))
+    cast = [name for turn in talrand["turns"] for name in turn["cast"]]
+    assert "Talrand, Sky Summoner" in cast and sum(t["attacked_with"] for t in talrand["turns"]) >= 1          # it cast its commander and attacked with it
+    assert all(t["played_land"] == (not t.get("skipped_land", False)) for t in talrand["turns"][:2]) and talrand["turns"][0]["lands"] == 0
+    quiet = thrasios["totals"]                                                                                # the seat that only plays lands
+    assert quiet["turns_with_attackers_and_no_attack"] == 0 and sum(t["attacked_with"] for t in thrasios["turns"]) == 0
+    assert all("untapped_sources" in t for t in pir["turns"][:-1])                                            # every finished turn says what it left untapped
+    told = render_pilot(record, 0)
+    assert "opening hand kept after 0 mulligan(s):" in told and "could attack with" in told and "in all:" in told
+
+
+def test_the_mulligan_question_counts_the_hand_for_the_pilot(database, tmp_path):
+    budget = Budget(max_calls=60)
+    seats = [ScriptedSeat(budget) for _ in range(3)]
+    play_pod(decks(tmp_path), seats, FakeRunner([OK] * 20, budget), database, cycles=1, seed=4, out_root=tmp_path / "games", echo=lambda *_: None)
+    asked = next(p for p in seats[0].prompts if "This is your opening hand" in p)
+    hand = asked.split("YOUR HAND")[1].split("\n\n")[0]
+    lands = sum(1 for line in hand.splitlines() if line.startswith("- [") and ("] Island" in line or "] Forest" in line))
+    assert f"Counted for you: {lands} land(s)" in asked and "the free mulligan is there to be used" in asked

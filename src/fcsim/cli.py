@@ -198,6 +198,12 @@ def main(argv: list[str] | None = None) -> int:
     scored.add_argument("game_dir")
     scored.add_argument("--json", action="store_true")
 
+    piloted = commands.add_parser("pilot", help="How each seat of a game was piloted, from its journal: the hand it kept, mana left unused "
+                                  "beside castable cards, attackers held back; no model call")
+    piloted.add_argument("game_dir")
+    piloted.add_argument("--seat", help="Only the seat whose name contains this")
+    piloted.add_argument("--json", action="store_true")
+
     where = commands.add_parser("status", help="Where a game stands and where its time went; works while it is being played")
     where.add_argument("game_dir")
     where.add_argument("--json", action="store_true")
@@ -233,9 +239,9 @@ def main(argv: list[str] | None = None) -> int:
         _stay_awake()
     if args.command == "pod" and args.games > 1 and not args.resume:
         return _pods(args, list(argv) if argv is not None else sys.argv[1:])
-    if args.command in ("cards", "deck", "audit", "goldfish", "pod", "status", "summarize", "rubric", "review", "report"):
+    if args.command in ("cards", "deck", "audit", "goldfish", "pod", "status", "summarize", "rubric", "pilot", "review", "report"):
         try:
-            return {"cards": _cards, "deck": _deck, "audit": _audit, "goldfish": _goldfish, "pod": _pod, "status": _status, "summarize": _summarize, "rubric": _rubric, "review": _review, "report": _report}[args.command](args)
+            return {"cards": _cards, "deck": _deck, "audit": _audit, "goldfish": _goldfish, "pod": _pod, "status": _status, "summarize": _summarize, "rubric": _rubric, "pilot": _pilot, "review": _review, "report": _report}[args.command](args)
         except (CardsError, RunnerError, ValueError, OSError) as exc:
             print(json.dumps({"error": {"code": "cards_error", "message": str(exc)}}), file=sys.stderr)
             return 2
@@ -513,6 +519,15 @@ def _review(args: argparse.Namespace) -> int:
 def _report(args: argparse.Namespace) -> int:
     result = aggregate(args.game_dirs)
     print(json.dumps(result, indent=2, ensure_ascii=False) if args.json else render_aggregate(result, deck=args.deck))
+    return 0
+
+
+def _pilot(args: argparse.Namespace) -> int:
+    from .play.pilotlog import pilot_record, render_pilot
+    record = pilot_record(args.game_dir)
+    wanted = [i for i, seat in enumerate(record["seats"]) if not args.seat or args.seat.casefold() in seat["name"].casefold()]
+    print(json.dumps({**record, "seats": [record["seats"][i] for i in wanted]}, indent=2, ensure_ascii=False) if args.json
+          else "\n\n".join(render_pilot(record, i) for i in wanted))
     return 0
 
 

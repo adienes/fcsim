@@ -319,6 +319,21 @@ class _Pod:
         return (f"Round {game.seats[game.turn.active].turns_taken}, {self.names[game.turn.active]}'s turn "
                 f"(table turn {game.turn.number}), {game.turn.step} step.")
 
+    def hand_facts(self, seat: int) -> str:
+        """What an opening hand holds, counted, and what players of the format keep. Two of four games of one deck began
+        with seven cards, two lands and nothing cheap, kept though the first mulligan was free; one of them never saw a
+        fourth land. The decision stays the pilot's, and its deck's primer may know better."""
+        cards = [self.database.find(self.table.game.objects[i].name) for i in self.table.game.seats[seat].hand]
+        known = [card for card in cards if card is not None]
+        lands = [card for card in known if "Land" in card.table_facts()["types"]]
+        spells = [card for card in known if card not in lands]
+        rocks = [card.name for card in spells if card.table_facts().get("produces") and card.table_facts()["mana_value"] <= 3]
+        cheap = [card.name for card in spells if card.table_facts()["mana_value"] <= 2]
+        return (f"Counted for you: {len(lands)} land(s), {len(rocks)} cheap mana source(s) besides ({', '.join(rocks) or 'none'}), "
+                f"{len(cheap)} spell(s) costing two or less, out of {len(cards)} cards. As the format is usually played, a hand to keep has "
+                "three or four lands, or two with cheap mana beside them, makes the colours of its first plays, and has something to do in "
+                "the first three turns; the free mulligan is there to be used on a hand that does not.")
+
     def briefing(self, seat: int) -> str:
         """Everything a seat would otherwise spend two or three round trips fetching."""
         view = self.table.view(seat)
@@ -429,7 +444,7 @@ class _Pod:
                         f"{self.count} in turn order. This is your opening hand, after {taken} mulligan(s). Keep it (keep=true) or mulligan "
                         "(keep=false): a mulligan shuffles it away and draws seven new cards. The first mulligan is free; for each one "
                         f"after that you put a card on the bottom when you keep. If you keep this hand you owe {max(0, taken - 1)}: list "
-                        f"exactly that many handles in `bottom`.\n\n{self.briefing(seat)}")
+                        f"exactly that many handles in `bottom`. {self.hand_facts(seat)}\n\n{self.briefing(seat)}")
             prompts = {seat: question(seat) for seat in deciding}  # built here: the card database is not for several threads at once
 
             replies = self.ask_all(prompts, _OPENING)
