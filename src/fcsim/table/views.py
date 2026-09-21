@@ -115,6 +115,7 @@ def view(game: Game, viewer: int | None, handles: Handles, rev: int) -> dict:
             "seat": seat.index, "name": seat.name, "status": seat.status, "life": seat.life,
             "counters": seat.counters, "commander_damage": seat.commander_damage,
             "commander_casts": seat.commander_casts, "mulligans": seat.mulligans,
+            **({"mana_pool": "".join(f"{{{m[0]}}}" for m in seat.pool)} if seat.pool else {}),  # a mana pool is public
             **({"response_policy": seat.response_policy, "holds_for_end_step": seat.holds_for_end_step}
                if viewer == seat.index else {}),  # whether one holds up interaction is private
             "hand": _hidden_zone(game, seat.index, "hand", viewer, handles),

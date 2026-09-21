@@ -21,8 +21,12 @@ How this table works. The table is a virtual tabletop, not a rules engine. It en
 turn order, priority and hidden information, and knows no card text. Players carry out every \
 card effect themselves, as logged actions. So anything the rules require can have been done \
 wrongly or not done at all, and you are the check. Conventions to read the record by:
-- Mana is not tracked. A player announces a payment by tapping permanents, sometimes with a \
-note. Judge whether the tapped permanents could have produced the cost, including its colors.
+- A player announces a payment by tapping permanents, by spending mana from its mana pool, and \
+sometimes with a note. The table has already checked that what was tapped and spent can make the \
+cost, colors included, unless there is a note: then judge it yourself. Mana made and not spent at \
+once is added to the player's mana pool with a `mana` mutation and shown on the board; the table \
+empties it as each step ends unless the mutation says the effect keeps it longer. Check that mana \
+added is mana the effect really makes, and for as long as it says.
 - Continuous effects that live on no card are written as notes on a permanent, such as \
 "gets +3/+3 until end of turn". Treat a note as true unless the record shows it is wrong.
 - The battlefield is listed in order of arrival, oldest first. That order is the timestamp order.
@@ -294,6 +298,7 @@ def describe(view: dict, database: CardDatabase | None = None) -> str:
         extras = [f"{n} {kind} counters" for kind, n in seat["counters"].items()]
         extras += [f"{n} commander damage from {source}" for source, n in seat["commander_damage"].items()]
         extras += [f"has cast {name} from the command zone {n} time(s)" for name, n in seat["commander_casts"].items()]
+        extras += [f"mana pool: {seat['mana_pool']}"] if seat.get("mana_pool") else []
         lines.append(f"{who(index)}: {seat['status']}, {seat['life']} life, {seat['hand']['count']} cards in hand, "
                      f"{seat['library']['count']} in library" + "".join(f"; {e}" for e in extras) + ".")
         for zone in ("command", "graveyard", "exile"):

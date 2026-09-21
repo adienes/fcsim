@@ -6,7 +6,7 @@ trigger), a hook in the ledger says so and the step is handed to a seat instead.
 
 from __future__ import annotations
 
-from . import mutations, triggers
+from . import mana, mutations, triggers
 from .model import STEPS, Control, Dice, Game, StackItem, TableError
 
 _PRIORITY_STEPS = frozenset(STEPS) - {"untap", "cleanup"}
@@ -52,6 +52,7 @@ def begin_turn(game: Game, seat: int) -> None:
     game.seats[seat].holds_for_end_step = False
     turn.active, turn.remaining, turn.passed = seat, list(STEPS), []
     turn.land_plays, turn.attackers, turn.blockers, turn.damage_steps, turn.casts = 0, [], [], 0, {}
+    mana.empty_pools(game, entering=None)
     advance(game)
 
 
@@ -137,6 +138,7 @@ def advance(game: Game) -> None:
             return _next_turn(game)
         step = turn.step = turn.remaining.pop(0)
         turn.passed = []
+        mana.empty_pools(game, entering=step)
         if step in _HOLDABLE and (hold := _hold(game, step)):
             game.control = Control("held_step", [turn.active], {"step": step, "because": hold.get("text", "")})
             return

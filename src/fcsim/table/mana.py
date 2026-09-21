@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 
-from .model import Game, Obj
+from .model import Game, Obj, TableError
 
 COLORS = "WUBRG"
 _SYMBOL = re.compile(r"\{([^}]+)\}")
@@ -40,6 +40,48 @@ def parse_cost(cost: str, x: int = 0) -> tuple[int, list[set[str]]] | None:
         else:
             return None
     return generic, colored
+
+
+LIFETIMES = ("step", "end_of_combat", "end_of_turn", "kept")
+
+
+def parse_mana(text) -> list[str] | None:
+    """Mana written as "RRG", "{R}{R}{G}" or "2" (that much colorless): one symbol each, or None if it is not mana."""
+    found = []
+    for symbol in (_SYMBOL.findall(str(text)) or list(str(text).replace(" ", ""))):
+        if symbol.isdigit():
+            found += ["C"] * int(symbol)
+        elif symbol.upper() in COLORS + "C":
+            found.append(symbol.upper())
+        else:
+            return None
+    return found or None
+
+
+def empty_pools(game: Game, *, entering: str | None) -> None:
+    """Rule 500.4: unspent mana empties as each step ends. What an effect keeps longer goes when it says:
+    as combat ends, or with the turn (`entering` is None when a new turn begins). Mana an effect says is
+    never lost ("kept") stays."""
+    def goes(floating: list) -> bool:
+        if floating[1] == "kept":
+            return False
+        return entering is None or floating[1] == "step" or (floating[1] == "end_of_combat" and entering in ("main2", "end", "cleanup"))
+    for seat in game.seats:
+        gone = [m for m in seat.pool if goes(m)]
+        if gone:
+            seat.pool = [m for m in seat.pool if not goes(m)]
+            game.announcements.append(f"{seat.name}'s unspent " + "".join(f"{{{m[0]}}}" for m in gone) + " empties from their mana pool.")
+
+
+def spend(game: Game, seat: int, wanted: list[str]) -> None:
+    """Take this mana out of the seat's pool, the soonest to empty first."""
+    pool = game.seats[seat].pool
+    for color in wanted:
+        held = sorted((m for m in pool if m[0] == color), key=lambda m: LIFETIMES.index(m[1]))
+        if not held:
+            floating = "".join(f"{{{m[0]}}}" for m in pool) or "nothing"
+            raise TableError("not_in_pool", f"You have no {{{color}}} floating: your mana pool holds {floating}.")
+        pool.remove(held[0])
 
 
 def source(game: Game, obj: Obj, lookup: Callable[[str], dict | None] | None) -> dict | None:
@@ -94,7 +136,7 @@ def plan(cost: tuple[int, list[set[str]]], sources: list[dict]) -> list[dict] | 
 
 
 def payment_problem(game: Game, seat: int, told: dict | None, tapped: list[int], *, x: int = 0, tax: int = 0,
-                    lookup: Callable[[str], dict | None] | None = None) -> str | None:
+                    lookup: Callable[[str], dict | None] | None = None, floating: list[str] | None = None) -> str | None:
     """Why the permanents tapped cannot pay this card's cost, as far as the table can tell; None if
     they can, or if the table does not know enough to say."""
     cost = parse_cost((told or {}).get("mana_cost") or "", x) if told else None
@@ -103,6 +145,7 @@ def payment_problem(game: Game, seat: int, told: dict | None, tapped: list[int],
     sources = [source(game, game.objects[i], lookup) for i in tapped if i in game.objects]
     if any(s is None for s in sources):
         return None  # something tapped makes mana in a way the table was not told about
+    sources += [{"colors": {color}, "amount": 1} for color in floating or []]
     cost = (cost[0] + tax, cost[1])
     if pays(cost, sources):
         return None
@@ -122,10 +165,11 @@ def affordable(game: Game, seat: int, cards: list[tuple[str, dict | None, int]],
         sick = "Creature" in told.get("types", []) and obj.entered_turn == game.turn.number and "Haste" not in told.get("keywords", [])
         if made and not sick and obj.token is None:  # a Treasure is not tapped for mana but sacrificed: left to the player
             ready.append({**made, "id": obj.id})
+    ready += [{"colors": {m[0]}, "amount": 1, "id": None, "floating": m[0]} for m in game.seats[seat].pool]
     found = []
     for name, told, tax in cards:
         cost = parse_cost((told or {}).get("mana_cost") or "") if told and "Land" not in told.get("types", []) else None
         tapped = plan((cost[0] + tax, cost[1]), ready) if cost is not None else None
         if tapped is not None:
-            found.append((name, [s["id"] for s in tapped]))
+            found.append((name, [s["id"] for s in tapped if s["id"] is not None], "".join(s["floating"] for s in tapped if s.get("floating"))))
     return found

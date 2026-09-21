@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from . import mutations, triggers, turn
+from . import mana, mutations, triggers, turn
 from .model import HIDDEN_ZONES, Dice, Game, Obj, TableError
 
 
@@ -131,6 +131,20 @@ def apply_op(game: Game, dice: Dice, actor: int, op: dict, told: Told) -> None:
             obj.attached_to = host.id if host else None
             told.public.append(f"{me} attaches {_named(obj)} to {_named(host)}." if host
                                else f"{me} unattaches {_named(obj)}.")
+        case "mana":
+            # Floating mana had nowhere to live: it was a note on a permanent, and the auditor twice caught it spent twice.
+            player = game.seats[_seat(game, op.get("seat", actor))]
+            added, removed = mana.parse_mana(op.get("add", "")) if op.get("add") else [], mana.parse_mana(op.get("remove", "")) if op.get("remove") else []
+            until = str(op.get("until") or "step")
+            if added is None or removed is None or not (added or removed) or until not in mana.LIFETIMES:
+                raise TableError("bad_mana", "Give `add` (or `remove`) as mana, such as \"RRG\" or \"{R}{R}{G}\", and `until` as one of: "
+                                             + ", ".join(mana.LIFETIMES) + " (the default, step, empties as this step ends).")
+            mana.spend(game, player.index, removed)
+            player.pool += [[color, until] for color in added]
+            holds = "".join(f"{{{m[0]}}}" for m in player.pool) or "nothing"
+            told.public.append(f"{player.name} " + (f"adds {''.join('{' + c + '}' for c in added)}" + ("" if until == "step" else f" (until {until.replace('_', ' ')})")
+                                                    if added else f"removes {''.join('{' + c + '}' for c in removed)}")
+                               + f"{because}; their mana pool holds {holds}.")
         case "delay":
             # A delayed triggered ability belongs to no permanent ("return it at the beginning of the next end
             # step", after the card that said so has left), so no hook can carry it. In the fifth pod Norin the
@@ -266,7 +280,7 @@ def apply_op(game: Game, dice: Dice, actor: int, op: dict, told: Told) -> None:
             raise TableError("unknown_op", f"Unknown mutation {kind!r}. See the tool description for the list.")
 
 
-_OPS = frozenset({"annotate", "attach", "clear_annotations", "commander_damage", "counters", "create_token", "damage", "delay", "designate",
+_OPS = frozenset({"annotate", "attach", "clear_annotations", "commander_damage", "counters", "create_token", "damage", "delay", "designate", "mana",
                   "discard_random", "draw", "eliminate", "end_turn", "extra_combat", "extra_turn", "face", "flip_coin", "life", "look",
                   "mill", "move", "phase", "remove_from_stack", "request_choice", "reveal", "roll", "set_controller", "shuffle",
                   "skip_step", "tap", "untap"})

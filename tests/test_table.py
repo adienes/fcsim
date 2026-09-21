@@ -1269,3 +1269,38 @@ def test_a_script_written_with_its_operation_as_a_key_is_understood():
     table, runner = started()
     pass_until(table, runner, "main2")
     assert "error" not in table.act(0, "pass_priority", {"until": "main2"})       # already there: a pass, not an error
+
+
+def test_floating_mana_lives_in_a_pool_that_payments_spend_and_steps_empty():
+    told: dict[str, dict] = {"Island": {"types": ["Land"], "produces": ["U"], "mana_amount": 1, "mana_cost": ""}}
+    table = Table(seats(), seed=5, first=0, card_lookup=lambda name: told.get(name))
+    runner = ScriptedRunner(table)
+    for seat in range(3):
+        runner.step(seat, "keep")
+    pass_until(table, runner, "main1")
+    red, big = [name for name in hand(table, 0) if "spell" in name][:2]
+    told[red] = {"types": ["Creature"], "keywords": [], "mana_cost": "{R}{R}", "produces": [], "mana_amount": 1}
+    told[big] = {"types": ["Instant"], "keywords": [], "mana_cost": "{2}{R}", "produces": [], "mana_amount": 1}   # castable over the first spell
+    runner.step(0, "play_land", {"card": "@Island"})
+    added = runner.step(0, "act", {"because": "firebending 3", "mutations": [{"op": "mana", "add": "RRR", "until": "end_of_combat"}]})
+    assert added["log"][-1] == "Ann adds {R}{R}{R} (until end of combat) (firebending 3); their mana pool holds {R}{R}{R}." or "holds {R}{R}{R}" in added["log"][-1]
+    assert table.view(1)["seats"][0]["mana_pool"] == "{R}{R}{R}"                                  # everyone can see a mana pool
+    offered = {a["name"]: a for a in table.affordable(0)}
+    assert offered[red]["pool"] == "RR" and offered[red]["tap"] == [] and set(offered) == {red, big}   # the briefing's ready-made payment spends it
+    refused = table.act(0, "cast", {"card": next(c["handle"] for c in table.view(0)["seats"][0]["hand"]["cards"] if c["name"] == red), "payment": {"pool": "RG"}})
+    assert refused["error"]["code"] in ("cannot_pay", "not_in_pool") and table.view(0)["seats"][0]["mana_pool"] == "{R}{R}{R}"   # nothing was spent
+    cast = runner.step(0, "cast", {"card": f"@{red}", "payment": {"pool": "RR"}, "resolves": "auto_permanent"})
+    assert "spending {R}{R} from their mana pool" in cast["log"][0] and table.view(0)["seats"][0]["mana_pool"] == "{R}"
+    assert table.act(0, "cast", {"card": next(c["handle"] for c in table.view(0)["seats"][0]["hand"]["cards"] if c["name"] == big),
+                                 "payment": {"pool": "RR", "tap": [table.view(0)["battlefield"][0]["handle"]]}})["error"]["code"] == "not_in_pool"   # spent twice: the old error
+    pass_until(table, runner, "main2")                                                             # combat is over
+    assert "mana_pool" not in table.view(0)["seats"][0]
+    assert any("Ann's unspent {R} empties from their mana pool." in line for e in table.events for line in e["public"])
+    runner.step(0, "act", {"because": "a ritual", "mutations": [{"op": "mana", "add": "{R}{R}"}, {"mana": {"add": "B", "until": "kept"}}]})
+    runner.step(0, "pass_priority", {"until": "end"})
+    while table.game.turn.step != "end":
+        seat, kind = table.expected()[0]
+        runner.step(seat, "pass_priority")
+    assert table.view(0)["seats"][0]["mana_pool"] == "{B}"                                        # mana an effect says is never lost stays
+    assert table.act(0, "act", {"because": "x", "mutations": [{"op": "mana", "add": "purple"}]})["error"]["code"] == "bad_mana"
+    assert Table.replay(table.config, table.events, card_lookup=table.card_lookup).game.to_dict() == table.game.to_dict()

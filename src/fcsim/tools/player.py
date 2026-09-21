@@ -9,10 +9,11 @@ from ..table import Table
 _HANDLE = {"type": "string", "description": "A handle from get_view, such as \"c12\"."}
 _TARGETS = {"type": "array", "description": "Each target is {\"object\": handle}, {\"seat\": number} or {\"stack_item\": handle}.",
             "items": {"type": "object"}}
-_PAYMENT = {"type": "object", "description": "How the cost is paid. `tap` lists permanents you control to tap for it: the table "
-            "checks that they can make the cost, colors included, and refuses if not. `note` covers anything else (life paid, "
-            "cards discarded, a Treasure sacrificed, a cost reducer); with a note the table leaves the sums to the auditor.",
-            "properties": {"tap": {"type": "array", "items": _HANDLE}, "note": {"type": "string"}}}
+_PAYMENT = {"type": "object", "description": "How the cost is paid. `tap` lists permanents you control to tap for it, and `pool` is "
+            "mana you spend from your mana pool (\"RR\"): the table checks that together they can make the cost, colors included, "
+            "and refuses if not. `note` covers anything else (life paid, cards discarded, a Treasure sacrificed, a cost reducer); "
+            "with a note the table leaves the sums to the auditor.",
+            "properties": {"tap": {"type": "array", "items": _HANDLE}, "pool": {"type": "string"}, "note": {"type": "string"}}}
 _ENTERS = {"type": "object", "description": "How a permanent enters: {\"tapped\": true, \"counters\": {\"+1/+1\": 2}, "
            "\"attached_to\": handle}."}
 MUTATIONS = """\
@@ -34,6 +35,9 @@ roll {sides, count} · flip_coin {count} · designate {key: "monarch" and the li
 commander_damage {seat, commander: handle, amount | set} - only for damage the table did not count itself, or \
 with `set` to correct a wrong total · eliminate {seat, reason}
 extra_turn {seat?} · extra_combat · end_turn · skip_step {step} · remove_from_stack {item: handle}
+mana {add: "RRG", until?: "step" | "end_of_combat" | "end_of_turn" | "kept", seat?} - mana that is made and not spent at once \
+(firebending, a ritual, a Treasure cracked early) goes into your mana pool, which everyone can see; spend it with `pool` in a payment. It \
+empties as the step ends unless `until` says the effect keeps it longer ("kept": it is never lost). `remove` takes mana out again.
 delay {step, text, whose?: "mine" | seat} - a delayed trigger ("return it at the beginning of the next end step", "at the \
 beginning of your next upkeep, sacrifice it"): the table puts it in front of you when that step next begins, on anyone's turn unless \
 `whose` says otherwise, so that you need not remember it. Steps: upkeep, draw, main1, begin_combat, end_combat, main2, end.

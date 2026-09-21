@@ -298,7 +298,12 @@ class Table:
             if obj.tapped:
                 raise TableError("already_tapped", f"{obj.name} is already tapped.")
             obj.tapped = True
+        floating = mana.parse_mana(payment["pool"]) if payment.get("pool") else []
+        if floating is None:
+            raise TableError("bad_mana", "`pool` is the floating mana you spend, such as \"RR\" or \"{R}{R}\".")
+        mana.spend(game, seat, floating)
         parts = ([f"tapping {', '.join(ops._named(o) for o in tapped)}"] if tapped else []) + \
+                ([f"spending {''.join('{' + c + '}' for c in floating)} from their mana pool"] if floating else []) + \
                 ([str(payment["note"])] if payment.get("note") else [])
         return "; ".join(parts)
 
@@ -371,9 +376,10 @@ class Table:
                                         + (", with something on the stack" if game.stack else "") + "). If an effect lets you cast it "
                                         "now, call cast again with `because` naming that effect.")
         payment = args.get("payment") or {}
-        if info and payment.get("tap") and not payment.get("note") and not self._replaying and not face_down:
+        if info and (payment.get("tap") or payment.get("pool")) and not payment.get("note") and not self._replaying and not face_down:
             tax = 2 * game.seats[seat].commander_casts.get(name, 0) if from_command else 0
-            problem = mana.payment_problem(game, seat, info, payment["tap"], x=int(args.get("x") or 0), tax=tax, lookup=self.card_lookup)
+            problem = mana.payment_problem(game, seat, info, payment.get("tap", []), x=int(args.get("x") or 0), tax=tax, lookup=self.card_lookup,
+                                           floating=mana.parse_mana(payment["pool"]) if payment.get("pool") else None)
             if problem:
                 # In the third pod {2}{G}{G} was paid with Swamp, Swamp, Rogue's Passage and a Forest, and the auditor found it a turn later.
                 raise TableError("cannot_pay", f"{name}: {problem} Tap sources that can make it; or if something else pays or "
@@ -638,8 +644,8 @@ class Table:
         held = [(i, 0) for i in me.hand] + [(i, 2 * me.commander_casts.get(game.objects[i].name, 0)) for i in me.command]
         cards = [(game.objects[i].name, self.card_lookup(game.objects[i].name), tax) for i, tax in held]
         by_name = {game.objects[i].name: i for i, _ in reversed(held)}
-        return [{"name": name, "card": handles.of("c", by_name[name]), "tap": [handles.of("c", i) for i in tapped]}
-                for name, tapped in mana.affordable(game, seat, cards, self.card_lookup)]
+        return [{"name": name, "card": handles.of("c", by_name[name]), "tap": [handles.of("c", i) for i in tapped], **({"pool": floating} if floating else {})}
+                for name, tapped, floating in mana.affordable(game, seat, cards, self.card_lookup)]
 
     def proposed_damage(self, viewer: int | None) -> dict | None:
         """This combat damage step as the table works it out, in `viewer`'s handles, with a line of

@@ -339,7 +339,8 @@ class _Pod:
                           describe(view, self.database), "", "YOUR HAND", *(hand or ["(empty)"]),
                           "", "WHAT YOUR UNTAPPED MANA CAN PAY FOR, by the table's count (one at a time; before cost reducers, extra costs, "
                           "Treasures or X), with a payment you can use as it stands:",
-                          *([f"- {a['name']}: cast {{\"card\": \"{a['card']}\", \"payment\": {{\"tap\": {json.dumps(a['tap'])}}}}}"
+                          *([f"- {a['name']}: cast {{\"card\": \"{a['card']}\", \"payment\": "
+                             + json.dumps({"tap": a["tap"], **({"pool": a["pool"]} if a.get("pool") else {})}) + "}"
                              for a in self.table.affordable(seat)] or ["- nothing"]),
                           *(["", "YOUR TRIGGERS WAITING TO GO ON THE STACK", *waiting] if waiting else []),
                           *(["", "QUESTIONS FOR YOU", *asked] if asked else []),
