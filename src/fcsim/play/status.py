@@ -23,7 +23,8 @@ def status(game_dir: str | Path) -> dict:
     names = config.get("seats") or [seat["name"] for seat in config["table"]["seats"]]
     state = directory.read("state.json") if (directory.path / "state.json").is_file() else None
     rows = [row for index in range(len(names)) for row in _lines(directory.path / f"transcript-seat-{index}.jsonl")]
-    wakes = [r for r in rows if r.get("kind") != "triage" and "seconds" in r]
+    wakes = [r for r in rows if "tool_calls" in r and "seconds" in r]  # the other rows are tool-less questions
+    talk = [r for r in rows if r.get("kind") == "reply"]
     triage = [r for r in rows if r.get("kind") == "triage"]
     checks = _lines(directory.path / "audits.jsonl")
     audits = [a for a in checks if "kind" not in a]
@@ -58,6 +59,8 @@ def status(game_dir: str | Path) -> dict:
             "rejected_calls": dict(Counter(e["error"] for w in wakes for e in w["tool_errors"])),
             "wakes_the_driver_finished": sum(1 for w in wakes if w.get("forced") or w.get("forced_to_end")),
             "triage_questions": len(triage), "triage_said_respond": sum(1 for t in triage if t["respond"]),
+            "triage_seconds": round(sum(t.get("seconds") or 0 for t in triage)),
+            "talk_questions": len(talk), "talk_answered": sum(1 for t in talk if t["reply"]), "talk_seconds": round(sum(t["seconds"] for t in talk)),
             "audits": len(audits), "audit_seconds": round(sum(a.get("seconds") or 0 for a in audits)),
             "refreshes": len(refreshes), "refresh_seconds": round(sum(a.get("seconds") or 0 for a in refreshes)),
             "rulings": len(rulings), "ruling_seconds": round(sum(a.get("seconds") or 0 for a in rulings)),
@@ -81,7 +84,8 @@ def render(report: dict) -> str:
     lines += ["", f"TIME  {time['wakes']} wakes, {time['wake_seconds']}s of model time ({time['seconds_per_wake']}s each), "
                   f"{time['tool_calls']} tool calls; {time['audits']} audits, {time['audit_seconds']}s; "
                   + (f"{time['refreshes']} power/toughness checks before blocks, {time['refresh_seconds']}s; " if time["refreshes"] else "") +
-                  f"{time['triage_questions']} respond-or-pass questions ({time['triage_said_respond']} said respond)",
+                  f"{time['triage_questions']} respond-or-pass questions ({time['triage_said_respond']} said respond), {time['triage_seconds']}s"
+                  + (f"; {time['talk_questions']} questions at the table ({time['talk_answered']} answered), {time['talk_seconds']}s" if time["talk_questions"] else ""),
               f"  {time['wakes_that_only_looked_and_passed']} wakes only looked and passed ({time['their_seconds']}s); "
               f"{time['wakes_the_driver_finished']} the driver had to finish; rejected calls {time['rejected_calls'] or 'none'}",
               "  calls: " + ", ".join(f"{tool} {n}" for tool, n in time["calls_by_tool"].items()),

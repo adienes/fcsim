@@ -604,6 +604,8 @@ def test_a_player_spoken_to_by_name_answers_before_the_speaker_acts(database, tm
     log = (Path(report["directory"]) / "log.md").read_text()
     assert log.index("Talrand (to Pir, Thrasios): Pir, Thrasios: truce") < log.index("Pir (to Talrand): Deal, for two turns.")
     assert [(t["seat"], t["reply"]) for t in report["talk"]] == [(1, "Deal, for two turns."), (2, "")]
+    from fcsim.play.status import render, status
+    assert "2 questions at the table (1 answered)" in render(status(report["directory"]))
     asked = next(p for p in seats[1].prompts if "has just said to you" in p)
     assert "You are not acting now, only talking." in asked and "YOUR HAND" in asked
 
