@@ -623,7 +623,10 @@ class _Pod:
         past = Table.replay(self.table.config, events[:since], card_lookup=self.table.card_lookup)
         return self.auditor.snapshot(past)
 
-    def audit(self, server: McpServer, snapshot: tuple) -> None:
+    def audit(self, server: McpServer, snapshot: tuple, *, losing: list[tuple[int, str]] | None = None) -> None:
+        """`losing` are the seats the driver will remove once this audit is over, which is why it was called. The first
+        game played with that audit had two findings that a player "has lost the game and is still listed as alive", and a
+        correction opened for each that nobody could make: the auditor was looking at what the driver was about to do."""
         gone = self.table.undone(self.table.events)
         unit = [e for e in self.table.events[snapshot[2]:] if e["n"] not in gone]
 
@@ -654,7 +657,14 @@ class _Pod:
             return
         actions = sum(1 for e in unit if e["seat"] is not None and e["tool"] not in ("pass_priority", "say", "write_notes", "set_response_policy"))
         self.echo(f"         auditing {actions} actions ...")
-        verdict, reply = self.auditor.audit(self.table, snapshot)
+        note = ("The table is about to remove " + "; ".join(f"{self.names[seat]} ({reason})" for seat, reason in losing) + " from the game as a state-based "
+                "action. Nothing brings a player back, so the turn so far is checked first: say whether what led to it was played correctly. Do not "
+                "report that they are still in the game; that is what happens next.") if losing else ""
+        verdict, reply = self.auditor.audit(self.table, snapshot, note=note)
+        if losing:  # whatever the note said: a finding that the player about to go has not gone yet is no finding
+            leaving = {seat for seat, _ in losing}
+            verdict["findings"] = [f for f in verdict.get("findings", []) if not (f.get("kind") == "sba" and f.get("seat") in leaving)]
+            verdict["verdict"] = "findings" if any(f.get("kind") in SERIOUS for f in verdict["findings"]) else "ok"
         record = {"turn": self.table.game.turn.number, "events": [snapshot[2], len(self.table.events)], **verdict, "seconds": round(reply.seconds, 1)}
         self.report["audits"].append(record)
         self.directory.append("audits.jsonl", record)
@@ -933,7 +943,7 @@ class _Pod:
                             # table's own bug dealt twice; the audit a turn later had the damage undone, and no tool could bring
                             # the player back. So the turn so far is audited before anybody goes, while it can still be put right.
                             self.table.checkpoint()
-                        self.audit(server, snapshot)
+                        self.audit(server, snapshot, losing=_must_lose(self.table) if why == "loss" else None)
                         self.table.release()
                         snapshot = self.auditor.snapshot(self.table)
                         self.cleared = len(self.table.events)  # if the loss still stands with nothing new to read, it is applied

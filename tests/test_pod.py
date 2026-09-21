@@ -1123,12 +1123,15 @@ def test_the_turn_so_far_is_audited_and_put_right_before_the_driver_removes_a_pl
         return [(0, "test"), (2, "test")] if acted and table.game.control.kind != "over" and table.game.seats[0].status == "alive" else []
     monkeypatch.setattr(pod, "_must_lose", two_lose_in_the_second_turn)
     finding = {"kind": "misresolved", "seat": 1, "summary": "the damage was dealt twice", "basis": "test", "fix": "undo it", "confidence": "high"}
-    last = {"verdict": "findings", "findings": [finding], "hooks": []} if held else OK
+    still_here = {"kind": "sba", "seat": 0, "summary": "Talrand has lost the game and is still listed as alive", "basis": "704.5a", "fix": "remove Talrand", "confidence": "high"}
+    last = {"verdict": "findings", "findings": [finding, still_here], "hooks": []} if held else {"verdict": "findings", "findings": [still_here], "hooks": []}
     auditor = FakeRunner([OK, last] + [OK] * 5, budget)
     report = play_pod(decks(tmp_path), [ScriptedSeat(budget, fidgets=True) for _ in range(3)], auditor, database, cycles=3, seed=4,
                       out_root=tmp_path / "games", echo=lambda *_: None)
     assert report["winner"] == "Pir" and report["stopped"] is None and report["journal"] == "replays to the same game"
     assert "Tapping and untapping my land" in auditor.asked[1]["prompt"]          # the turn so far, read before anybody goes
+    assert "WHY YOU ARE ASKED NOW\nThe table is about to remove Talrand (test); Thrasios (test)" in auditor.asked[1]["prompt"]
+    assert "still listed as alive" not in json.dumps(report["audits"]) and "correct the table: Talrand has lost" not in (Path(report["directory"]) / "log.md").read_text()
     log = (Path(report["directory"]) / "log.md").read_text()
     if held:
         assert log.index("The auditor asks Pir to correct the table: the damage was dealt twice") < log.index("Talrand is out of the game")
