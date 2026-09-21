@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .cardlog import card_record
 from .rubric import measure
+from .status import status
 
 
 def aggregate(game_dirs: list[str | Path]) -> dict:
@@ -16,7 +17,7 @@ def aggregate(game_dirs: list[str | Path]) -> dict:
         scored, seen = measure(game_dir), card_record(game_dir)
         verdicts = {s["measure"]: s["verdict"] for s in scored["scores"]}
         games.append({"directory": Path(scored["directory"]).name, "rounds": scored["rounds"], "over": scored["over"],
-                      "winner": scored["winner"], "verdicts": verdicts})
+                      "winner": scored["winner"], "verdicts": verdicts, "pace": _pace(game_dir)})
         for index, seat in enumerate(scored["seats"]):
             deck = decks.setdefault(seat["name"], {"games": 0, "wins": 0, "turns": 0, "idle_turns": 0, "spells": 0, "damage_to_players": 0,
                                                    "aimed_at_others": 0, "responses": 0, "left_in_rounds": []})
@@ -37,11 +38,25 @@ def aggregate(game_dirs: list[str | Path]) -> dict:
     return {"games": games, "decks": decks, "cards": cards, "verdicts": tally}
 
 
+def _pace(game_dir: str | Path) -> dict:
+    """What a game cost in the models' own time, which games played side by side do not share the
+    way they share the clock on the wall: a batch's games are compared by this, not by when they ended."""
+    told = status(game_dir)
+    time, turns = told["time"], max(told["at"]["table_turn"], 1)
+    seconds = sum(time[key] for key in ("wake_seconds", "audit_seconds", "refresh_seconds", "ruling_seconds", "triage_seconds", "talk_seconds"))
+    return {"table_turns": turns, "model_seconds": seconds, "seconds_per_turn": round(seconds / turns), "wakes_per_turn": round(time["wakes"] / turns, 1),
+            "audits": time["audits"], "findings": len(told["findings"]), "rulings": time["rulings"]}
+
+
 def render(report: dict, *, deck: str | None = None) -> str:
     n = len(report["games"])
     lines = [f"{n} game(s). With so few, read these as observations, not rates.", "",
-             "GAMES"] + [f"  {g['directory'][:60]:<60}  {g['rounds']:>2} rounds  " + (f"won by {g['winner']}" if g["winner"] else "unfinished")
+             "GAMES"] + [f"  {g['directory'][-5:]}  {g['directory'][:-5][:56]:<56}  {g['rounds']:>2} rounds  " + (f"won by {g['winner']}" if g["winner"] else "unfinished")
                          for g in report["games"]]
+    lines += ["", "PACE    in the models' own seconds, so games played side by side compare",
+              "  game   table turns  seconds a turn  wakes a turn  audits  findings  rulings"]
+    lines += [f"  {g['directory'][-5:]:<7}{p['table_turns']:>11}{p['seconds_per_turn']:>16}{p['wakes_per_turn']:>14}{p['audits']:>8}{p['findings']:>10}{p['rulings']:>9}"
+              for g in report["games"] for p in [g["pace"]]]
     lines += ["", "RUBRIC  how many games got each verdict"]
     lines += [f"  {measure_:<17}" + "  ".join(f"{verdict} {count}" for verdict, count in sorted(row.items())) for measure_, row in report["verdicts"].items()]
     lines += ["", "DECKS   games  wins  turns  idle  spells  damage to players  aimed at others  at instant speed  left in round"]

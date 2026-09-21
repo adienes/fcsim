@@ -680,6 +680,8 @@ def test_several_games_are_reported_side_by_side_with_their_sample_size(combat_g
     assert main(["report", directory, "--deck", "thras"]) == 0
     out = capsys.readouterr().out
     assert "1 game(s). With so few" in out and "CARDS Thrasios saw" in out and "CARDS Talrand saw" not in out
+    pace = report["games"][0]["pace"]   # in the models' own time, so games played side by side compare
+    assert pace["table_turns"] >= 1 and pace["seconds_per_turn"] == round(pace["model_seconds"] / pace["table_turns"]) and "PACE" in out
 
 
 def test_several_games_of_one_pod_are_child_processes_with_their_own_seeds(combat_game, monkeypatch, capsys, tmp_path):
