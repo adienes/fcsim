@@ -130,13 +130,15 @@ PLAYER_TOOLS = [
           {"text": {"type": "string"}, "to": {"type": "array", "items": {"type": "integer"}, "description": "Seats addressed."}}, ("text",)),
     _tool("set_response_policy", "Tell the table, privately, whether to ask you each time another player puts something "
           "on the stack. \"pass_always\" passes for you every time; \"pass_unless_targeted\" passes unless the spell or "
-          "ability targets you or something you control; \"ask\" (the default) asks every time. It lasts until your next "
+          "ability targets you or something you control; \"ask\" (the default) asks about every spell and activated ability, and "
+          "about a triggered ability only if it targets you or yours; \"ask_everything\" asks about every triggered ability too "
+          "(you hold something that answers them). It lasts until your next "
           "turn begins. Use it when you are tapped out or hold nothing to respond with: being asked costs time and "
           "changes nothing. Blocks, triggers and questions still come to you, and unless you pass always you are still "
           "asked when creatures attack and when blocks are declared. Set `hold_for_end_step` when you hold an instant, a "
           "flash card or an ability you mean to use at the end of the turn before yours: the table otherwise passes for "
           "you whenever the stack is empty on another player's turn.",
-          {"policy": {"type": "string", "enum": ["ask", "pass_unless_targeted", "pass_always"]},
+          {"policy": {"type": "string", "enum": ["ask", "ask_everything", "pass_unless_targeted", "pass_always"]},
            "hold_for_end_step": {"type": "boolean"}}, ("policy",)),
     _tool("contest", "Only when the auditor has asked you to correct the table and you are sure it is wrong: say why, quoting "
           "the card text or the rule. An independent judge rules, and the ruling is final: if it goes against you, you make "

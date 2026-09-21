@@ -649,8 +649,8 @@ class Table:
 
     def _do_set_response_policy(self, game: Game, seat: int, args: dict):
         policy = args.get("policy")
-        if policy not in ("ask", "pass_unless_targeted", "pass_always"):
-            raise TableError("bad_policy", "The policy is \"ask\", \"pass_unless_targeted\" or \"pass_always\".")
+        if policy not in ("ask", "ask_everything", "pass_unless_targeted", "pass_always"):
+            raise TableError("bad_policy", "The policy is \"ask\", \"ask_everything\", \"pass_unless_targeted\" or \"pass_always\".")
         game.seats[seat].response_policy = policy
         told = [f"Until your next turn, when others put something on the stack: {policy.replace('_', ' ')}."]
         if "hold_for_end_step" in args:

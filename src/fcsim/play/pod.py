@@ -78,7 +78,7 @@ tools and reply with one or two sentences on what you did and why; only you will
 
 _TRIAGE = {"type": "object", "additionalProperties": False, "required": ["respond", "ask_again", "why"],
            "properties": {"respond": {"type": "boolean"}, "ask_again": {"type": "boolean"},
-                          "policy": {"type": "string", "enum": ["ask", "pass_unless_targeted", "pass_always"]},
+                          "policy": {"type": "string", "enum": ["ask", "ask_everything", "pass_unless_targeted", "pass_always"]},
                           "why": {"type": "string", "description": "One short sentence."}}}
 _OPENING = {"type": "object", "additionalProperties": False, "required": ["keep", "bottom", "why"],
             "properties": {"keep": {"type": "boolean"}, "why": {"type": "string", "description": "One short sentence."},
@@ -225,6 +225,7 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
                                         [{k: (obj.controller if v == "its controller" else v) for k, v in h.items()} for h in known_hooks[obj.name]])
                 except ValueError:
                     pass
+    greeted: set[int] = set()  # permanents whose controller has had its chance to see to them on someone else's turn
     windows: dict = {}  # (table turn, step) -> the seats that said they would act in that empty-stack window
     stamped: list = [None]  # what the battlefield looked like when power and toughness were last worked out
     report: dict = {"directory": str(directory.path), "seed": seed, "seats": names, "stopped": None,
@@ -362,7 +363,7 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
             answers[seat] = bool(data.get("respond"))
             if not answers[seat]:  # asked again by default: a player who says nothing about the rest has only passed once
                 waived[seat] = {top.id} if data.get("ask_again", True) else {item.id for item in game.stack}
-                if data.get("policy") in ("pass_unless_targeted", "pass_always"):
+                if data.get("policy") in ("ask_everything", "pass_unless_targeted", "pass_always"):
                     table.act(seat, "set_response_policy", {"policy": data["policy"]})
             record = {"turn": game.turn.number, "seat": seat, "respond": answers[seat], "why": data.get("why", ""),
                       "about": top.source_name, "stack": len(game.stack), "ask_again": bool(data.get("ask_again", True)),
@@ -656,6 +657,19 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
                         return "wake"  # its wake takes it off the list: if it passes after all, the window is over for it
                     windows[key].discard(seat)
                     return "yours"
+            if kind == "priority" and not game.stack and seat != game.turn.active:
+                # A permanent of theirs has arrived on somebody else's turn (a flash creature, a token maker): the driver
+                # is about to pass for them, and its "when this enters" would wait for the audit. In the fifth pod
+                # Aang, Swift Savior came in during an attack and its controller never got to stack the trigger.
+                arrived = [o for o in (game.objects[i] for i in game.battlefield) if o.controller == seat and o.id not in greeted
+                           and o.entered_turn == game.turn.number and o.token is None
+                           and not any(e.get("source") == o.id for e in game.ledger)
+                           and not ((card := database.find(o.name)) is not None and _needs_nothing_written(card, known_hooks))]
+                greeted.update(o.id for o in game.objects.values() if o.controller == seat and o.zone == "battlefield")
+                if arrived:
+                    if seat != me:
+                        return "wake"
+                    return "yours"
             if kind == "priority" and not game.stack and (quiet_step or seat != game.turn.active):
                 # Nothing to respond to on someone else's turn; and nothing waiting in one's own
                 # upkeep or draw step, or the table would be asking for a trigger, not priority. That
@@ -907,10 +921,12 @@ def _window(table: Table, seat: int) -> str | None:
 def _wants_asking(table: Table, seat: int) -> bool:
     """Whether to ask this seat if it responds to the top of the stack, given its standing policy."""
     game = table.game
-    policy = game.seats[seat].response_policy
-    if policy == "pass_unless_targeted":
-        return any(t.get("seat") == seat or (t.get("obj") in game.objects and game.objects[t["obj"]].controller == seat)
-                   for t in game.stack[-1].targets)
+    policy, top = game.seats[seat].response_policy, game.stack[-1]
+    at_me = any(t.get("seat") == seat or (t.get("obj") in game.objects and game.objects[t["obj"]].controller == seat) for t in top.targets)
+    if policy == "pass_unless_targeted" or (policy == "ask" and top.kind == "triggered"):
+        # A triggered ability that points at nothing of theirs: in the fifth pod that was most of 107 questions,
+        # and nobody answered one. A player who holds a Stifle says so with the policy "ask_everything".
+        return at_me
     return policy != "pass_always"
 
 

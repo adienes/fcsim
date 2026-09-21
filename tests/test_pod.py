@@ -43,10 +43,11 @@ class ScriptedSeat:
     def __init__(self, budget: Budget, *, cast_commander: bool = False, with_trigger: bool = False, triage: dict | None = None,
                  attack: int | None = None, contests: bool = False, disputes: str = "", mulligans: int = 0, bottoms: bool = True,
                  acts: bool = False, holds: bool = False, fidgets: bool = False, asks: str = "", answers: str = "",
-                 blinks: bool = False):
+                 blinks: bool = False, policy: str = ""):
         self.budget, self.prompts, self.cast_commander, self.attack, self.contests = budget, [], cast_commander, attack, contests
         self.disputes, self.mulligans, self.bottoms, self.acts, self.holds = disputes, mulligans, bottoms, acts, holds
         self.asks, self.answers, self.heard = asks, answers, []   # a question for seat 1, once; what this seat says when spoken to
+        self.policy = policy    # a standing response policy, set again on each of its own turns (the table resets it there)
         self.blinks = blinks    # once, returns its commander to the command zone, to be cast again
         self.fidgets = fidgets  # does something auditable each turn: a basic land alone is not sent to the auditor
         self.with_trigger, self.triage = with_trigger, triage or {}   # a made-up trigger on top of the commander; triage answers
@@ -89,6 +90,8 @@ class ScriptedSeat:
             if self.disputes and waiting_for == "priority":
                 tool("dispute", claim=self.disputes)
                 self.disputes = ""
+            if self.policy and waiting_for == "priority" and view["turn"]["active"] == me and view["seats"][me]["response_policy"] != self.policy:
+                tool("set_response_policy", policy=self.policy)
             if self.holds and waiting_for == "priority" and view["turn"]["active"] == me and not view["seats"][me]["holds_for_end_step"]:
                 tool("set_response_policy", policy="ask", hold_for_end_step=True)
             if self.asks and waiting_for == "priority" and view["turn"]["active"] == me:
@@ -175,7 +178,7 @@ def test_a_pod_game_schedules_seats_audits_and_acts_on_findings(database, tmp_pa
             "transcript-seat-0.jsonl", "transcript-seat-2.jsonl"} <= {p.name for p in directory.iterdir()}
     assert "| Talrand | alive | 39 |" in (directory / "report.md").read_text()
     later = [p for p in seats[0].prompts if "Since your last wake:" in p and "Pir plays Forest" in p]
-    assert sum(p.count("Pir plays Forest") for p in later) == 2   # each of Pir's land plays reaches Talrand exactly once
+    assert later and all(p.count("Pir plays Forest") == 1 for p in later)   # a land play of Pir's reaches Talrand once, never twice
 
 
 def test_a_pod_game_stops_at_its_budget(database, tmp_path):
@@ -373,7 +376,9 @@ def test_notes_and_a_response_policy_can_still_be_saved_after_a_wake_has_ended()
 @pytest.mark.parametrize("answer, questions", [({}, 4), ({"ask_again": True}, 4), ({"ask_again": False}, 2)])
 def test_one_answer_can_cover_everything_on_the_stack(database, tmp_path, answer, questions):
     budget = Budget(max_calls=400)
-    seats = [ScriptedSeat(budget, cast_commander=True, with_trigger=True), ScriptedSeat(budget, triage=answer), ScriptedSeat(budget, triage=answer)]
+    # Untargeted triggers are not asked about by default; these two players say they want to be ("ask_everything").
+    seats = [ScriptedSeat(budget, cast_commander=True, with_trigger=True), ScriptedSeat(budget, triage=answer, policy="ask_everything"),
+             ScriptedSeat(budget, triage=answer, policy="ask_everything")]
     report = play_pod(decks(tmp_path), seats, FakeRunner([OK] * 120, budget), database, cycles=5, seed=4,
                       out_root=tmp_path / "games", echo=lambda *_: None)
     assert report["stopped"] is None and report["standings"][0]["commander_casts"] == {"Talrand, Sky Summoner": 1}
@@ -387,7 +392,8 @@ def test_one_answer_can_cover_everything_on_the_stack(database, tmp_path, answer
 
 def test_a_triage_answer_can_set_a_standing_policy(database, tmp_path):
     budget = Budget(max_calls=400)
-    seats = [ScriptedSeat(budget, cast_commander=True, with_trigger=True), ScriptedSeat(budget, triage={"policy": "pass_always"}), ScriptedSeat(budget)]
+    seats = [ScriptedSeat(budget, cast_commander=True, with_trigger=True), ScriptedSeat(budget, triage={"policy": "pass_always"}, policy="ask_everything"),
+             ScriptedSeat(budget, policy="ask_everything")]
     report = play_pod(decks(tmp_path), seats, FakeRunner([OK] * 120, budget), database, cycles=5, seed=4,
                       out_root=tmp_path / "games", echo=lambda *_: None)
     assert report["stopped"] is None
@@ -761,3 +767,12 @@ def test_the_seating_can_be_drawn_from_the_seed_as_well_as_who_goes_first(databa
     again = play_pod(decks(tmp_path), [ScriptedSeat(Budget(max_calls=60)) for _ in range(3)], FakeRunner([OK] * 20), database, cycles=1, seed=3,
                      out_root=tmp_path / "games", echo=lambda *_: None, shuffle_seats=True)
     assert tuple(again["seats"]) in seatings                                                        # a seed repeats its seating
+
+
+def test_an_untargeted_trigger_is_not_asked_about_unless_a_player_wants_everything(database, tmp_path):
+    budget = Budget(max_calls=400)
+    seats = [ScriptedSeat(budget, cast_commander=True, with_trigger=True), ScriptedSeat(budget), ScriptedSeat(budget, policy="ask_everything")]
+    report = play_pod(decks(tmp_path), seats, FakeRunner([OK] * 120, budget), database, cycles=5, seed=4, out_root=tmp_path / "games", echo=lambda *_: None)
+    about = [(t["seat"], t["about"]) for t in report["triage"]]
+    assert (2, "a triggered ability") in about and (1, "a triggered ability") not in about        # Pir is asked about the spell only
+    assert (1, "Talrand, Sky Summoner") in about and (2, "Talrand, Sky Summoner") in about
