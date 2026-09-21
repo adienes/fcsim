@@ -41,7 +41,8 @@ Start from HOW THIS SEAT WAS PILOTED, MEASURED. It is where a pilot's mistakes s
 opinion: the hand it kept (the first mulligan in Commander is free: a seven with two lands and \
 nothing cheap is rarely a keep), the land drops it missed afterwards, the turns it ended with mana \
 untapped beside a card it could have cast, the turns it had attackers and sent none, or kept them \
-home from a player with no untapped blocker. Each of those is a lesson only if the pilot had no good \
+home from a player with no untapped blocker, and the turns it sent everything and what the table \
+took from it before it untapped again. Each of those is a lesson only if the pilot had no good \
 reason at the time (a held instant, a swing into first strikers): read what it said it was doing, \
 and say which it was. A loss that followed from a hand that should have gone back teaches about \
 mulligans, not about the cards that were stuck in it. Under `piloting`, go through every game first \

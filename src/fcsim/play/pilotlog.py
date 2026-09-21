@@ -47,6 +47,8 @@ def pilot_record(game_dir: str | Path) -> dict:
         quick = [name for name in castable if "Instant" in told(name).get("types", []) or "Flash" in told(name).get("keywords", [])]
         row["castable_left"], row["castable_left_at_instant_speed"] = [name for name in castable if name not in quick], quick
         row["hand_at_end"] = len(game.seats[seat].hand)
+        row["creatures_left_untapped"] = sum(1 for obj in mine if creature(obj) and not obj.tapped)  # what stands between it and three opponents
+        row["life_at_end"] = game.seats[seat].life
 
     def before(table: Table, event: dict) -> None:
         game = table.game
@@ -98,15 +100,21 @@ def pilot_record(game_dir: str | Path) -> dict:
     for seat in table.game.seats:  # whoever left during the last event
         if seat.status != "alive" and seats[seat.index]["left"] is None:
             seats[seat.index]["left"] = {"turn": table.game.turn.number, "round": max(seat.turns_taken, 1), "on_the_turn_of": names[table.game.turn.active]}
-    for seat in seats:
+    for index, seat in enumerate(seats):
         turns = seat["turns"]
+        for turn, later in zip(turns, [*turns[1:], None], strict=True):  # what the table did to it before it next untapped
+            after = later["life"] if later else table.game.seats[index].life
+            if "life_at_end" in turn:
+                turn["life_lost_before_next_turn"] = max(turn["life_at_end"] - after, 0)
         seat["totals"] = {
             "turns": len(turns),
             "land_drops_missed_in_first_six": sum(1 for t in turns if t["round"] <= 6 and not t["played_land"]),
             "turns_ended_with_a_castable_card_and_the_mana_for_it": sum(1 for t in turns if t.get("castable_left")),
             "turns_with_attackers_held_back_from_a_player_without_blockers": sum(
                 1 for t in turns if len(t["could_attack"] or []) > t["attacked_with"] and any(n == 0 for n in t["untapped_blockers"].values())),
-            "turns_with_attackers_and_no_attack": sum(1 for t in turns if (t["could_attack"] or []) and not t["attacked_with"])}
+            "turns_with_attackers_and_no_attack": sum(1 for t in turns if (t["could_attack"] or []) and not t["attacked_with"]),
+            "turns_ended_with_creatures_but_none_untapped": sum(1 for t in turns if t["attacked_with"] and t.get("creatures_left_untapped") == 0),
+            "life_lost_after_such_turns": sum(t.get("life_lost_before_next_turn", 0) for t in turns if t["attacked_with"] and t.get("creatures_left_untapped") == 0)}
     return {"directory": str(directory.path), "seats": seats}
 
 
@@ -123,6 +131,8 @@ def render_pilot(record: dict, seat: int) -> str:
         lines.append(f"  round {t['round']} (table turn {t['turn']}): {t['life']} life, {t['hand']} in hand, {t['lands']} land(s) and {t['other_sources']} other mana "
                      f"source(s) as it began; {'played a land' if t['played_land'] else 'NO LAND PLAYED'}; cast {', '.join(t['cast']) or 'nothing'}; "
                      f"could attack with {len(t['could_attack'] or [])}, attacked with {t['attacked_with']}" + (f" (untapped blockers: {blockers})" if t["could_attack"] else "")
+                     + (f"; left {t['creatures_left_untapped']} creature(s) untapped and lost {t.get('life_lost_before_next_turn', 0)} life before its next turn"
+                        if "creatures_left_untapped" in t else "")
                      + f"; ended with {t.get('untapped_sources', '?')} mana source(s) untapped"
                      + (f" and could still have cast {', '.join(t['castable_left'])}" if t.get("castable_left") else "")
                      + (f" (held at instant speed: {', '.join(t['castable_left_at_instant_speed'])})" if t.get("castable_left_at_instant_speed") else ""))
@@ -131,5 +141,7 @@ def render_pilot(record: dict, seat: int) -> str:
     lines.append(f"  in all: {totals['turns']} turns; {totals['land_drops_missed_in_first_six']} land drop(s) missed in the first six; "
                  f"{totals['turns_ended_with_a_castable_card_and_the_mana_for_it']} turn(s) ended with a castable card and the mana for it; "
                  f"{totals['turns_with_attackers_and_no_attack']} turn(s) with attackers and no attack; "
-                 f"{totals['turns_with_attackers_held_back_from_a_player_without_blockers']} turn(s) when attackers stayed home though some player had no untapped blocker")
+                 f"{totals['turns_with_attackers_held_back_from_a_player_without_blockers']} turn(s) when attackers stayed home though some player had no untapped blocker; "
+                 f"{totals['turns_ended_with_creatures_but_none_untapped']} turn(s) it attacked and left no creature untapped, losing {totals['life_lost_after_such_turns']} life "
+                 "in all before its next turns")
     return "\n".join(lines)

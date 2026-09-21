@@ -1201,6 +1201,9 @@ def test_how_each_seat_was_piloted_is_measured_from_the_journal(combat_game):
     quiet = thrasios["totals"]                                                                                # the seat that only plays lands
     assert quiet["turns_with_attackers_and_no_attack"] == 0 and sum(t["attacked_with"] for t in thrasios["turns"]) == 0
     assert all("untapped_sources" in t for t in pir["turns"][:-1])                                            # every finished turn says what it left untapped
+    swung = [t for t in talrand["turns"] if t["attacked_with"]]                                               # and what attacking cost: who stayed home, what came back
+    assert swung and all(t["creatures_left_untapped"] == 0 and t["life_lost_before_next_turn"] >= 0 for t in swung if "creatures_left_untapped" in t)
+    assert talrand["totals"]["turns_ended_with_creatures_but_none_untapped"] >= 1
     told = render_pilot(record, 0)
     assert "opening hand kept after 0 mulligan(s):" in told and "could attack with" in told and "in all:" in told
 
