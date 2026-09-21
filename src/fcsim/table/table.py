@@ -10,7 +10,7 @@ from __future__ import annotations
 import copy
 from collections.abc import Callable
 
-from . import mana, mechanics, mutations, ops, turn
+from . import mana, mechanics, mutations, ops, triggers, turn
 from .model import MECHANICS, STEPS, Dice, Game, Obj, Seat, StackItem, TableError
 from .views import Handles, obj_view, view
 
@@ -515,6 +515,7 @@ class Table:
                 raise TableError("say_why", f"{problem} If an effect allows this block all the same, declare your blocks again with "
                                             "`because` naming that effect; nothing has been declared.")
             game.turn.blockers.append({"blocker": blocker.id, "attacker": block["attacker"]})
+            game.facts.append(triggers.fact("blocks", name=blocker.name, controller=seat, obj=blocker))
             names.append(f"{ops._named(blocker)} blocks {ops._named(mutations.get(game, block['attacker']))}")
         turn.turn_action_done(game)
         return ops.Told(public=[f"{self._name(seat)}: {', '.join(names) or 'no blocks'}."])
@@ -538,19 +539,23 @@ class Table:
                 player.life -= amount
                 told.public.append(f"{ops._named(source)} deals {amount} to {player.name} ({player.life} life).")
                 if amount:
-                    game.facts.append({"event": "combat_damage", "id": source.id, "old_id": None, "name": source.name, "type_line": source.type_line,
-                                       "controller": source.controller, "was_controller": source.controller, "token": source.token is not None,
-                                       "to_player": player.index})
+                    game.facts.append(triggers.fact("damage", name=source.name, controller=source.controller, obj=source, to="player",
+                                                    to_player=player.index, amount=amount, combat=True))
+                    game.facts.append(triggers.fact("life", name=player.name, controller=player.index, delta=-amount))
                 if source.is_commander and amount:
                     ops.apply_op(game, self.dice, seat, {"op": "commander_damage", "seat": player.index,
                                                          "commander": source.id, "amount": amount}, told)
             else:
                 victim = mutations.get(game, hit["target"]["obj"])
                 victim.damage += amount
+                if amount:
+                    game.facts.append(triggers.fact("damage", name=source.name, controller=source.controller, obj=source, to="permanent",
+                                                    target_id=victim.id, amount=amount, combat=True))
                 told.public.append(f"{ops._named(source)} deals {amount} to {ops._named(victim)}.")
         if proposal:
             for who, amount in proposal["gains"].items():
                 game.seats[who].life += amount
+                game.facts.append(triggers.fact("life", name=game.seats[who].name, controller=who, delta=amount))
                 told.public.append(f"{game.seats[who].name} gains {amount} life (lifelink) and is at {game.seats[who].life}.")
             for obj_id in proposal["deaths"]:
                 dead = game.objects[obj_id]
@@ -785,7 +790,7 @@ class Table:
             entry = {"kind": hook["kind"], "text": str(hook.get("text", "")), "source": source.id,
                      "controller": hook.get("controller", source.controller)}
             if hook["kind"] == "event_trigger" and isinstance(hook.get("on"), dict):
-                entry["on"] = {k: hook["on"][k] for k in ("event", "who", "type", "nontoken", "other", "from", "self", "nonland", "once") if k in hook["on"]}
+                entry["on"] = {k: v for k, v in hook["on"].items() if isinstance(v, (str, int, bool, list))}  # a pattern over facts: see `triggers`
             if hook["kind"] == "hold":
                 entry |= {"step": hook.get("step"), "seat": hook.get("seat", source.controller)}
             elif hook["kind"] == "step_trigger":

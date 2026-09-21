@@ -82,21 +82,24 @@ step "loss" for an effect that stops a player losing the game (Platinum Angel): 
 otherwise removes a player at 0 life, 10 poison, 21 commander damage or a draw from an empty library.
 - step_trigger: an ability that triggers at the beginning of a step. step is one of upkeep, \
 draw, main1, begin_combat, end_combat, main2, end; whose is "each" or a seat number.
-- event_trigger: an ability that triggers on a game event, described in text. Also give `on`, so \
-that the table can put the trigger in front of its controller the moment the event happens: \
-`event` is cast, enters, dies, leaves, attacks, milled (a card goes from a library to a graveyard; \
-`who` is whose library) or deals_combat_damage (a creature deals combat damage to a player); `who` \
-is "you" (the permanent's controller cast the spell or controlled the object), "opponent" or "any"; `type` is a word that must be in the \
-object's type line, such as Creature, Dragon, Zombie or Instant; `nontoken` is true if tokens do \
-not count; `nonland` is true if lands do not count; `once` is true if the ability says "one or \
-more", so that it triggers once however many cards or creatures did it together; `other` is true \
-if the ability says "another"; `self` is true if the ability triggers \
-only on the permanent itself ("whenever this creature attacks", "when The Wise Mothman enters or \
-attacks", "when this dies"): without it the table offers the trigger every time anything attacks, \
-enters or dies. Always give `on` when the event is one of the five; `from` is the zone a spell must be cast \
-from or a permanent must enter from, when the ability names one (hand, exile, graveyard, command, \
-library; a permanent spell that resolves enters from the stack). Leave `on` out when the trigger does not \
-fit these words, and describe it in text alone.
+- event_trigger: an ability that triggers on something happening, described in `text`. Also give \
+`on`, a pattern over what the table sees happen, so that it can put the trigger in front of its \
+controller the moment it does. The table sees only these things, and every condition is a pattern \
+over them: `moved` (a card or token changes zones: give `from` and `to`, each one of library, hand, \
+battlefield, graveyard, exile, stack, command), `cast`, `attacks`, `blocks`, `damage` (`combat` true \
+or false; `to` is "player" or "permanent"), `life` and `counters` (`sign` is "gain" or "loss"; \
+`kind` names the counter), `tapped`, `untapped`. Common patterns have names you may use as `event` \
+instead: enters, leaves, dies, milled, discarded, drawn, exiled, returned_to_hand, \
+deals_combat_damage, gains_life, loses_life, counters_added, counters_removed. Narrow a pattern \
+with: `who`, "you" (the permanent's controller did it, or controlled the object), "opponent" or \
+"any"; `whom`, the same for the player who was dealt damage; `type`, a word that must be in the \
+object's type line (Creature, Dragon, Instant), and `not_type`, one that must not; `nontoken`; \
+`nonland`; `min`, the least amount of damage or life; `self`, true if the ability triggers only on \
+the permanent itself ("whenever this creature attacks", "when The Wise Mothman enters"), without \
+which the table offers it every time anything does; `other`, true if it says "another"; `once`, \
+true if it says "one or more", so that it triggers once for everything that happened together. \
+Always give `on` when a pattern fits, and leave it out only when none can ("your second spell each \
+turn"): then the text alone stands, and you check it after the fact as now.
 - static: a continuous effect that changes other objects, players or the rules while the \
 permanent stays: "other Zombie creatures you control get +1/+1", "spells cost {1} less", \
 "players can't gain life". Players will read it at the top of their view, so state it exactly.
@@ -145,6 +148,7 @@ taken at its printed values, and your list replaces the last one entirely.
 
 Answer in the required JSON form."""
 
+_ZONES = ["library", "hand", "battlefield", "graveyard", "exile", "stack", "command"]
 VERDICT_SCHEMA = {
     "type": "object", "additionalProperties": False, "required": ["verdict", "findings", "hooks"],
     "properties": {
@@ -174,11 +178,14 @@ VERDICT_SCHEMA = {
                           "description": "For a step_trigger: \"each\" or a seat number."},
                 "controller": {"type": "integer"},
                 "on": {"type": "object", "additionalProperties": False, "required": ["event"], "properties": {
-                    "event": {"type": "string", "enum": ["cast", "enters", "dies", "leaves", "attacks", "milled", "deals_combat_damage"]},
-                    "who": {"type": "string", "enum": ["you", "opponent", "any"]},
-                    "type": {"type": "string"}, "nontoken": {"type": "boolean"}, "other": {"type": "boolean"},
-                    "self": {"type": "boolean"}, "nonland": {"type": "boolean"}, "once": {"type": "boolean"},
-                    "from": {"type": "string", "enum": ["hand", "exile", "graveyard", "command", "library", "stack"]}}}}}},
+                    "event": {"type": "string", "description": "What the table sees (moved, cast, attacks, blocks, damage, life, counters, "
+                              "tapped, untapped) or the name of a common pattern (enters, dies, milled, gains_life, ...)."},
+                    "from": {"type": "string", "enum": _ZONES}, "to": {"type": "string", "enum": [*_ZONES, "player", "permanent"]},
+                    "who": {"type": "string", "enum": ["you", "opponent", "any"]}, "whom": {"type": "string", "enum": ["you", "opponent", "any"]},
+                    "type": {"type": "string"}, "not_type": {"type": "string"}, "kind": {"type": "string"},
+                    "sign": {"type": "string", "enum": ["gain", "loss"]}, "combat": {"type": "boolean"}, "min": {"type": "integer"},
+                    "nontoken": {"type": "boolean"}, "nonland": {"type": "boolean"}, "other": {"type": "boolean"},
+                    "self": {"type": "boolean"}, "once": {"type": "boolean"}}}}}},
         "disputes": {"type": "array", "items": {
             "type": "object", "additionalProperties": False, "required": ["event", "upheld", "answer"],
             "properties": {"event": {"type": "integer", "description": "The number of the event in which the player raised the dispute."},

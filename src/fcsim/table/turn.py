@@ -6,7 +6,7 @@ trigger), a hook in the ledger says so and the step is handed to a seat instead.
 
 from __future__ import annotations
 
-from . import mutations
+from . import mutations, triggers
 from .model import STEPS, Control, Dice, Game, StackItem, TableError
 
 _PRIORITY_STEPS = frozenset(STEPS) - {"untap", "cleanup"}
@@ -229,51 +229,24 @@ def _queue_step_triggers(game: Game, step: str) -> None:
                                           "text": entry.get("text", ""), "source": entry.get("source")})
 
 
-_EVENTS = {"cast": lambda f: f["event"] == "cast", "attacks": lambda f: f["event"] == "attacks",
-           "enters": lambda f: f["event"] == "moved" and f["to"] == "battlefield" and f["from"] != "battlefield",
-           "leaves": lambda f: f["event"] == "moved" and f["from"] == "battlefield" and f["to"] != "battlefield",
-           "dies": lambda f: f["event"] == "moved" and f["from"] == "battlefield" and f["to"] == "graveyard"
-           and ("creature" in f["type_line"].lower() or not f["type_line"]),
-           "milled": lambda f: f["event"] == "moved" and f["from"] == "library" and f["to"] == "graveyard",
-           "deals_combat_damage": lambda f: f["event"] == "combat_damage"}
-
-
 def collect_triggers(game: Game) -> None:
     """Match what has happened against the ledger's event triggers and queue each match for its
     controller. The table cannot read a card, but it can tell that "a Dragon entered under seat 2"
-    fits what the auditor wrote down for Ganax. A loose match is fine: the controller declines a
-    trigger that does not really apply, and the auditor checks."""
+    fits the pattern the auditor wrote down for Ganax (see `triggers`). A loose match is fine: the
+    controller declines a trigger that does not really apply, and the auditor checks."""
     facts, game.facts = game.facts, []
     fired: set[int] = set()  # hooks that say "one or more": once for everything that happened together
     for fact in facts:
-        actor = fact["was_controller"] if fact["event"] == "moved" and fact["to"] != "battlefield" else fact["controller"]
         for hook in game.ledger:
             on = hook.get("on") or {}
-            if hook.get("kind") != "event_trigger" or on.get("event") not in _EVENTS or not _EVENTS[on["event"]](fact):
-                continue
-            mine = actor == hook["controller"]
-            if (on.get("who") == "you" and not mine) or (on.get("who") == "opponent" and mine):
-                continue
-            if on.get("type") and fact["type_line"] and str(on["type"]).lower() not in fact["type_line"].lower():
-                continue
-            if on.get("nontoken") and fact.get("token"):
-                continue
-            if on.get("from") and fact.get("from") and str(on["from"]).lower() != fact["from"]:
-                continue  # "whenever you cast a spell from exile": the third pod declined this trigger on every cast from hand
-            if on.get("other") and hook.get("source") in (fact.get("id"), fact.get("old_id")):
-                continue
-            if on.get("self") and hook.get("source") not in (fact.get("id"), fact.get("old_id")):
-                continue  # "whenever The Wise Mothman enters" was offered to its controller each time a land entered
-            if on.get("nonland") and "land" in fact["type_line"].lower():
+            if hook.get("kind") != "event_trigger" or not on.get("event") or not triggers.matches(on, fact, hook):
                 continue
             if on.get("once"):
                 if id(hook) in fired:
                     continue
                 fired.add(id(hook))
-            what = {"cast": "cast", "attacks": "attacked", "enters": "entered", "leaves": "left the battlefield", "dies": "died",
-                    "milled": "was milled", "deals_combat_damage": "dealt combat damage to a player"}
             game.pending_triggers.append({"id": game.new_id(), "seat": hook["controller"], "source": hook.get("source"),
-                                          "text": f"{hook.get('text', '')} (because {fact['name']} {what[on['event']]})"})
+                                          "text": f"{hook.get('text', '')} (because {triggers.because(game, fact)})"})
 
 
 def grant_priority(game: Game, seat: int) -> None:

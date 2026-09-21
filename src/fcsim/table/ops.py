@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from . import mutations, turn
+from . import mutations, triggers, turn
 from .model import HIDDEN_ZONES, Dice, Game, Obj, TableError
 
 
@@ -88,6 +88,8 @@ def apply_op(game: Game, dice: Dice, actor: int, op: dict, told: Told) -> None:
         case "tap" | "untap":
             objs = _selected(game, dice, actor, op)
             for obj in objs:
+                if obj.tapped != (kind == "tap"):
+                    game.facts.append(triggers.fact("tapped" if kind == "tap" else "untapped", name=obj.name, controller=obj.controller, obj=obj))
                 obj.tapped = kind == "tap"
             told.public.append(f"{me} {kind}s {', '.join(_named(o) for o in objs)}.")
         case "counters":
@@ -96,6 +98,10 @@ def apply_op(game: Game, dice: Dice, actor: int, op: dict, told: Told) -> None:
             if not name:
                 raise TableError("bad_counter", "Name the kind of counter, e.g. '+1/+1', 'loyalty', 'poison'.")
             value = int(op["set"]) if "set" in op else holder.counters.get(name, 0) + int(op.get("delta", 0))
+            on_object = isinstance(holder, Obj)
+            game.facts.append(triggers.fact("counters", name=_named(holder) if on_object else holder.name, obj=holder if on_object else None,
+                                            controller=holder.controller if on_object else holder.index, kind=name,
+                                            delta=value - holder.counters.get(name, 0)))
             holder.counters[name] = value
             if value <= 0:
                 del holder.counters[name]
@@ -103,7 +109,10 @@ def apply_op(game: Game, dice: Dice, actor: int, op: dict, told: Told) -> None:
             told.public.append(f"{label} now has {max(value, 0)} {name} counter(s){because}.")
         case "life":
             player = game.seats[_seat(game, op.get("seat"))]
+            was = player.life
             player.life = int(op["set"]) if "set" in op else player.life + int(op.get("delta", 0))
+            if player.life != was:
+                game.facts.append(triggers.fact("life", name=player.name, controller=player.index, delta=player.life - was))
             told.public.append(f"{player.name} is at {player.life} life{because}.")
         case "create_token":
             controller = _seat(game, op.get("controller", actor))
@@ -153,6 +162,8 @@ def apply_op(game: Game, dice: Dice, actor: int, op: dict, told: Told) -> None:
         case "damage":
             obj = _selected(game, dice, actor, op)[0]
             obj.damage += _count(op, "amount")
+            game.facts.append(triggers.fact("damage", name="A source", controller=None, to="permanent", target_id=obj.id,
+                                            amount=_count(op, "amount"), combat=False))
             told.public.append(f"{_named(obj)} has {obj.damage} damage marked on it{because}.")
         case "draw":
             seat = _seat(game, op.get("seat", actor))

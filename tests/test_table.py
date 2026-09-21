@@ -893,7 +893,7 @@ def test_an_event_trigger_can_depend_on_where_the_spell_was_cast_from():
     runner.step(0, "cast", {"card": table.view(0)["seats"][0]["exile"][0]["handle"], "because": "exiled with Prosper"})
     runner.step(0, "pass_priority")                                                               # triggers go on before anyone gets priority
     assert table.expected() == [(0, "triggers")]
-    assert [t["text"] for t in table.view(0)["waiting_triggers"]] == [f"Whenever you cast a spell from exile, put a counter on each creature. (because {second} cast)"]
+    assert [t["text"] for t in table.view(0)["waiting_triggers"]] == [f"Whenever you cast a spell from exile, put a counter on each creature. (because {second} was cast)"]
 
 
 def test_get_log_tells_a_run_of_passes_as_one_entry():
@@ -980,4 +980,36 @@ def test_mills_and_combat_damage_are_events_a_trigger_can_wait_for():
         seat, kind = table.expected()[0]
         runner.step(seat, {"priority": "pass_priority"}.get(kind, kind))
     runner.step(0, "combat_damage", {"assignments": [{"source": f"@{moth}", "target": {"seat": 1}, "amount": 2}]})
-    assert [t["text"] for t in table.view(0)["waiting_triggers"]] == [f"Whenever this creature deals combat damage to a player, they get four rad counters. (because {moth} dealt combat damage to a player)"]
+    assert [t["text"] for t in table.view(0)["waiting_triggers"]] == [f"Whenever this creature deals combat damage to a player, they get four rad counters. (because {moth} dealt 2 combat damage to Bob)"]
+
+
+def test_a_trigger_is_a_pattern_over_what_the_table_sees_so_new_conditions_need_no_new_code():
+    from fcsim.table import triggers
+    table, runner = started()
+    pass_until(table, runner, "main1")
+    watcher = spell_in_hand(table, 0)
+    runner.step(0, "act", {"because": "test set-up", "mutations": [{"op": "move", "obj": f"@{watcher}", "to": "battlefield"}]})
+    handle = next(o["handle"] for o in table.view(None)["battlefield"] if o["name"] == watcher)
+    table.apply_hooks([
+        {"kind": "event_trigger", "handle": handle, "text": "Whenever an opponent discards a card, ...", "on": {"event": "moved", "from": "hand", "to": "graveyard", "who": "opponent"}},
+        {"kind": "event_trigger", "handle": handle, "text": "Whenever you gain life, ...", "on": {"event": "gains_life", "who": "you"}},
+        {"kind": "event_trigger", "handle": handle, "text": "Whenever an opponent loses 3 or more life, ...", "on": {"event": "life", "sign": "loss", "who": "opponent", "min": 3}},
+        {"kind": "event_trigger", "handle": handle, "text": "Whenever a +1/+1 counter is put on this, ...", "on": {"event": "counters_added", "kind": "+1/+1", "self": True}},
+        {"kind": "event_trigger", "handle": handle, "text": "Whenever you draw a card, ...", "on": {"event": "drawn", "who": "you"}},
+        {"kind": "event_trigger", "handle": handle, "text": "Whenever this becomes tapped, ...", "on": {"event": "tapped", "self": True}}])
+    runner.step(0, "pass_priority")   # its own arrival matched none of them
+    assert table.expected() == [(1, "priority")]
+    for seat in (1, 2):
+        runner.step(seat, "pass_priority")
+    runner.step(0, "act", {"because": "test", "mutations": [
+        {"op": "discard_random", "seat": 1, "count": 1}, {"op": "discard_random", "seat": 0, "count": 1},
+        {"op": "life", "seat": 0, "delta": 2}, {"op": "life", "seat": 1, "delta": -2}, {"op": "life", "seat": 2, "delta": -4},
+        {"op": "counters", "obj": f"@{watcher}", "kind": "+1/+1", "delta": 1}, {"op": "counters", "obj": f"@{watcher}", "kind": "stun", "delta": 1},
+        {"op": "draw", "count": 1}, {"op": "tap", "objs": [f"@{watcher}"]}]})
+    runner.step(0, "pass_priority")
+    waiting = [t["text"] for t in table.view(0)["waiting_triggers"]]
+    assert [w.split(",")[0] for w in waiting] == ["Whenever an opponent discards a card", "Whenever you gain life", "Whenever an opponent loses 3 or more life",
+                                                  "Whenever a +1/+1 counter is put on this", "Whenever you draw a card", "Whenever this becomes tapped"]
+    assert "(because a card was drawn)" in waiting[4] and "was discarded)" in waiting[0] and "(because Cat lost 4 life)" in waiting[2]   # a hidden card is not named
+    assert triggers.pattern({"event": "dies", "type": "Zombie", "nonland": True}) == {"event": "moved", "from": "battlefield", "to": "graveyard",
+                                                                                      "type": ["Creature", "Zombie"], "not_type": ["Land"], "nonland": True}
