@@ -222,6 +222,7 @@ uv run fcsim deck random --count 3 --seed 4 --exclude "Fire Lord Zuko"      # th
 ```sh
 uv run fcsim pod examples/zuko.txt decks/lathril.txt decks/miirym.txt decks/wilhelt.txt --cycles 10
 uv run fcsim pod --resume games/<game_dir> --cycles 4      # play on, by replaying the journal
+uv run fcsim pod --resume games/<game_dir> --rewind-to 733 --because "why"   # take it up again from an earlier event
 uv run fcsim pod <four decks> --cycles 10 --games 4 --parallel 2   # several games, then one report over them
 uv run fcsim status games/<game_dir>                       # where it stands and where the time went; works mid-game
 ```
@@ -260,7 +261,12 @@ it happens; several at once are one item with a count. What is learned about a c
 `data/hooks.json` for later games. A delayed trigger is recorded by the player with the `delay`
 mutation and comes back at its step. An ability with nothing to decide can carry its effect as a
 script, which the table runs by itself once the card's text, the script's vocabulary and two
-separate audits all agree; one finding against it revokes it.
+separate audits all agree; one finding that the resolution was wrong revokes it. A pattern can say
+the trigger is about the permanent itself (`self`), another one (`other`) or what it is attached to
+(`attached`: "whenever equipped creature attacks"); a script can speak of the player and the amount
+its trigger was about (`that_player`, `that_many`). A trigger written as text alone that gets missed
+is flagged, and the next audit is asked to give it a pattern. A script a player gives for one
+trigger that turns out to do nothing is handed back to them to resolve by hand.
 
 **Rules integrity.** The auditor checks each whole turn before the next begins (`--audit-every
 checkpoint` checks every time the pen moves: stricter, several times slower). Its hooks go into
@@ -271,7 +277,15 @@ has changed. A seat it faults is asked to correct the table, or may `contest`: a
 both sides and the text of every rule either cited, upholds, overrules or amends, and its ruling
 binds the auditor and the players for the rest of the game. Any player can `dispute` another's
 play, which the auditor must answer in public. The driver itself removes a player at 0 life, 10
-poison, 21 commander damage or a draw from an empty library before anyone gets priority.
+poison, 21 commander damage or a draw from an empty library before anyone gets priority. The
+stretch that ends a game is audited too; nothing can be corrected then, so the report says whether
+the ending stands or what is held against it.
+
+A game can stop anywhere (a budget, a bug, a closed laptop) and be resumed: the journal holds every
+accepted call. A resumed game is first owed the audit of everything played since the last one that
+was completed. `--rewind-to EVENT` takes it up again from an earlier event with the table's own
+rewind: what was played after it stays in the journal, which must replay as played, and is counted
+by nobody: not the auditor, not the scores.
 
 **After the game.**
 
