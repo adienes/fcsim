@@ -87,6 +87,13 @@ _OPENING = {"type": "object", "additionalProperties": False, "required": ["keep"
 _REPLY = {"type": "object", "additionalProperties": False, "required": ["reply"],
           "properties": {"reply": {"type": "string", "description": "What you say back, in a sentence or two; empty to stay silent."}}}
 _REPLIES_PER_WAKE = 3
+_TRIGGERS = {"type": "object", "additionalProperties": False, "required": ["triggers"], "properties": {"triggers": {"type": "array", "items": {
+    "type": "object", "additionalProperties": False, "required": ["pending", "action", "because"],
+    "properties": {"pending": {"type": "string", "description": "The waiting trigger's handle, such as t12."},
+                   "action": {"type": "string", "enum": ["decline", "script", "wake"]},
+                   "because": {"type": "string", "description": "One short sentence."},
+                   "times": {"type": "integer", "description": "For a trigger that triggered several times: how many to put on the stack. The rest are declined."},
+                   "script": {"type": "array", "items": {"type": "object"}}}}}}}
 _WINDOW = {"type": "object", "additionalProperties": False, "required": ["act", "why"],
            "properties": {"act": {"type": "boolean"}, "why": {"type": "string", "description": "One short sentence."}}}
 _DEFAULTS = {"priority": "pass_priority", "mulligan": "keep", "declare_attackers": "declare_attackers",
@@ -181,7 +188,7 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
 def _play(directory: GameDirectory, table: Table, names: list[str], decks: list, runners: list, auditor_runner, database: CardDatabase,
           cycles: int, rules: RulesReference | None, echo, *, earlier: dict | None = None, audit_every: str = "turn",
           triage_runners: list | None = None, refresh_before_blocks: bool = True, judge_runner=None,
-          hook_library: str | Path | None = None) -> dict:
+          hook_library: str | Path | None = None, ask_about_triggers: bool = True) -> dict:
     """Schedule seats and audits until the game ends or `cycles` more rounds have been played."""
     count, seed = len(names), table.config["seed"]
     table.on_event = directory.journal  # a replayed table was built without its journal
@@ -430,6 +437,52 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
         echo(f"turn {game.turn.number} {game.turn.step}: {names[speaker]} spoke to {', '.join(names[s] for s in asked)}; "
              f"{len(said)} answered")
         return said
+
+    def waiting_triggers(seat: int) -> bool:
+        """The table is waiting for this seat's triggers and the seat has no session open. Most triggers need no
+        session: they do not apply, or what they do can be said in the few operations the table carries out
+        itself. One question, no tools: decline it, give its effect as a script, or ask to be woken. Returns
+        False when a wake is needed after all (a target, a choice, an answer the table refused)."""
+        view = table.view(seat)
+        mine = [t for t in view["waiting_triggers"] if t["seat"] == seat]
+        listed = "\n".join(f"- [{t['handle']}] {t['text']}" for t in mine)
+        question = (f"{when()} The table is waiting for your triggered abilities:\n{listed}\nFor each, answer with its handle in `pending` and "
+                    "one `action`. \"decline\": it does not really apply, or it is a \"may\" you do not want (say why in `because`). "
+                    "\"script\": it applies, it has no target and leaves nothing to choose, and these operations say ALL it does; give them in "
+                    "`script` and the table puts it on the stack and resolves it for you: counters {on, kind, delta}; life {who, delta}; "
+                    "draw {who, count}; mill {who, count}; create_token {token: {name, types, power, toughness, text}, count}; move {what, "
+                    "to}; tap {what}; untap {what}; delay {step, text, script}. `what` is \"self\" (the permanent the ability is on); `on` is "
+                    "\"self\", \"each_creature_you_control\", \"each_other_creature_you_control\" or a player; a player (`who`) is \"you\", "
+                    "\"each_opponent\" or \"each_player\"; `to` is battlefield, graveyard, exile, hand or command. \"wake\": anything else "
+                    "(a target, a choice, a card to look at, an effect these operations cannot say): you are woken to do it by hand. If "
+                    "in doubt, \"wake\". For a trigger that says it triggered several times, `times` says how many go on the stack.")
+        (_, reply), = ask_all({seat: f"{question}\n\n{news(seat)}\n\n{briefing(seat)}"}, _TRIGGERS, quick=True)
+        answers = {a.get("pending"): a for a in (reply.data or {}).get("triggers", []) if isinstance(a, dict)}
+        record = {"turn": table.game.turn.number, "seat": seat, "respond": False, "about": "its waiting triggers", "stack": len(table.game.stack),
+                  "why": "; ".join(f"{a.get('action')}: {a.get('because', '')}" for a in answers.values())[:300], "seconds": round(reply.seconds, 1)}
+        report["triage"].append(record)
+        directory.append(f"transcript-seat-{seat}.jsonl", {"kind": "triage", **record, "answers": list(answers.values())})
+        echo(f"turn {table.game.turn.number} {table.game.turn.step}: {names[seat]}'s triggers: "
+             + (", ".join(str(a.get("action")) for a in answers.values()) or "no answer"))
+        for trigger in mine:
+            answer = answers.get(trigger["handle"], {})
+            if answer.get("action") == "decline":
+                result = table.act(seat, "skip_trigger", {"pending": trigger["handle"], "because": answer.get("because") or "declined"})
+            elif answer.get("action") == "script" and answer.get("script"):
+                result = {}
+                for _ in range(max(1, min(int(answer.get("times") or 1), trigger.get("count", 1)))):
+                    result = table.act(seat, "add_trigger", {"pending": trigger["handle"], "script": answer["script"]})
+                    if "error" in result:
+                        break
+                still = next((t for t in table.view(seat)["waiting_triggers"] if t["handle"] == trigger["handle"]), None)
+                if "error" not in result and still is not None and table.game.control.kind == "triggers":
+                    result = table.act(seat, "skip_trigger", {"pending": trigger["handle"], "because": "the rest of them do nothing more"})
+            else:
+                return False
+            if "error" in result:
+                return False
+        seen[seat] = len(table.events)
+        return True
 
     def window(seats: list[int], situation: str) -> set[int]:
         """Ask several seats at once whether they would act now, with the stack empty on another player's
@@ -708,6 +761,8 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
                 return "yours"
             if kind in ("priority", "declare_blockers") and _cannot_act(table, seat, kind):
                 table.act(seat, _DEFAULTS[kind])  # an empty hand and nothing untapped; or nothing that could block
+                continue
+            if kind == "triggers" and seat != me and ask_about_triggers and waiting_triggers(seat):
                 continue
             if kind == "combat_damage" and seat != me and _plain_combat(table):
                 # Nothing has happened since the attack that could change how damage is dealt, and the sums

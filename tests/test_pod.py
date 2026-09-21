@@ -43,10 +43,11 @@ class ScriptedSeat:
     def __init__(self, budget: Budget, *, cast_commander: bool = False, with_trigger: bool = False, triage: dict | None = None,
                  attack: int | None = None, contests: bool = False, disputes: str = "", mulligans: int = 0, bottoms: bool = True,
                  acts: bool = False, holds: bool = False, fidgets: bool = False, asks: str = "", answers: str = "",
-                 blinks: bool = False, policy: str = ""):
+                 blinks: bool = False, policy: str = "", triggers: dict | None = None):
         self.budget, self.prompts, self.cast_commander, self.attack, self.contests = budget, [], cast_commander, attack, contests
         self.disputes, self.mulligans, self.bottoms, self.acts, self.holds = disputes, mulligans, bottoms, acts, holds
         self.asks, self.answers, self.heard = asks, answers, []   # a question for seat 1, once; what this seat says when spoken to
+        self.triggers = triggers  # how it answers the question about its waiting triggers: {"action": ..., "script": ...}
         self.policy = policy    # a standing response policy, set again on each of its own turns (the table resets it there)
         self.blinks = blinks    # once, returns its commander to the command zone, to be cast again
         self.fidgets = fidgets  # does something auditable each turn: a basic land alone is not sent to the auditor
@@ -60,6 +61,9 @@ class ScriptedSeat:
                 owed = int(re.search(r"you owe (\d+)", prompt)[1]) if self.bottoms else 0
                 data = {"keep": self.mulligans <= 0, "bottom": re.findall(r"^- \[(c\d+)\]", prompt.split("YOUR HAND")[1], re.M)[:owed], "why": "scripted"}
                 self.mulligans -= 1
+            elif "triggers" in (schema or {}).get("properties", {}):
+                handles = re.findall(r"^- \[(t\d+)\]", prompt, re.M)
+                data = {"triggers": [{"pending": h, "because": "scripted", **self.triggers} for h in handles]} if self.triggers else {"triggers": []}
             elif "reply" in (schema or {}).get("properties", {}):
                 data = {"reply": self.answers}
             elif "act" in (schema or {}).get("properties", {}):
@@ -823,3 +827,26 @@ def test_a_script_earns_its_trust_over_two_audits_and_is_then_left_alone(databas
         assert report["journal"] == "replays to the same game"
     # game 1: described once, not trusted. game 2: described again, the same, and trusted from then. game 3: trusted on arrival, and not described at all.
     assert states == [(1, 1, [False]), (1, 2, [True]), (0, 2, [True])]
+
+
+@pytest.mark.parametrize("answer, life, stacked", [({"action": "script", "script": [{"op": "life", "who": "you", "delta": 1}]}, 41, True),
+                                                   ({"action": "decline"}, 40, False), ({"action": "wake"}, 40, True),
+                                                   ({"action": "script", "script": [{"op": "shuffle"}]}, 40, True)])
+def test_a_waiting_trigger_is_settled_with_one_question_where_it_can_be(database, tmp_path, answer, life, stacked):
+    budget = Budget(max_calls=200)
+    seats = [ScriptedSeat(budget, fidgets=True), ScriptedSeat(budget, fidgets=True), ScriptedSeat(budget, fidgets=True, triggers=answer)]
+    trigger = {"kind": "trigger", "seat": 2, "summary": "Thrasios gains 1 life", "basis": "test", "fix": "put it on the stack", "confidence": "high"}
+    report = play_pod(decks(tmp_path), seats, FakeRunner([{"verdict": "findings", "findings": [trigger], "hooks": []}] + [OK] * 40, budget), database,
+                      cycles=2, seed=4, out_root=tmp_path / "games", echo=lambda *_: None)
+    assert report["stopped"] is None and report["standings"][2]["life"] == life and report["journal"] == "replays to the same game"
+    woken = [w for w in report["wakes"] if w["kind"] == "triggers"]
+    log = (Path(report["directory"]) / "log.md").read_text()
+    if answer["action"] == "script" and answer["script"][0]["op"] == "life":
+        assert woken == [] and "to resolve by the script they gave" in log and "resolves by script: Thrasios is at 41 life." in log
+    elif answer["action"] == "decline":
+        assert woken == [] and "Thrasios does not put a trigger on the stack" in log
+    else:   # it asked to be woken, or gave a script the table will not run: a session as before
+        assert len(woken) == 1
+    assert ("Thrasios puts a trigger on the stack" in log) == stacked
+    asked = [t for t in report["triage"] if t["about"] == "its waiting triggers"]
+    assert len(asked) == 1 and asked[0]["seat"] == 2

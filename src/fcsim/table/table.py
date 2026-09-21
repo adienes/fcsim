@@ -423,10 +423,20 @@ class Table:
                 raise TableError("pending_required", "Say which waiting trigger this is with `pending`, "
                                                      "or decline it with skip_trigger.")
             waiting = next((t for t in game.pending_triggers if t["id"] == args["pending"]), None)
+            if source is None and waiting and waiting.get("source") in game.objects:
+                source = game.objects[waiting["source"]]  # the table knows what triggered: no need to say it again
         text = str(args.get("text") or (waiting or {}).get("text", ""))
+        script = args.get("script")
+        if script is not None:
+            # The player says what the ability does, in the few operations the table carries out itself, and nobody
+            # has to be woken to resolve it. Anything else it needs is resolved by hand, as ever.
+            if args.get("targets"):
+                raise TableError("bad_script", "A trigger with targets is resolved by hand: leave `script` out.")
+            if (wrong := scripts.problem(script)) is not None:
+                raise TableError("bad_script", f"That is not a script the table can run ({wrong}). Leave `script` out and resolve the trigger by hand.")
         item = StackItem(id=game.new_id(), kind="triggered", controller=seat, source=source.id if source else None,
                          source_name=ops._named(source) if source else "a triggered ability", text=text,
-                         targets=args.get("targets", []))
+                         targets=args.get("targets", []), script=script, bound={"self": source.uid if source else None, "it": None})
         game.stack.append(item)
         if game.control.kind == "triggers":
             game.turn.passed = []  # something new is on the stack: everyone gets priority again, whoever passed before
@@ -440,7 +450,7 @@ class Table:
                 game.pending_triggers.remove(queued)
             turn.acted(game)
         return ops.Told(public=[f"{self._name(seat)} puts a trigger on the stack ({item.source_name}): {text}"
-                                f"{self._targets_text(game, item.targets)}."])
+                                f"{self._targets_text(game, item.targets)}" + (", to resolve by the script they gave" if script else "") + "."])
 
     def _do_skip_trigger(self, game: Game, seat: int, args: dict):
         trigger = turn.trigger_handled(game, args["pending"])

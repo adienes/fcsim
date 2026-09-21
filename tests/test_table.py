@@ -1189,3 +1189,25 @@ def test_the_table_counts_each_players_spells_so_second_spell_triggers_can_be_a_
             seat, kind = table.expected()[0]
             runner.step(seat, "pass_priority")
     assert offered == [0, 1, 0]                                              # the second, and only the second
+
+
+def test_a_player_can_say_what_its_trigger_does_and_the_table_resolves_it():
+    table, runner = started()
+    pass_until(table, runner, "main1")
+    artist = spell_in_hand(table, 0)
+    runner.step(0, "act", {"because": "test set-up", "mutations": [{"op": "move", "obj": f"@{artist}", "to": "battlefield"}]})
+    handle = next(o["handle"] for o in table.view(None)["battlefield"] if o["name"] == artist)
+    table.apply_hooks([{"kind": "event_trigger", "handle": handle, "text": "Whenever you cast a spell, each opponent loses 1 life and you gain 1 life.",
+                        "on": {"event": "cast", "who": "you"}}])
+    runner.step(0, "cast", {"card": f"@{spell_in_hand(table, 0)}", "resolves": "auto_permanent"})
+    runner.step(0, "pass_priority")
+    pending = table.view(0)["waiting_triggers"][0]["handle"]
+    assert table.act(0, "add_trigger", {"pending": pending, "script": [{"op": "shuffle"}]})["error"]["code"] == "bad_script"
+    drain = [{"op": "life", "who": "each_opponent", "delta": -1}, {"op": "life", "who": "you", "delta": 1}]
+    done = runner.step(0, "add_trigger", {"pending": pending, "script": drain})
+    assert done["log"][0].endswith("to resolve by the script they gave.") and artist in done["log"][0]      # named from what the table knew triggered
+    for seat in (1, 2, 0):
+        runner.step(seat, "pass_priority")
+    assert [s["life"] for s in table.view(0)["seats"]] == [41, 39, 39] and table.expected() == [(0, "priority")]   # nobody was handed a resolution
+    assert any("resolves by script" in line for line in table.events[-1]["public"])
+    assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()

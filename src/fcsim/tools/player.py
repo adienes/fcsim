@@ -93,8 +93,14 @@ PLAYER_TOOLS = [
     _tool("add_trigger", "Put a triggered ability on the stack. If the table is waiting for your triggers, name "
           "which one with `pending` (a handle from `waiting_triggers`). A waiting trigger that says it triggered several "
           "times stands for that many: add_trigger puts one of them on the stack and the rest go on waiting, and "
-          "skip_trigger declines all that remain (say why: \"the first one exiles it; the rest do nothing\").",
-          {"source": _HANDLE, "text": {"type": "string"}, "targets": _TARGETS, "pending": {"type": "string"}}),
+          "skip_trigger declines all that remain (say why: \"the first one exiles it; the rest do nothing\"). If the ability "
+          "has no target and nothing to choose, and these operations say all it does, give `script` and the table resolves it "
+          "by itself, so you need not be woken for it: counters {on, kind, delta}; life {who, delta}; draw {who, count}; mill "
+          "{who, count}; create_token {token, count}; move {what, to}; tap {what}; untap {what}; delay {step, text, script}. "
+          "`what` is \"self\"; `on` is \"self\", \"each_creature_you_control\", \"each_other_creature_you_control\" or a player; a "
+          "player is \"you\", \"each_opponent\" or \"each_player\".",
+          {"source": _HANDLE, "text": {"type": "string"}, "targets": _TARGETS, "pending": {"type": "string"},
+           "script": {"type": "array", "items": {"type": "object"}}}),
     _tool("skip_trigger", "Decline a waiting trigger: a \"may\" you do not want, or one whose condition is false.",
           {"pending": {"type": "string"}, "because": {"type": "string"}}, ("pending", "because")),
     _tool("resolve", "Carry out part of the effect of your spell or ability that is resolving. Call it as many "
