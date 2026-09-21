@@ -177,3 +177,15 @@ def test_cli_selects_backends_and_shared_budget(monkeypatch, tmp_path, command, 
 def test_cli_rejects_an_unenforceable_dollar_limit(capsys):
     assert main(["goldfish", "deck.txt", "--backend", "codex", "--max-cost", "1"]) == 2
     assert "Codex has no USD estimate" in capsys.readouterr().err
+
+
+def test_the_session_limits_own_message_says_how_long_to_wait():
+    import datetime
+
+    from fcsim.agents import seconds_until_reset
+    said = "model error: Claude Code reported an error: You've hit your session limit · resets 3:30pm (America/New_York)"
+    assert seconds_until_reset(said, datetime.datetime(2026, 9, 21, 13, 35)) == 115 * 60 + 120
+    assert seconds_until_reset(said, datetime.datetime(2026, 9, 21, 15, 31)) == (24 * 60 - 1) * 60 + 120      # that time has passed: tomorrow's
+    assert seconds_until_reset("limit · resets 12am", datetime.datetime(2026, 9, 21, 23, 0)) is None             # not the session limit's message
+    assert seconds_until_reset("You've hit your session limit · resets 12am", datetime.datetime(2026, 9, 21, 23, 0)) == 3600 + 120
+    assert seconds_until_reset("model error: The model did not answer within 600 seconds.") is None

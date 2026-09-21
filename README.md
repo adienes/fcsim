@@ -223,6 +223,7 @@ uv run fcsim deck random --count 3 --seed 4 --exclude "Fire Lord Zuko"      # th
 uv run fcsim pod examples/zuko.txt decks/lathril.txt decks/miirym.txt decks/wilhelt.txt --cycles 10
 uv run fcsim pod --resume games/<game_dir> --cycles 4      # play on, by replaying the journal
 uv run fcsim pod --resume games/<game_dir> --rewind-to 733 --because "why"   # take it up again from an earlier event
+uv run fcsim pod <four decks> --cycles 10 --wait-for-limit  # if the subscription's session limit stops it, wait for the reset and go on
 uv run fcsim pod <four decks> --cycles 10 --games 4 --parallel 2   # several games, then one report over them
 uv run fcsim status games/<game_dir>                       # where it stands and where the time went; works mid-game
 ```

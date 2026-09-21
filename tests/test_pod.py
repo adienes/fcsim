@@ -1115,3 +1115,25 @@ def test_the_stretch_that_ended_the_game_is_audited_and_the_report_says_whether_
         assert report["ending"].startswith("contested: the spell that won was countered") and "Nothing can be corrected in a game that is over" in text
     else:
         assert report["ending"].startswith("stands") and "**The ending stands" in text
+
+
+def test_a_game_stopped_by_the_session_limit_can_wait_for_the_reset_and_take_itself_up_again(combat_game, monkeypatch, capsys, tmp_path):
+    from fcsim import cli
+    directory = combat_game[0]["directory"]
+    begun = cli._rounds_begun(directory)
+    calls, slept = [], []
+    limit = "model error: Claude Code reported an error: You've hit your session limit · resets 3:30pm (America/New_York)"
+
+    def fake_play(decks, *_, cycles, resume, rewind_to, **__):
+        calls.append({"decks": list(decks), "cycles": cycles, "resume": resume, "rewind_to": rewind_to})
+        return {"directory": directory, "stopped": limit if len(calls) == 1 else None, "seats": ["Talrand", "Pir", "Thrasios"]}
+    monkeypatch.setattr(cli, "play_pod", fake_play)
+    monkeypatch.setattr(cli, "CardDatabase", lambda: None)
+    monkeypatch.setattr(cli, "_stay_awake", lambda: None)
+    monkeypatch.setattr(cli.time, "sleep", slept.append)
+    assert cli.main(["pod", "a.txt", "b.txt", "c.txt", "--cycles", "10", "--wait-for-limit"]) == 0
+    assert [c["resume"] for c in calls] == [None, directory] and calls[0]["cycles"] == 10 and calls[1]["cycles"] == 10 - (begun - 1)   # to the same round
+    assert calls[1]["decks"] == ["Talrand", "Pir", "Thrasios"] and len(slept) == 1 and 120 <= slept[0] <= 24 * 3600 + 120
+    assert "waiting" in capsys.readouterr().out
+    calls.clear()
+    assert cli.main(["pod", "a.txt", "b.txt", "c.txt", "--cycles", "10"]) == 1 and len(calls) == 1      # not asked to wait: it stops, as before

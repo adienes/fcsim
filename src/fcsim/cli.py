@@ -13,7 +13,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 
-from .agents import BACKENDS, Budget, RunnerError, make_runner
+from .agents import BACKENDS, Budget, RunnerError, make_runner, seconds_until_reset
 from .audit import Auditor, build, load_scenarios, materials, play, run_suite
 from .audit import render as render_report
 from .cards import CardDatabase, CardsError, read_decklist, resolve
@@ -205,6 +205,9 @@ def main(argv: list[str] | None = None) -> int:
     pod = commands.add_parser("pod", help="A multiplayer game: one agent per deck, audited")
     pod.add_argument("decks", nargs="*", help="Two to four decklists, in turn order after a random start")
     pod.add_argument("--resume", metavar="GAME_DIR", help="Play --cycles more rounds of an existing game instead of starting one")
+    pod.add_argument("--wait-for-limit", action="store_true", help="If the subscription's session limit stops the game, wait for it to "
+                     "reset and take the game up again, as often as it takes. Off by default: a game that carries on by itself "
+                     "spends the new session's allowance the moment it has one")
     pod.add_argument("--rewind-to", type=int, metavar="EVENT", help="With --resume: first return the game to just after this event. "
                      "What was played after it stays in the journal and is counted by nobody")
     pod.add_argument("--because", default="", help="With --rewind-to: why, for the log")
@@ -449,19 +452,39 @@ def _pod(args: argparse.Namespace) -> int:
         rules = RulesReference()
     except RulesError:
         rules = None
-    report = play_pod(args.decks, [make_runner(args.backend, model=args.model, effort=args.effort,
-                                             budget=budget, timeout=1800) for _ in args.decks],
-                      make_runner(args.audit_backend or args.backend, model=args.audit_model, effort=args.audit_effort,
-                                  budget=budget), CardDatabase(), cycles=args.cycles,
-                      seed=args.seed, out_root=args.out, rules=rules, resume=args.resume, audit_every=args.audit_every,
-                      triage_runners=[make_runner(args.backend, model=args.triage_model or args.model, effort=args.triage_effort,
-                                                  budget=budget) for _ in args.decks],
-                      hook_library=default_data_dir() / "hooks.json", shuffle_seats=not args.keep_seating,
-                      rewind_to=args.rewind_to if args.resume else None, rewind_because=args.because)
+    resume, cycles, rewind_to = args.resume, args.cycles, args.rewind_to if args.resume else None
+    cap = _rounds_begun(resume) - 1 + cycles if resume else cycles   # the round the game is to end with, however often it is taken up again
+    while True:
+        report = play_pod(args.decks, [make_runner(args.backend, model=args.model, effort=args.effort,
+                                                 budget=budget, timeout=1800) for _ in args.decks],
+                          make_runner(args.audit_backend or args.backend, model=args.audit_model, effort=args.audit_effort,
+                                      budget=budget), CardDatabase(), cycles=cycles,
+                          seed=args.seed, out_root=args.out, rules=rules, resume=resume, audit_every=args.audit_every,
+                          triage_runners=[make_runner(args.backend, model=args.triage_model or args.model, effort=args.triage_effort,
+                                                      budget=budget) for _ in args.decks],
+                          hook_library=default_data_dir() / "hooks.json", shuffle_seats=not args.keep_seating,
+                          rewind_to=rewind_to, rewind_because=args.because)
+        wait = seconds_until_reset(str(report["stopped"] or "")) if args.wait_for_limit else None
+        if wait is None:
+            break
+        # The second batch lost two games to the limit an hour in, and they sat stopped until somebody looked. A game taken
+        # up again goes through the same resume as any other: the journal is replayed, and the audit it is owed is made.
+        print(f"The session limit is reached; waiting {wait // 60} minutes for it to reset, then taking the game up again.", flush=True)
+        time.sleep(wait)
+        resume, rewind_to = report["directory"], None
+        args.decks = report["seats"]
+        cycles = max(cap - (_rounds_begun(resume) - 1), 1)
     with open(f"{report['directory']}/report.md", encoding="utf-8") as text:
         print("\n" + text.read())
     print(f"Everything is in {report['directory']}")
     return 0 if not report["stopped"] else 1
+
+
+def _rounds_begun(game_dir: str) -> int:
+    """Which of its own turns the active player of a stopped game is in: a resumed game counts its rounds from there."""
+    with open(os.path.join(game_dir, "state.json"), encoding="utf-8") as state:
+        game = json.load(state)
+    return max(int(game["seats"][game["turn"]["active"]]["turns_taken"]), 1)
 
 
 def _stay_awake() -> None:

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import datetime
 import json
+import re
 import shutil
 import subprocess
 import tempfile
@@ -11,6 +13,21 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from ..mcp.connection import McpConnection
+
+
+def seconds_until_reset(message: str, now: datetime.datetime | None = None) -> int | None:
+    """How long until the subscription's session limit resets, from what Claude Code says when it is reached ("You've hit your
+    session limit · resets 3:30pm (America/New_York)"), or None if the message is about something else. The time is read as
+    this machine's local time, with two minutes to spare."""
+    found = re.search(r"session limit.*?resets\s+(\d{1,2})(?::(\d{2}))?\s*([ap]m)", message, re.I | re.S)
+    if not found:
+        return None
+    now = now or datetime.datetime.now()
+    hour = int(found[1]) % 12 + (12 if found[3].lower() == "pm" else 0)
+    reset = now.replace(hour=hour, minute=int(found[2] or 0), second=0, microsecond=0)
+    if reset <= now:
+        reset += datetime.timedelta(days=1)
+    return int((reset - now).total_seconds()) + 120
 
 
 class RunnerError(RuntimeError):
