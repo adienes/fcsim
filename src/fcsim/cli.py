@@ -348,13 +348,21 @@ def _pods(args: argparse.Namespace, argv: list[str]) -> int:
         elif not word.startswith(("--games=", "--parallel=", "--seed=")):
             passed_on.append(word)
 
+    logs = os.path.join(args.out, time.strftime("batch_%Y-%m-%d_%H%M%S"))
+    os.makedirs(logs, exist_ok=True)
+    print(f"{args.games} games, {max(1, args.parallel)} at a time; each game's progress is in {logs}/game-N.log", flush=True)
+
     def one(index: int) -> tuple[int, str | None, int]:
         time.sleep(2 * (index % max(1, args.parallel)))  # game directories are named by the second
-        child = subprocess.run([sys.executable, "-c", "import sys; from fcsim.cli import main; sys.exit(main(sys.argv[1:]))",
-                                *passed_on, "--seed", str(first + index)], capture_output=True, text=True, check=False)
-        where = re.search(r"^Everything is in (.+)$", child.stdout, re.M)
+        path = os.path.join(logs, f"game-{index + 1}.log")
+        with open(path, "w", encoding="utf-8") as log:  # written as the game goes, so a batch can be watched like a single game
+            child = subprocess.run([sys.executable, "-c", "import sys; from fcsim.cli import main; sys.exit(main(sys.argv[1:]))",
+                                    *passed_on, "--seed", str(first + index)], stdout=log, stderr=subprocess.STDOUT, text=True, check=False)
+        with open(path, encoding="utf-8") as log:
+            told = log.read()
+        where = re.search(r"^Everything is in (.+)$", told, re.M)
         print(f"game {index + 1} of {args.games} (seed {first + index}): "
-              + (where[1] if where else "did not finish: " + (child.stderr.strip().splitlines() or ["no output"])[-1]), flush=True)
+              + (where[1] if where else "did not finish: " + (told.strip().splitlines() or ["no output"])[-1]), flush=True)
         return index, where[1] if where else None, child.returncode
     with ThreadPoolExecutor(max_workers=max(1, args.parallel)) as pool:
         results = list(pool.map(one, range(args.games)))
