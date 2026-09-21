@@ -217,3 +217,20 @@ def test_an_edhrec_average_deck_page_becomes_an_mtgo_list(database, tmp_path):
     assert edhrec.slug("Lim-Dûl's Vault") == "lim-duls-vault"
     with pytest.raises(CardsError, match="no deck"):
         edhrec.deck_text({"deck": {}})
+
+
+def test_random_opponents_are_drawn_from_the_popular_list_without_the_excluded(tmp_path):
+    from fcsim.cards.edhrec import average_deck, popular_commanders, random_commanders
+
+    views = [{"name": name, "sanitized": slug, "num_decks": 1000 - index} for index, (name, slug) in enumerate(
+        [("Fire Lord Zuko", "fire-lord-zuko"), ("Krenko, Mob Boss", "krenko-mob-boss"), ("Edgar Markov", "edgar-markov"),
+         ("Ojer Axonil, Deepest Might // Temple of Power", "ojer-axonil-deepest-might"), ("The Ur-Dragon", "the-ur-dragon")])]
+    (tmp_path / "popular-year.json").write_text(json.dumps({"container": {"json_dict": {"cardlists": [{"cardviews": views}]}}}))
+    assert [c["name"] for c in popular_commanders(cache_dir=tmp_path)][:2] == ["Fire Lord Zuko", "Krenko, Mob Boss"]
+    drawn = random_commanders(3, seed=1, exclude=("Fire Lord Zuko", "Edgar Markov"), cache_dir=tmp_path)
+    assert len({c["name"] for c in drawn}) == 3 and not {"Fire Lord Zuko", "Edgar Markov"} & {c["name"] for c in drawn}
+    assert drawn == random_commanders(3, seed=1, exclude=("Fire Lord Zuko", "Edgar Markov"), cache_dir=tmp_path)   # a seed repeats the draw
+    # A two-faced commander's page goes by EDHREC's own name for it, not by the card's full name.
+    (tmp_path / "ojer-axonil-deepest-might.json").write_text(json.dumps({"deck": {"cards": {"lands": [["Mountain", 99]]},
+                                                                                  "commander": ["Ojer Axonil, Deepest Might // Temple of Power"]}}))
+    assert average_deck("Ojer Axonil, Deepest Might // Temple of Power", cache_dir=tmp_path, page_slug="ojer-axonil-deepest-might").startswith("99 Mountain")

@@ -184,6 +184,15 @@ transcript, usage, and `report.md`: lands, spells and attacks by turn, the pilot
 own account of each turn, and rules health. Findings are recorded but not yet
 corrected. A three-turn run took about four minutes and seven model calls.
 
+## Opponents
+
+```sh
+uv run fcsim deck average "Miirym, Sentinel Wyrm" --out decks/miirym.txt    # EDHREC's average list for one commander
+uv run fcsim deck random --count 3 --seed 4 --exclude "Fire Lord Zuko"      # three drawn from its hundred most built
+```
+
+Average lists are seeds for opponents, not tuned decks. `deck random` prints the paths it wrote, ready to paste after your own list in `fcsim pod`.
+
 ## Pod
 
 ```sh

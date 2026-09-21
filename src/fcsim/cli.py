@@ -18,7 +18,7 @@ from .audit import Auditor, build, load_scenarios, materials, play, run_suite
 from .audit import render as render_report
 from .cards import CardDatabase, CardsError
 from .cards.database import default_data_dir
-from .cards.edhrec import average_deck
+from .cards.edhrec import average_deck, random_commanders
 from .play import goldfish, play_pod
 from .play.aggregate import aggregate
 from .play.aggregate import render as render_aggregate
@@ -118,6 +118,12 @@ def main(argv: list[str] | None = None) -> int:
     where_to.add_argument("-o", "--out", help="Where to write the new list")
     where_to.add_argument("--in-place", action="store_true", help="Overwrite the list")
     applied.add_argument("--all", action="store_true", help="Make every proposed swap, ticked or not")
+    sampled = deck_actions.add_parser("random", help="Write EDHREC average decks for commanders drawn at random from its hundred most built")
+    sampled.add_argument("--count", type=int, default=3)
+    sampled.add_argument("--seed", type=int)
+    sampled.add_argument("--exclude", action="append", default=[], metavar="COMMANDER", help="Never pick this one; repeat as needed")
+    sampled.add_argument("--window", choices=["week", "month", "year"], default="year", help="Popular over the past week, month or two years")
+    sampled.add_argument("--out", default="decks", help="Directory to write the lists into")
     average = deck_actions.add_parser("average", help="Write EDHREC's average deck for a commander: a placeholder opponent")
     average.add_argument("commander")
     average.add_argument("--out", help="File to write (default: print)")
@@ -249,6 +255,19 @@ def _deck(args: argparse.Namespace) -> int:
         with open(target, "w", encoding="utf-8") as out:
             out.write(decklist.to_mtgo())
         print(f"Wrote {target}; check it with `fcsim deck check {target}`.")
+        return 0
+    if args.action == "random":
+        database, written = CardDatabase(), []
+        for pick in random_commanders(args.count, seed=args.seed, exclude=tuple(args.exclude), window=args.window):
+            target = os.path.join(args.out, f"{pick['slug']}.txt")
+            os.makedirs(args.out, exist_ok=True)
+            with open(target, "w", encoding="utf-8") as out:
+                out.write(average_deck(pick["name"], page_slug=pick["slug"]))
+            checked = check_deck(target, database, trials=0, online=True)
+            written.append(target)
+            print(f"{pick['name']} ({pick['decks']:,} decks on EDHREC) -> {target}: " + ("legal" if checked["legal"] else
+                  "; ".join(issue["message"] for issue in checked["issues"])))
+        print(" ".join(written))
         return 0
     if args.action == "average":
         text = average_deck(args.commander)
