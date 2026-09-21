@@ -187,47 +187,61 @@ corrected. A three-turn run took about four minutes and seven model calls.
 ## Pod
 
 ```sh
-uv run fcsim pod examples/zuko.txt examples/talrand.txt --cycles 3 --max-calls 80
+uv run fcsim pod examples/zuko.txt decks/lathril.txt decks/miirym.txt decks/wilhelt.txt --cycles 10
+uv run fcsim pod --resume games/<game_dir> --cycles 4      # play on, by replaying the journal
+uv run fcsim status games/<game_dir>                       # where it stands and where the time went; works mid-game
 ```
 
-A multiplayer game: one agent per deck, each a fresh session in the selected backend with
-only its own seat's tools. The scheduler wakes whichever seat the table is waiting
-for and tells it what has happened since its last wake. A seat with priority on
-someone else's turn and nothing on the stack is passed for without a wake. At every
-checkpoint where something auditable happened, the auditor reviews it before the
-game goes on: its hooks go into the ledger, a trigger it reports is put in front of
-its controller, and a seat whose action it faults gets a correction wake to put
-the table right. Players can talk with `say`. Every wake opens with a briefing (the
-table with the seat's handles, its hand and the cards in play with their text, and
-its notes), so an agent can act without first fetching any of it. When something is
-on the stack, every seat still to act is asked at once, with one tool-less question,
-whether it wants to respond; a no is passed for mechanically and only a yes gets a
-wake. When a seat passes and nobody responds, its session is not ended: the call
-returns the table as it now stands and the same wake carries on, so a turn is a few
-sessions rather than twenty. `fcsim pod --resume <game_dir> --cycles N` plays N more
-rounds of a saved game by replaying its journal, and `fcsim status <game_dir>` shows
-where a game stands and where its time went, and `fcsim summarize <game_dir>` writes
-one file, `narrative.md`: the story of the game told with full information, then the
-round-by-round accounts it was written from. `fcsim rubric <game_dir>` scores a game
-against the table-quality rubric from its log alone (length, participation, sitting
-out, interaction, threat rotation, turn weight, the ending); the same scores close
-every pod's `report.md`.
+A multiplayer game: one agent per deck, each seeing only its own seat. `--cycles` caps the game
+in rounds (each living player's own turns). On a Mac the command keeps the machine from idle
+sleep while it runs.
 
-`fcsim review <decklist> <game_dir>...` is the first piece of the workshop: a
-reviewer with full information reads how the deck fared (the rubric scores, the
-round accounts, what happened to every card its pilot saw, the pilot's notes, rules
-findings, and your own `feedback.md` if the game has one), separates the deck from
-the pilot, the pod and the draws, and proposes at most five swaps. It is told that
-better means better games, not more power. Swaps are checked against the card data
-(in the list, legal, in color identity, not a duplicate) and written beside the
-list as checkboxes; `fcsim deck apply <decklist> <review> -o <new list>` makes the
-ones you tick. `FINDINGS.md` logs what real games have
-shown about the harness. A player asked to correct the table can `contest` the
-finding instead; a judge, given both sides and the text of every rule either cited,
-upholds, overrules or amends, and its ruling binds the auditor and the players for
-the rest of the game. Any player can `dispute` another's play, which the auditor
-must answer in public. Not built yet: rewinds as a judge's remedy, `ask_judge`, and
-reply wakes for table talk.
+**How a turn runs.** The driver wakes whichever seat the table is waiting for. Every wake opens
+with a briefing: what the seat has already done this turn, the table with its handles, its hand
+and the cards in play with their text, its notes, and any judge's rulings. When a seat passes
+and the pen comes straight back, the same session carries on, so a turn is normally one session.
+Whatever needs no judgement is done without a model: passing on an empty stack in someone
+else's turn, a quiet upkeep or draw step, a seat with no cards and nothing untapped.
+
+**Other players' chances to act** cost one tool-less question each, asked of every seat at once:
+whether to respond when something goes on the stack (one answer can cover the whole stack), and
+whether to act when attackers have been declared and again when blocks have. Only a yes is a
+wake. A player can set a private standing policy (`pass_always`, `pass_unless_targeted`), and can
+ask to be given priority in the end step before its own turn. Opening hands are decided the
+same way, all seats together.
+
+**Rules integrity.** The auditor checks each whole turn before the next begins (`--audit-every
+checkpoint` checks every time the pen moves: stricter, several times slower). Its hooks go into
+the ledger; a trigger it reports is put in front of its controller; event triggers it has
+described are queued by the table the moment their event happens; and it stamps creatures with
+their current power and toughness, which is worked out again before blocks if the battlefield
+has changed. A seat it faults is asked to correct the table, or may `contest`: a judge, given
+both sides and the text of every rule either cited, upholds, overrules or amends, and its ruling
+binds the auditor and the players for the rest of the game. Any player can `dispute` another's
+play, which the auditor must answer in public. The driver itself removes a player at 0 life, 10
+poison, 21 commander damage or a draw from an empty library before anyone gets priority.
+
+**After the game.**
+
+```sh
+uv run fcsim summarize games/<game_dir>          # narrative.md: the story, then the round accounts it came from
+uv run fcsim rubric games/<game_dir>             # scores from the log alone; no model
+uv run fcsim review examples/zuko.txt games/<game_dir> [more games]
+uv run fcsim deck apply examples/zuko.txt examples/zuko.review.md -o examples/zuko-v2.txt
+```
+
+`rubric` scores length, participation, sitting out, interaction, threat rotation, turn weight
+and the ending, each with its threshold stated; the same scores close every pod's `report.md`.
+`review` is the first piece of the workshop: a reviewer with full information reads how the
+deck fared (the rubric, the round accounts, what happened to every card its pilot saw, the
+pilot's notes, rules findings, and your own `feedback.md` if the game has one), separates the
+deck from the pilot, the pod and the draws, and proposes at most five swaps. It is told that
+better means better games, not more power. Swaps are checked against the card data and written
+beside the list as checkboxes; `deck apply` makes the ones you tick into a new list.
+
+`FINDINGS.md` logs what real games have shown about the harness, with evidence and status. Not
+built yet: rewinds as a judge's remedy, `ask_judge`, reply wakes for table talk, several games
+at once.
 
 ## Model backends
 
