@@ -84,10 +84,13 @@ otherwise removes a player at 0 life, 10 poison, 21 commander damage or a draw f
 draw, main1, begin_combat, end_combat, main2, end; whose is "each" or a seat number.
 - event_trigger: an ability that triggers on a game event, described in text. Also give `on`, so \
 that the table can put the trigger in front of its controller the moment the event happens: \
-`event` is cast, enters, dies, leaves or attacks; `who` is "you" (the permanent's controller cast \
-the spell or controlled the object), "opponent" or "any"; `type` is a word that must be in the \
+`event` is cast, enters, dies, leaves, attacks, milled (a card goes from a library to a graveyard; \
+`who` is whose library) or deals_combat_damage (a creature deals combat damage to a player); `who` \
+is "you" (the permanent's controller cast the spell or controlled the object), "opponent" or "any"; `type` is a word that must be in the \
 object's type line, such as Creature, Dragon, Zombie or Instant; `nontoken` is true if tokens do \
-not count; `other` is true if the ability says "another"; `self` is true if the ability triggers \
+not count; `nonland` is true if lands do not count; `once` is true if the ability says "one or \
+more", so that it triggers once however many cards or creatures did it together; `other` is true \
+if the ability says "another"; `self` is true if the ability triggers \
 only on the permanent itself ("whenever this creature attacks", "when The Wise Mothman enters or \
 attacks", "when this dies"): without it the table offers the trigger every time anything attacks, \
 enters or dies. Always give `on` when the event is one of the five; `from` is the zone a spell must be cast \
@@ -171,10 +174,10 @@ VERDICT_SCHEMA = {
                           "description": "For a step_trigger: \"each\" or a seat number."},
                 "controller": {"type": "integer"},
                 "on": {"type": "object", "additionalProperties": False, "required": ["event"], "properties": {
-                    "event": {"type": "string", "enum": ["cast", "enters", "dies", "leaves", "attacks"]},
+                    "event": {"type": "string", "enum": ["cast", "enters", "dies", "leaves", "attacks", "milled", "deals_combat_damage"]},
                     "who": {"type": "string", "enum": ["you", "opponent", "any"]},
                     "type": {"type": "string"}, "nontoken": {"type": "boolean"}, "other": {"type": "boolean"},
-                    "self": {"type": "boolean"},
+                    "self": {"type": "boolean"}, "nonland": {"type": "boolean"}, "once": {"type": "boolean"},
                     "from": {"type": "string", "enum": ["hand", "exile", "graveyard", "command", "library", "stack"]}}}}}},
         "disputes": {"type": "array", "items": {
             "type": "object", "additionalProperties": False, "required": ["event", "upheld", "answer"],

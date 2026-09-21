@@ -233,7 +233,9 @@ _EVENTS = {"cast": lambda f: f["event"] == "cast", "attacks": lambda f: f["event
            "enters": lambda f: f["event"] == "moved" and f["to"] == "battlefield" and f["from"] != "battlefield",
            "leaves": lambda f: f["event"] == "moved" and f["from"] == "battlefield" and f["to"] != "battlefield",
            "dies": lambda f: f["event"] == "moved" and f["from"] == "battlefield" and f["to"] == "graveyard"
-           and ("creature" in f["type_line"].lower() or not f["type_line"])}
+           and ("creature" in f["type_line"].lower() or not f["type_line"]),
+           "milled": lambda f: f["event"] == "moved" and f["from"] == "library" and f["to"] == "graveyard",
+           "deals_combat_damage": lambda f: f["event"] == "combat_damage"}
 
 
 def collect_triggers(game: Game) -> None:
@@ -242,6 +244,7 @@ def collect_triggers(game: Game) -> None:
     fits what the auditor wrote down for Ganax. A loose match is fine: the controller declines a
     trigger that does not really apply, and the auditor checks."""
     facts, game.facts = game.facts, []
+    fired: set[int] = set()  # hooks that say "one or more": once for everything that happened together
     for fact in facts:
         actor = fact["was_controller"] if fact["event"] == "moved" and fact["to"] != "battlefield" else fact["controller"]
         for hook in game.ledger:
@@ -261,7 +264,14 @@ def collect_triggers(game: Game) -> None:
                 continue
             if on.get("self") and hook.get("source") not in (fact.get("id"), fact.get("old_id")):
                 continue  # "whenever The Wise Mothman enters" was offered to its controller each time a land entered
-            what = {"cast": "cast", "attacks": "attacked", "enters": "entered", "leaves": "left the battlefield", "dies": "died"}
+            if on.get("nonland") and "land" in fact["type_line"].lower():
+                continue
+            if on.get("once"):
+                if id(hook) in fired:
+                    continue
+                fired.add(id(hook))
+            what = {"cast": "cast", "attacks": "attacked", "enters": "entered", "leaves": "left the battlefield", "dies": "died",
+                    "milled": "was milled", "deals_combat_damage": "dealt combat damage to a player"}
             game.pending_triggers.append({"id": game.new_id(), "seat": hook["controller"], "source": hook.get("source"),
                                           "text": f"{hook.get('text', '')} (because {fact['name']} {what[on['event']]})"})
 

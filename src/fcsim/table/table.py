@@ -537,6 +537,10 @@ class Table:
                 player = game.seats[ops._seat(game, hit["target"]["seat"])]
                 player.life -= amount
                 told.public.append(f"{ops._named(source)} deals {amount} to {player.name} ({player.life} life).")
+                if amount:
+                    game.facts.append({"event": "combat_damage", "id": source.id, "old_id": None, "name": source.name, "type_line": source.type_line,
+                                       "controller": source.controller, "was_controller": source.controller, "token": source.token is not None,
+                                       "to_player": player.index})
                 if source.is_commander and amount:
                     ops.apply_op(game, self.dice, seat, {"op": "commander_damage", "seat": player.index,
                                                          "commander": source.id, "amount": amount}, told)
@@ -781,7 +785,7 @@ class Table:
             entry = {"kind": hook["kind"], "text": str(hook.get("text", "")), "source": source.id,
                      "controller": hook.get("controller", source.controller)}
             if hook["kind"] == "event_trigger" and isinstance(hook.get("on"), dict):
-                entry["on"] = {k: hook["on"][k] for k in ("event", "who", "type", "nontoken", "other", "from", "self") if k in hook["on"]}
+                entry["on"] = {k: hook["on"][k] for k in ("event", "who", "type", "nontoken", "other", "from", "self", "nonland", "once") if k in hook["on"]}
             if hook["kind"] == "hold":
                 entry |= {"step": hook.get("step"), "seat": hook.get("seat", source.controller)}
             elif hook["kind"] == "step_trigger":

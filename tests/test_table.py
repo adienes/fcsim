@@ -954,3 +954,30 @@ def test_a_mutation_named_by_a_key_is_understood():
     assert "error" not in table.act(0, "act", {"because": "test", "mutations": [{"move": True, "from": {"seat": 0, "zone": "library", "position": "top", "count": 2}, "to": "exile"}]})
     assert "error" not in table.act(0, "act", {"because": "test", "mutations": [{"life": {"seat": 0}, "delta": -1}]}) and table.view(0)["seats"][0]["life"] == 39
     assert table.act(0, "act", {"because": "test", "mutations": [{"tap": {}, "untap": {}}]})["error"]["code"] == "unknown_op"   # two names: no single meaning
+
+
+def test_mills_and_combat_damage_are_events_a_trigger_can_wait_for():
+    table, runner = started()
+    pass_until(table, runner, "main1")
+    moth = spell_in_hand(table, 0)
+    runner.step(0, "act", {"because": "test set-up", "mutations": [{"op": "move", "obj": f"@{moth}", "to": "battlefield"}]})
+    handle = next(o["handle"] for o in table.view(None)["battlefield"] if o["name"] == moth)
+    table.apply_hooks([{"kind": "event_trigger", "handle": handle, "text": "Whenever one or more nonland cards are milled, put a counter on a creature.",
+                        "on": {"event": "milled", "who": "any", "nonland": True, "once": True}},
+                       {"kind": "event_trigger", "handle": handle, "text": "Whenever this creature deals combat damage to a player, they get four rad counters.",
+                        "on": {"event": "deals_combat_damage", "self": True}}])
+    runner.step(0, "act", {"because": "test", "mutations": [{"op": "mill", "seat": 1, "count": 12}]})   # twelve cards, some of them spells
+    runner.step(0, "pass_priority")
+    milled = [t["text"] for t in table.view(0)["waiting_triggers"]]
+    assert len(milled) == 1 and milled[0].startswith("Whenever one or more nonland cards are milled")            # once, not once a card
+    table.game.objects[next(o.id for o in table.game.objects.values() if o.name == moth)].entered_turn = 0
+    runner.step(0, "skip_trigger", {"pending": table.view(0)["waiting_triggers"][0]["handle"], "because": "test"})
+    pass_until(table, runner, "begin_combat")
+    for seat in (0, 1, 2):
+        runner.step(seat, "pass_priority")
+    runner.step(0, "declare_attackers", {"attacks": [{"attacker": f"@{moth}", "target": {"seat": 1}}]})
+    while table.expected()[0][1] != "combat_damage":
+        seat, kind = table.expected()[0]
+        runner.step(seat, {"priority": "pass_priority"}.get(kind, kind))
+    runner.step(0, "combat_damage", {"assignments": [{"source": f"@{moth}", "target": {"seat": 1}, "amount": 2}]})
+    assert [t["text"] for t in table.view(0)["waiting_triggers"]] == [f"Whenever this creature deals combat damage to a player, they get four rad counters. (because {moth} dealt combat damage to a player)"]
