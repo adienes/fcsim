@@ -1133,3 +1133,38 @@ def test_only_a_script_in_the_tables_own_words_is_kept_and_an_untrusted_one_wait
     runner.step(0, "cast", {"card": f"@{spell_in_hand(table, 0)}", "resolves": "auto_permanent"})
     runner.step(0, "pass_priority")
     assert table.expected() == [(0, "triggers")]                                 # as before: its controller puts it on the stack
+
+
+def test_lethal_damage_kills_before_anyone_gets_priority_where_the_table_is_sure():
+    table, runner, n = combat_table({"A1": {"power": "2", "toughness": "2"}, "A2": {"power": "3", "toughness": "3"},
+                                     "B1": {"power": "1", "toughness": "1", "keywords": ["Indestructible"]}, "B2": {"power": "4", "toughness": "4"}})
+    for obj in table.game.objects.values():     # the helper reaches into the state for Bob's creatures; give them their type lines too
+        if obj.zone == "battlefield":
+            obj.type_line = "Creature — Test"
+    runner.step(0, "act", {"because": "a burn spell resolves", "mutations": [
+        {"op": "damage", "obj": f"@{n['A1']}", "amount": 2}, {"op": "damage", "obj": f"@{n['A2']}", "amount": 2},
+        {"op": "damage", "obj": f"@{n['B1']}", "amount": 5}, {"op": "annotate", "obj": f"@{n['B2']}", "text": "prevent all damage to it this turn"},
+        {"op": "damage", "obj": f"@{n['B2']}", "amount": 9}]})
+    runner.step(0, "pass_priority")     # the next time anyone would receive priority, the table applies what it is sure of
+    told = " ".join(table.events[-1]["public"])
+    assert f"{n['A1']} has lethal damage marked on it and is destroyed (rule 704.5g)." in told
+    on_board = [o["name"] for o in table.view(0)["battlefield"]]
+    assert n["A1"] not in on_board and n["A2"] in on_board          # 2 damage on a 3/3 is not lethal
+    assert n["B1"] in on_board and n["B2"] in on_board              # indestructible; and a creature carrying a note is left to the players
+    runner.step(1, "act", {"because": "-3/-3 until end of turn", "mutations": [{"op": "counters", "obj": f"@{n['A2']}", "kind": "-1/-1", "delta": 3}]})
+    runner.step(1, "pass_priority")
+    assert n["A2"] not in [o["name"] for o in table.view(0)["battlefield"]] and "toughness 0 or less" in " ".join(table.events[-1]["public"])
+
+
+def test_a_lone_blocker_cannot_block_a_creature_with_menace():
+    table, runner, n = combat_table({"A1": {"power": "3", "toughness": "3", "keywords": ["Menace"]}, "B1": {"power": "1", "toughness": "1"}, "B2": {"power": "1", "toughness": "1"}})
+    pass_until(table, runner, "begin_combat")
+    for seat in (0, 1, 2):
+        runner.step(seat, "pass_priority")
+    runner.step(0, "declare_attackers", {"attacks": [{"attacker": f"@{n['A1']}", "target": {"seat": 1}}]})
+    for seat in (0, 1, 2):
+        runner.step(seat, "pass_priority")
+    handles = {o["name"]: o["handle"] for o in table.view(1)["battlefield"]}
+    alone = table.act(1, "declare_blockers", {"blocks": [{"blocker": handles[n["B1"]], "attacker": handles[n["A1"]]}]})
+    assert alone["error"]["code"] == "say_why" and "menace" in alone["error"]["message"] and table.game.turn.blockers == []
+    assert "error" not in table.act(1, "declare_blockers", {"blocks": [{"blocker": handles[n[b]], "attacker": handles[n["A1"]]} for b in ("B1", "B2")]})

@@ -40,7 +40,9 @@ beginning of your next upkeep, sacrifice it"): the table puts it in front of you
 request_choice {seats, prompt, options?} - asks other players something an effect makes them choose. It must be \
 last in its list; your wake then ends and you are woken again with the answers.
 Use annotate for effects that live on no card ("gets +3/+3 until end of turn", expires "eot"). You carry out \
-state-based actions yourself: a creature with lethal damage must be moved to its owner's graveyard."""
+state-based actions yourself, except that the table destroys a creature with lethal damage marked on it, or with no toughness \
+left, when it knows the creature's numbers and nothing in play speaks of prevention, regeneration or indestructibility: look before \
+you move a creature that may already have gone."""
 
 
 def _tool(name: str, description: str, properties: dict | None = None, required: tuple[str, ...] = ()) -> dict:

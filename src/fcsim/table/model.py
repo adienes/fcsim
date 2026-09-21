@@ -15,8 +15,8 @@ SEAT_ZONES = ("library", "hand", "graveyard", "exile", "command")
 
 # 1: the rad counter trigger (rule 728.1) is the table's. 2: a permanent's hooks are one set, replaced when it is described
 # again, and identical triggers queued together are one item with a count. 3: a trusted scripted trigger goes on the stack
-# and resolves by itself.
-MECHANICS = 3
+# and resolves by itself. 4: a creature with lethal damage, or no toughness left, dies before anyone gets priority.
+MECHANICS = 4
 
 
 class TableError(ValueError):

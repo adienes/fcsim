@@ -123,6 +123,40 @@ def propose_damage(game: Game, lookup: Callable[[str], dict | None] | None) -> d
             "first_strike_step": first_step, "basis": sorted({s["basis"] for s in known.values()})}
 
 
+_UNSURE = ("indestructible", "prevent", "regenerat", "can't be destroyed", "umbra armor", "totem armor", "damage can't", "instead")
+
+
+def doomed(game: Game, lookup) -> list[tuple[Obj, str]]:
+    """Creatures the state-based actions remove, where the table is sure: toughness 0 or less (rule
+    704.5f), or lethal damage marked and no indestructibility (704.5g). It is sure only of a creature
+    whose numbers it knows and which carries no note, and only while nothing on the ledger speaks of
+    prevention, regeneration or indestructibility; every other case stays with the players."""
+    if any(word in str(e.get("text", "")).lower() for e in game.ledger if e.get("kind") == "static" for word in _UNSURE):
+        return []
+    found = []
+    for obj in (game.objects[i] for i in game.battlefield):
+        if "creature" not in obj.type_line.lower() or obj.annotations or obj.phased_out or obj.face_down:
+            continue
+        known = stats(game, obj, lookup)
+        if known is None:
+            continue
+        if known["toughness"] <= 0:
+            found.append((obj, "has toughness 0 or less and is put into its owner's graveyard (rule 704.5f)"))
+        elif obj.damage and obj.damage >= known["toughness"] and "indestructible" not in known["keywords"]:
+            found.append((obj, "has lethal damage marked on it and is destroyed (rule 704.5g)"))
+    return found
+
+
+def menace_problem(game: Game, blocks: list[dict], lookup) -> str | None:
+    """An attacker with menace that these blocks leave with exactly one blocker."""
+    for attacker_id in {b["attacker"] for b in blocks}:
+        attacker = game.objects.get(attacker_id)
+        known = stats(game, attacker, lookup) if attacker is not None else None
+        if known and "menace" in known["keywords"] and sum(1 for b in blocks if b["attacker"] == attacker_id) == 1:
+            return f"{attacker.name} has menace: it can't be blocked except by two or more creatures."
+    return None
+
+
 def attack_problem(game: Game, obj: Obj, lookup) -> str | None:
     """Why this creature cannot be declared as an attacker, as far as the table can tell."""
     known = stats(game, obj, lookup)

@@ -100,7 +100,9 @@ the way past it when a card says otherwise:
 | Triggers and holds of a card any auditor has described before | on the ledger from the moment the card arrives, from a hook library kept across games (R12) |
 | The rad counter trigger (rule 728.1), an ability with no source that no permanent's hook can carry | queued by the table as the player's first main phase begins. Rules the table takes over are numbered (`mechanics` in a game's config), so a journal replays under the rules it was played with |
 | A triggered ability with nothing to decide, whose script has earned its trust (S16) | put on the stack and resolved by the table |
-| Still the agents' and the auditor's: everything a card's text says | ability costs, menace, the legend rule and zero toughness are next |
+| Blocking a creature with menace with one creature | refused |
+| A creature with lethal damage marked on it, or with no toughness left | dies before anyone receives priority (rules 704.3, 704.5f, 704.5g), when the table knows its numbers, it carries no note, and nothing on the ledger speaks of prevention, regeneration or indestructibility; otherwise it stays with the players. A dead commander goes on to the command zone |
+| Still the agents' and the auditor's: everything a card's text says | ability costs and the legend rule are next |
 
 ## Second pod: what the new driver did
 

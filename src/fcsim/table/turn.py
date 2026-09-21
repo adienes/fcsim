@@ -274,6 +274,22 @@ def collect_triggers(game: Game) -> None:
             game.pending_triggers.append(waiting)
 
 
+def _state_based_deaths(game: Game) -> None:
+    """Before anyone receives priority (rule 704.3): the deaths the table is sure of. What dies here is seen by
+    the triggers collected straight after, as it should be."""
+    from . import mechanics  # mechanics reads the model only; imported here to keep this module's imports as they were
+    lookup = getattr(game, "_lookup", None)
+    if lookup is None:
+        return
+    for obj, why in mechanics.doomed(game, lookup):
+        name = obj.name if obj.public else "A creature"
+        gone = mutations.move(game, obj, "graveyard")
+        game.announcements.append(f"{name} {why}.")
+        if gone is not None and gone.is_commander:
+            mutations.move(game, gone, "command")
+            game.announcements.append(f"{gone.name} is a commander, and goes from the graveyard to the command zone (rule 903.9a).")
+
+
 def _stack_script(game: Game, entry: dict, cause: str, fact: dict | None = None) -> None:
     """A trigger whose effect the table carries out itself goes straight on the stack: nobody has to be
     woken to put it there, and nobody to resolve it. It can still be responded to."""
@@ -298,6 +314,8 @@ def grant_priority(game: Game, seat: int) -> None:
     receives priority. (The audit of what just happened gates this too, once there is an auditor.)"""
     if game.control.kind == "over" or _gate(game, {"do": "grant", "seat": seat}):
         return
+    if game.mechanics >= 4:
+        _state_based_deaths(game)
     collect_triggers(game)
     owed = {t["seat"] for t in game.pending_triggers}
     for candidate in game.turn_order_from(game.turn.active):
@@ -322,6 +340,8 @@ def _yielding(game: Game, seat: int) -> bool:
 def _give_priority(game: Game, seat: int) -> None:
     if _gate(game, {"do": "give", "seat": seat}):
         return
+    if game.mechanics >= 4:
+        _state_based_deaths(game)  # rule 704.3: whenever a player would receive priority, not only after a resolution
     collect_triggers(game)
     if game.pending_triggers:  # something triggered since priority was last granted: it goes on the stack first
         return grant_priority(game, seat)
