@@ -1,63 +1,38 @@
-# Fire Lord Zuko — Primer
+# Fire Lord Zuko
 
 ## Gameplan
-This is a red-heavy Mardu deck that plays cards from exile and wins in combat. Zuko puts a +1/+1 counter on **each** creature you control whenever you cast a spell from exile, and whenever a permanent you control enters from exile. The feeders are:
-- **Impulse draw:** Light Up the Stage, Commune with Lava, March of Reckless Joy, Opera Love Song, Hex Magic, Prosper, Laelia, Bonehoard Dracosaur, Headliner Scarlett, Party Thrasher, Tavern Brawler.
-- **Foretell:** Delayed Blast Fireball, Sozin's Comet, Ultimate Magic: Holy, and anything in hand under Dream Devourer.
-- **Re-entry:** Norin the Wary, and Appa, Steadfast Guardian airbending your own permanents so you can recast them for {2} each.
-
-Counters raise power, and power raises firebending mana. Spend that mana on pump, extra combats and burn.
+This deck is Mardu in name and mono-red in practice. Zuko attacks and makes red mana equal to his power. Whenever you cast a spell from exile or a permanent enters from exile, he puts a counter on each creature you control. Impulse draw, foretell and airbend make nearly every play a team-wide counter. Build a board, stack counters, then turn combat mana into lethal.
 
 ## Opening hands
-- Zuko needs {R}{W}{B}. Keep hands that cast him by turn 3–4. The deck has 36 lands plus Sol Ring, Arcane Signet and three Talismans. White and black sources matter more than raw land count.
-- Two-drop engines make strong keeps: Firebending Student, Emberheart Challenger, Party Thrasher and Dream Devourer.
-- Mulligan hands of six-drops with no ramp.
+- Mulligan a two-land seven unless it also has a mana rock (Sol Ring, Arcane Signet or a Talisman) and at least two plays castable off those three sources. Play the rock on turn 2. Even then, expect to sit on three sources for several turns: the payoffs cost 4 to 6. Legion Leadership and Valakut Awakening double as land drops.
+- Early exile engines make a hand strong: Norin the Wary, Dream Devourer, Prosper, Tome-Bound, Party Thrasher.
 
 ## Early turns and the commander
-- **Norin** exiles himself whenever any player casts a spell or attacks, then returns at the next end step. That is a free Zuko trigger nearly every turn. Cast Norin early, before or alongside Zuko, and leave him out.
-- **Foretell early.** Whenever you have a spare {2}, foretell Sozin's Comet and Delayed Blast Fireball.
-- **Iroh** gives firebending 2 to everything with a counter.
-- **Isshin** and a charged **Firebender Ascension** double attack triggers.
-- **Keeping firebending mana:** it vanishes at end of combat unless one of these is out:
-  - Leyline Tyrant or Electro, Assaulting Battery (unspent red persists).
-  - Ozai (unspent mana becomes red). With Ozai out, keep 6+ mana floating between turns so he stays flying and indestructible. If he's targeted by destroy removal, tap lands in response until the pool reaches 6 (seen once).
-  - The Last Agni Kai cast that turn.
-- **Without a holder,** spend the mana in combat. Embercleave costs {1} less per attacker, so flash it onto Zuko. Keep one {R} for Redirect Lightning, paying 5 life, to turn away removal or a bounce (seen once).
-- Mithril Coat and Shinka target only legendary creatures, so they suit Zuko.
+- Seen once: cast Norin the Wary before Zuko. Any spell or attack exiles Norin, and it returns at the next end step. Each return is a Zuko trigger, so resolve it every time.
+- Dream Devourer gives your hand foretell. A foretold card cast later is cast from exile.
+- Seen once: with Party Thrasher, discard a dead card, and cast Zuko before you play the card you chose. A land played from exile triggers him too. Noncreature spells cast from exile have convoke, so tap spare red creatures to pay.
+- Seen once: cast haste creatures (Laelia, the Blade Reforged; Iroh, Dragon of the West; Headliner Scarlett; Hellkite Charger) in main phase 1, or they miss their attack and attack triggers.
+- Protect Zuko before overextending. Mithril Coat has flash. Flawless Maneuver is free while you control a commander. Ultimate Magic: Holy covers everything.
 
 ## How it wins
-- **Extra combats:** Aggravated Assault, Hellkite Charger and Great Train Heist.
-- **Big hits:** Embercleave, Two-Handed Axe, Legion Leadership and Bulk Up.
-- **Comet turn (seen once):** with Zuko and Isshin out, cast the foretold Sozin's Comet for {2}{R} before combat, then attack with everything. Pour the pool into Electrodominance with a big X at a targetable opponent. X of 6 or more lets its free cast put Ozai into play, and Ozai then keeps the rest.
-- **Delayed Blast Fireball from exile** deals 5 to each opponent and each of their creatures. Party Thrasher lets your creatures convoke its foretell cost. Afterward, Light Up the Stage costs only its {R} spectacle cost (seen once).
-- **Storm King's Thunder into Chandra's Ignition (seen once):**
-  - Ignition is a sorcery, so the mana must survive combat through Tyrant, Electro or Ozai.
-  - Attack first, then cast Thunder and Ignition in main phase 2 on your biggest creature.
-  - Count every copy against each opponent's life before committing.
-  - Skip optional taxes on opponents' cards if paying them leaves you short.
-- **Leyline Tyrant or Electro dying** with a red pool deals that damage directly.
+- Firebending mana empties at end of combat. Before every Zuko attack, know how you will spend it. Hold your X spells and pump for combat.
+  - Flash in Embercleave, which costs {1} less per attacker.
+  - Cast Electrodominance for a big X; it also casts a free spell from your hand.
+  - Cast Invoke Calamity or The Last Agni Kai.
+- Electro, Assaulting Battery and Leyline Tyrant keep red mana past combat, and Ozai, the Phoenix King turns lost mana red. With any of them out, combat mana can pay for Aggravated Assault.
+- Seen once, the biggest turn: foretell Sozin's Comet, then cast it from exile for {2}{R} with Isshin, Two Heavens as One out. Every creature gets a counter, and every firebending trigger happens twice. Hold an X spell for that attack.
+- Seen once: pay for Storm King's Thunder with firebending mana after combat damage. Then, with no instant or sorcery in between, cast Chandra's Ignition from lands in main 2 on your biggest creature. Each opponent takes that creature's power X+1 times. Ignition also hits your own creatures, Zuko included, so fire it only when it is lethal.
+- Extra combats: Aggravated Assault, Hellkite Charger, Great Train Heist.
+- Burst: Embercleave, Two-Handed Axe, Bulk Up, Legion Leadership.
+- Avatar's Wrath is a one-sided reset. Target Zuko to keep him. Each recast of your other creatures for {2} triggers Zuko and Appa, Steadfast Guardian. Damning Verdict spares creatures with counters, so cast it after Zuko has grown your team.
+- Seen once: while Zuko is out, always take Goliath Daydreamer's free recast, even Electrodominance for X=0. The counters are the point.
 
 ## What to answer, what to ignore
-**Spot removal is thin:** Swords to Plowshares, Untimely Malfunction, Redirect Lightning, The Last Agni Kai and Fires of Mount Doom. Save it for:
-- blockers that stop your attack
-- cards that punish attacking
-- combo pieces
-
-**Ignore incremental value.** You out-tempo it.
-
-**Aim free fights at the threat (seen once).** The Last Agni Kai, including free casts from Invoke Calamity or Goliath Daydreamer, goes at the opponent whose board can kill you, not the one with the most life.
-
-**Board-level tools:**
-- **Damning Verdict** is one-sided after one Zuko trigger.
-- **Chandra's Ignition** doubles as a wrath.
-- **Bojuka Bog** answers graveyard decks.
-- **Avatar's Wrath (seen once):**
-  - Target your best creature so it stays. Target Zuko to keep the engine running.
-  - Recast your airbent creatures for {2} each. A Zuko left in exile also costs just {2}.
-  - Opponents can't cast from exile until your next turn, so the sweep is nearly one-sided.
-  - Each recast triggers Zuko and Appa.
+Removal is thin: Swords to Plowshares, Fires of Mount Doom, Untimely Malfunction, Redirect Lightning, The Last Agni Kai, and Delayed Blast Fireball (5 damage when cast from exile). Save it for what stops Zuko's attacks: big blockers, fogs, and removal aimed at him. Redirect Lightning and Untimely Malfunction can turn single-target removal away. Untimely Malfunction also stops blockers on the lethal turn. Use Bojuka Bog against graveyard decks. Ignore slow value engines and race them.
 
 ## Mistakes this deck's pilots have made
-- **Tapping out into a mass effect (seen once).** Don't spend everything on a Zuko recast plus an all-in attack when an opponent is building toward a wipe. Hold back a creature, or keep cheap interaction live. With Zuko out, Flawless Maneuver is free and makes your creatures indestructible. Ultimate Magic: Holy covers all your permanents.
-- **Losing firebending mana.** Don't plan a sorcery-speed payoff with it unless Tyrant, Electro or Ozai is on the battlefield.
-- **Forgetting Norin.** He is a free counter for the whole team nearly every turn.
+- Keeping two-landers with no rock and stalling on three mana with 5-drops in hand.
+- Attacking with Zuko with no plan for the firebending mana.
+- Skipping a "useless" free Daydreamer recast that would have put a counter on every creature (seen once).
+- Letting Ozai die to removal. He is indestructible while you have six or more unspent mana. Tap lands in response to reach six floating, and don't spend your pool below six on your own turn (seen once).
+- Forgetting the Zuko trigger when Norin returns (seen once).
