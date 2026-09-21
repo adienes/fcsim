@@ -234,3 +234,42 @@ def test_random_opponents_are_drawn_from_the_popular_list_without_the_excluded(t
     (tmp_path / "ojer-axonil-deepest-might.json").write_text(json.dumps({"deck": {"cards": {"lands": [["Mountain", 99]]},
                                                                                   "commander": ["Ojer Axonil, Deepest Might // Temple of Power"]}}))
     assert average_deck("Ojer Axonil, Deepest Might // Temple of Power", cache_dir=tmp_path, page_slug="ojer-axonil-deepest-might").startswith("99 Mountain")
+
+
+def test_cards_are_searched_in_scryfalls_syntax_over_the_local_data(database, capsys):
+    from fcsim.cards.search import render, search
+
+    def names(query, **options):
+        return [card["name"] for card in search(query, database, **options)["cards"]]
+    assert names("o:counter t:instant id<=u") == ["Counterspell"]
+    assert names('o:"draw a card" mv<=1') == ["Opt"] and set(names("t:instant -o:counter id<=u mv<=2")) == {"Opt", "Cyclonic Rift"}
+    assert set(names("kw:partner")) >= {"Thrasios, Triton Hero", "Tymna the Weaver"} and names("id=gu is:commander") == ["Thrasios, Triton Hero"]
+    assert names("o:/search your library for (a|up to two) basic/") == ["Cultivate", "Evolving Wilds"] or "Cultivate" in names("o:/search your library for/")
+    assert "Black Lotus" not in names("lotus") and names("lotus include:illegal") == ["Black Lotus"] and names("banned:commander include:illegal") == ["Black Lotus"]
+    assert names("t:land produces:u -t:basic order:name")[0] == "Command Tower"
+    assert names("wrath or armageddon order:name") == ["Armageddon", "Wrath of God"]
+    ranked = search("t:creature", database)["cards"]
+    assert [c["edhrec_rank"] for c in ranked if c["edhrec_rank"]] == sorted(c["edhrec_rank"] for c in ranked if c["edhrec_rank"])   # most played first
+    assert "card(s) for `o:counter`" in render(search("o:counter", database)) and "Counter target spell." in render(search("o:counter", database))
+    for wrong in ("foo:bar", "mv<=cheap", "id:purple", "is:pretty", "order:beauty t:land"):
+        with pytest.raises(CardsError):
+            search(wrong, database)   # a term it does not understand is refused, never ignored
+    with pytest.raises(CardsError, match="every card"):
+        search("order:name", database)
+
+
+def test_a_search_for_a_deck_stays_in_its_colours_and_leaves_out_what_it_runs(database, tmp_path, capsys):
+    from fcsim.cli import main
+    deck = tmp_path / "talrand.txt"
+    deck.write_text("98 Island\n1 Opt\n\n1 Talrand, Sky Summoner\n", encoding="utf-8")
+    import os
+    os.environ["FCSIM_DATA"] = str(tmp_path / "data")
+    (tmp_path / "data" / "scryfall").mkdir(parents=True)
+    import shutil
+    shutil.copy(database.path, tmp_path / "data" / "scryfall" / "cards.sqlite")
+    try:
+        assert main(["cards", "search", "t:instant", "--deck", str(deck), "--names"]) == 0
+    finally:
+        del os.environ["FCSIM_DATA"]
+    listed = capsys.readouterr().out.split()
+    assert "Counterspell" in listed and "Opt" not in listed and "Swords" not in listed      # blue only, and not what it already has

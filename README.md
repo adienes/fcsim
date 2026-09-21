@@ -184,6 +184,18 @@ transcript, usage, and `report.md`: lands, spells and attacks by turn, the pilot
 own account of each turn, and rules health. Findings are recorded but not yet
 corrected. A three-turn run took about four minutes and seven model calls.
 
+## Card research
+
+```sh
+uv run fcsim cards search 'o:airbend mv<=3' --deck examples/zuko.txt       # within the deck's colours, leaving out what it runs
+uv run fcsim cards search 'o:"from exile" o:/you may (play|cast)/ -t:creature id<=rwb' --names
+```
+
+Scryfall's search syntax over the local card data: offline, a third of a second, ordered by how much Commander players use
+each card. `fcsim cards search --help` lists what is understood; a term that is not understood is refused, never ignored.
+`.claude/skills/card-research/SKILL.md` tells an agent working in this repository how to research cards with it and with the
+game records, and what "better" means for these decks.
+
 ## Deck projects
 
 ```sh

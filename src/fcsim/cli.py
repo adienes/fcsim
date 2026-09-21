@@ -16,9 +16,11 @@ from datetime import date
 from .agents import BACKENDS, Budget, RunnerError, make_runner
 from .audit import Auditor, build, load_scenarios, materials, play, run_suite
 from .audit import render as render_report
-from .cards import CardDatabase, CardsError, read_decklist
+from .cards import CardDatabase, CardsError, read_decklist, resolve
 from .cards.database import default_data_dir
 from .cards.edhrec import average_deck, random_commanders
+from .cards.search import render as render_search
+from .cards.search import search as search_cards
 from .play import goldfish, play_pod
 from .play.aggregate import aggregate
 from .play.aggregate import render as render_aggregate
@@ -99,6 +101,17 @@ def main(argv: list[str] | None = None) -> int:
     card_actions = cards.add_subparsers(dest="action", required=True)
     card_actions.add_parser("update", help="Download current card data and rebuild the index")
     card_actions.add_parser("info", help="Show where the card data came from and how old it is")
+    searched = card_actions.add_parser("search", help="Card research in Scryfall's search syntax, over the local card data",
+                                       description="Example: fcsim cards search 'o:\"from exile\" id<=rwb mv<=3 -t:creature'. Understood: words and "
+                                       "\"phrases\" in the name; o: (text or /regex/), t:, kw:, name:; id:/id<=/id= (letters, c, or mardu, jeskai ...); "
+                                       "mv, pow, tou, usd, edhrec with = < <= > >=; produces:; is:commander|land|permanent|gamechanger; banned:commander; "
+                                       "-term to negate; or; order:edhrec|usd|mv|name, direction:desc; include:illegal. --deck leaves out what a list "
+                                       "already runs and keeps to its colour identity.")
+    searched.add_argument("query")
+    searched.add_argument("--limit", type=int, default=20)
+    searched.add_argument("--deck", help="A decklist or deck project: stay within its colour identity and leave out cards it already runs")
+    searched.add_argument("--names", action="store_true", help="Names only, one a line")
+    searched.add_argument("--json", action="store_true")
     show = card_actions.add_parser("show", help="Look up one card by name")
     show.add_argument("name")
 
@@ -246,6 +259,19 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _cards(args: argparse.Namespace) -> int:
+    if args.action == "search":
+        database, query, running = CardDatabase(), args.query, set()
+        if args.deck:
+            from .workshop.project import deck_argument
+            deck = resolve(read_decklist(deck_argument(args.deck)[0]), database)
+            running = {card.name for card, _ in deck.cards} | {card.name for card in deck.commanders}
+            query = f"{query} id<={''.join(sorted(deck.identity)).lower() or 'c'}"
+        result = search_cards(query, database, limit=args.limit + len(running))
+        result["cards"] = [card for card in result["cards"] if card["name"] not in running][:args.limit]
+        result["total"] -= sum(1 for card in running if card in {c["name"] for c in result["cards"]})
+        print(json.dumps(result, indent=2, ensure_ascii=False) if args.json else
+              "\n".join(card["name"] for card in result["cards"]) if args.names else render_search(result))
+        return 0
     match args.action:
         case "update":
             result = CardDatabase.update()
