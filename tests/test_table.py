@@ -1407,3 +1407,24 @@ def test_a_spell_cast_while_another_resolves_waits_on_the_stack_and_no_card_is_m
         runner.step(seat, "pass_priority")
     assert table.expected() == [(0, "resolution")] and table.game.resolution["item"].source_name == second
     assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()
+
+
+def test_a_pool_is_left_alone_while_its_owners_own_effect_speaks_of_unspent_mana():
+    table, runner = started()
+    pass_until(table, runner, "main1")
+    ozai = spell_in_hand(table, 0)
+    runner.step(0, "act", {"because": "test set-up", "mutations": [{"op": "move", "obj": f"@{ozai}", "to": "battlefield"}]})
+    handle = next(o["handle"] for o in table.view(None)["battlefield"] if o["name"] == ozai)
+    table.apply_hooks([{"kind": "static", "handle": handle, "text": "If you would lose unspent mana, that mana becomes red instead."}])
+    runner.step(0, "act", {"because": "firebending", "mutations": [{"op": "mana", "add": "RRG", "until": "end_of_combat"}, {"op": "mana", "seat": 1, "add": "U"}]})
+    pass_until(table, runner, "main2")
+    said = [line for e in table.events for line in e["public"] if "unspent" in line and not line.startswith("Ledger:")]
+    assert table.view(1)["seats"][0]["mana_pool"] == "{R}{R}{G}" and "mana_pool" not in table.view(0)["seats"][1]      # Bob has no such effect
+    assert len(said) == 2 and f"would empty now, but {ozai} speaks of unspent mana" in said[1] and "Bob's unspent {U} empties" in said[0]
+    runner.step(0, "act", {"because": "Ozai: it becomes red", "mutations": [{"op": "mana", "remove": "G"}, {"op": "mana", "add": "R", "until": "kept"}]})
+    runner.step(0, "act", {"because": "test", "mutations": [{"op": "move", "obj": f"@{ozai}", "to": "graveyard"}]})
+    pass_until(table, runner, "end")
+    assert table.view(0)["seats"][0]["mana_pool"] == "{R}"           # the effect is gone: what was only held went with the step, what was kept stays
+    assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()
+    old = Table(seats(), seed=5, first=0, mechanics=5)
+    assert old.game.mechanics == 5

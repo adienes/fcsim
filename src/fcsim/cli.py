@@ -420,7 +420,11 @@ def _pods(args: argparse.Namespace, argv: list[str]) -> int:
         results = list(pool.map(one, range(args.games)))
     finished = [where for _, where, _ in results if where]
     if finished:
-        print("\n" + render_aggregate(aggregate(finished)))
+        # In a process of its own, like the games: a batch runs for hours, and this one was started on code older than its
+        # later games were played on. The second batch's report died replaying a game whose triggers it did not know.
+        report = subprocess.run([sys.executable, "-c", "import sys; from fcsim.cli import main; sys.exit(main(sys.argv[1:]))", "report", *finished],
+                                capture_output=True, text=True, check=False)
+        print("\n" + (report.stdout if report.returncode == 0 else f"The report could not be made: {(report.stderr.strip().splitlines() or ['no output'])[-1]}"))
     return 0 if len(finished) == args.games and not any(code for _, _, code in results) else 1
 
 

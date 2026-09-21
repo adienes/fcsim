@@ -43,6 +43,7 @@ def parse_cost(cost: str, x: int = 0) -> tuple[int, list[set[str]]] | None:
 
 
 LIFETIMES = ("step", "end_of_combat", "end_of_turn", "kept")
+_SOONEST = ("step", "end_of_combat", "end_of_turn", "held", "kept")  # "held" is the table's own: see `empty_pools`
 
 
 def parse_mana(text) -> list[str] | None:
@@ -58,26 +59,49 @@ def parse_mana(text) -> list[str] | None:
     return found or None
 
 
+def _keeper(game: Game, seat: int) -> str | None:
+    """The name of a permanent of this player whose continuous effect, as the ledger has it, speaks of unspent mana."""
+    for entry in game.ledger:
+        source = game.objects.get(entry.get("source"))
+        if entry.get("kind") == "static" and entry.get("controller") == seat and "unspent" in str(entry.get("text", "")).lower() and source is not None:
+            return source.name
+    return None
+
+
 def empty_pools(game: Game, *, entering: str | None) -> None:
     """Rule 500.4: unspent mana empties as each step ends. What an effect keeps longer goes when it says:
     as combat ends, or with the turn (`entering` is None when a new turn begins). Mana an effect says is
-    never lost ("kept") stays."""
-    def goes(floating: list) -> bool:
-        if floating[1] == "kept":
-            return False
-        return entering is None or floating[1] == "step" or (floating[1] == "end_of_combat" and entering in ("main2", "end", "cleanup"))
+    never lost ("kept") stays.
+
+    The table reads no card. As with the deaths it is sure of only while nothing on the ledger speaks of
+    prevention, it empties a pool only while nothing of that player's speaks of unspent mana: with Ozai, the
+    Phoenix King out ("if you would lose unspent mana, that mana becomes red instead") it twice emptied eight
+    firebending mana. Such mana is "held": left alone, said so once, and gone with the first step that ends
+    after the effect has."""
     for seat in game.seats:
+        keeper = _keeper(game, seat.index) if game.mechanics >= 6 else None
+
+        def goes(floating: list, keeper=keeper) -> bool:
+            if floating[1] in ("kept", "held"):
+                return floating[1] == "held" and keeper is None
+            return entering is None or floating[1] == "step" or (floating[1] == "end_of_combat" and entering in ("main2", "end", "cleanup"))
         gone = [m for m in seat.pool if goes(m)]
-        if gone:
+        shown = "".join(f"{{{m[0]}}}" for m in gone)
+        if gone and keeper:
+            for floating in gone:
+                floating[1] = "held"
+            game.announcements.append(f"{seat.name}'s unspent {shown} would empty now, but {keeper} speaks of unspent mana, so the table leaves it: "
+                                      "its controller removes or changes what that effect does not keep.")
+        elif gone:
             seat.pool = [m for m in seat.pool if not goes(m)]
-            game.announcements.append(f"{seat.name}'s unspent " + "".join(f"{{{m[0]}}}" for m in gone) + " empties from their mana pool.")
+            game.announcements.append(f"{seat.name}'s unspent {shown} empties from their mana pool.")
 
 
 def spend(game: Game, seat: int, wanted: list[str]) -> None:
     """Take this mana out of the seat's pool, the soonest to empty first."""
     pool = game.seats[seat].pool
     for color in wanted:
-        held = sorted((m for m in pool if m[0] == color), key=lambda m: LIFETIMES.index(m[1]))
+        held = sorted((m for m in pool if m[0] == color), key=lambda m: _SOONEST.index(m[1]))
         if not held:
             floating = "".join(f"{{{m[0]}}}" for m in pool) or "nothing"
             raise TableError("not_in_pool", f"You have no {{{color}}} floating: your mana pool holds {floating}.")

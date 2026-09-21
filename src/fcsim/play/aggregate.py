@@ -12,9 +12,13 @@ from .status import status
 
 
 def aggregate(game_dirs: list[str | Path]) -> dict:
-    games, decks, cards = [], {}, {}
+    games, decks, cards, unread = [], {}, {}, []
     for game_dir in game_dirs:
-        scored, seen = measure(game_dir), card_record(game_dir)
+        try:
+            scored, seen = measure(game_dir), card_record(game_dir)
+        except Exception as error:  # noqa: BLE001 - one journal that does not replay must not cost the report of the others
+            unread.append({"directory": Path(game_dir).name, "error": f"{type(error).__name__}: {error}"[:300]})
+            continue
         verdicts = {s["measure"]: s["verdict"] for s in scored["scores"]}
         games.append({"directory": Path(scored["directory"]).name, "rounds": scored["rounds"], "over": scored["over"],
                       "winner": scored["winner"], "verdicts": verdicts, "pace": _pace(game_dir)})
@@ -35,7 +39,7 @@ def aggregate(game_dirs: list[str | Path]) -> dict:
                 card["stuck_at_end"] += row["ended_in"] == "hand" and row["rounds_in_hand"] >= 2
     tally = {measure_: dict(Counter(g["verdicts"].get(measure_, "-") for g in games)) for measure_ in
              ("length", "participation", "sitting out", "interaction", "threat rotation", "turn weight", "ending")}
-    return {"games": games, "decks": decks, "cards": cards, "verdicts": tally}
+    return {"games": games, "decks": decks, "cards": cards, "verdicts": tally, "unread": unread}
 
 
 def _pace(game_dir: str | Path) -> dict:
@@ -53,6 +57,7 @@ def render(report: dict, *, deck: str | None = None) -> str:
     lines = [f"{n} game(s). With so few, read these as observations, not rates.", "",
              "GAMES"] + [f"  {g['directory'][-5:]}  {g['directory'][:-5][:56]:<56}  {g['rounds']:>2} rounds  " + (f"won by {g['winner']}" if g["winner"] else "unfinished")
                          for g in report["games"]]
+    lines += [f"  {g['directory'][-5:]}  COULD NOT BE READ and is in none of the numbers below: {g['error']}" for g in report.get("unread", [])]
     lines += ["", "PACE    in the models' own seconds, so games played side by side compare",
               "  game   table turns  seconds a turn  wakes a turn  audits  findings  rulings"]
     lines += [f"  {g['directory'][-5:]:<7}{p['table_turns']:>11}{p['seconds_per_turn']:>16}{p['wakes_per_turn']:>14}{p['audits']:>8}{p['findings']:>10}{p['rulings']:>9}"

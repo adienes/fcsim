@@ -667,7 +667,7 @@ def test_a_player_spoken_to_by_name_answers_before_the_speaker_acts(database, tm
     assert "You are not acting now, only talking." in asked and "YOUR HAND" in asked
 
 
-def test_several_games_are_reported_side_by_side_with_their_sample_size(combat_game, capsys):
+def test_several_games_are_reported_side_by_side_with_their_sample_size(combat_game, capsys, tmp_path):
     from fcsim.cli import main
     from fcsim.play.aggregate import aggregate
 
@@ -680,6 +680,10 @@ def test_several_games_are_reported_side_by_side_with_their_sample_size(combat_g
     assert main(["report", directory, "--deck", "thras"]) == 0
     out = capsys.readouterr().out
     assert "1 game(s). With so few" in out and "CARDS Thrasios saw" in out and "CARDS Talrand saw" not in out
+    broken = aggregate([directory, str(tmp_path / "no-such-game")])   # one game that cannot be read does not cost the report of the others
+    assert len(broken["games"]) == 1 and broken["unread"][0]["directory"] == "no-such-game"
+    from fcsim.play.aggregate import render as render_report
+    assert "COULD NOT BE READ and is in none of the numbers below" in render_report(broken)
     pace = report["games"][0]["pace"]   # in the models' own time, so games played side by side compare
     assert pace["table_turns"] >= 1 and pace["seconds_per_turn"] == round(pace["model_seconds"] / pace["table_turns"]) and "PACE" in out
 
@@ -693,6 +697,9 @@ def test_several_games_of_one_pod_are_child_processes_with_their_own_seeds(comba
 
     def fake_run(command, stdout=None, **_):
         commands.append(command)
+        if command[3] == "report":   # the closing report is a child too, on the code as it is on disk by then
+            assert cli.main(command[3:]) == 0
+            return subprocess.CompletedProcess(command, 0, stdout=capsys.readouterr().out, stderr="")
         stdout.write(f"turn 1 main1: ...\nEverything is in {combat_game[0]['directory']}\n")   # a child writes its progress to its own log
         return subprocess.CompletedProcess(command, 0)
     monkeypatch.setattr(cli.subprocess, "run", fake_run)
@@ -700,8 +707,9 @@ def test_several_games_of_one_pod_are_child_processes_with_their_own_seeds(comba
     monkeypatch.setattr(cli, "_stay_awake", lambda: None)
     out = str(tmp_path / "games")
     assert cli.main(["pod", "a.txt", "b.txt", "--games", "3", "--parallel", "2", "--seed", "10", "--cycles", "8", "--effort", "medium", "--out", out]) == 0
-    tails = sorted(command[3:] for command in commands)
+    tails = sorted(command[3:] for command in commands if command[3] == "pod")
     assert tails == [["pod", "a.txt", "b.txt", "--cycles", "8", "--effort", "medium", "--out", out, "--seed", str(seed)] for seed in (10, 11, 12)]
+    assert [command[3:] for command in commands if command[3] == "report"] == [["report"] + [combat_game[0]["directory"]] * 3]
     assert sorted(p.name for p in next((tmp_path / "games").glob("batch_*")).iterdir()) == ["game-1.log", "game-2.log", "game-3.log"]
     out = capsys.readouterr().out
     assert "game 3 of 3 (seed 12)" in out and "3 game(s). With so few" in out and "RUBRIC  how many games got each verdict" in out
