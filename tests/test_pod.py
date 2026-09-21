@@ -996,3 +996,57 @@ def test_a_finding_at_a_scripted_resolution_that_is_in_no_library_stops_nothing(
     report = play_pod(decks(tmp_path), seats, auditor, database, cycles=2, seed=4, out_root=tmp_path / "games", echo=lambda *_: None,
                       hook_library=tmp_path / "hooks.json")
     assert auditor.blamed and report["stopped"] is None and not (Path(report["directory"]) / "error.txt").exists()
+
+
+def test_a_game_that_stopped_inside_an_audit_is_still_owed_that_audit_when_it_is_resumed(database, tmp_path, monkeypatch):
+    """The second batch's second game: the auditor found Cyclonic Rift resolved against the wrong permanent, the
+    driver died before the correction, and the resume audited only what had happened since it began: nothing."""
+    from fcsim.play import pod
+    budget = Budget(max_calls=300)
+    finding = {"kind": "misresolved", "seat": 0, "summary": "what Talrand did was wrong", "basis": "test", "fix": "put it right", "confidence": "high"}
+    real, calls = pod._characteristics_print, {"n": 0}
+
+    def breaks_once(table):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise KeyError("inside the audit, after the verdict and before the correction")
+        return real(table)
+    monkeypatch.setattr(pod, "_characteristics_print", breaks_once)
+    report = play_pod(decks(tmp_path), [ScriptedSeat(budget, fidgets=True) for _ in range(3)], FakeRunner([{"verdict": "findings", "findings": [finding], "hooks": []}] + [OK] * 20, budget),
+                      database, cycles=1, seed=4, out_root=tmp_path / "games", echo=lambda *_: None)
+    directory = Path(report["directory"])
+    assert report["stopped"].startswith("internal error") and "correct" not in (directory / "log.md").read_text().lower()
+    monkeypatch.undo()
+    auditor = FakeRunner([{"verdict": "findings", "findings": [finding], "hooks": []}] + [OK] * 20, budget)
+    resumed = play_pod([], [ScriptedSeat(budget, fidgets=True) for _ in range(3)], auditor, database, cycles=1, resume=directory, echo=lambda *_: None)
+    audits = [json.loads(line) for line in (directory / "audits.jsonl").read_text().splitlines()]
+    assert resumed["stopped"] is None and audits[1]["events"][0] == audits[0]["events"][0]      # the same stretch, from the board as it stood then
+    assert "what Talrand did was wrong" in (directory / "log.md").read_text()                   # and this time the correction is made
+    assert resumed["journal"] == "replays to the same game"
+
+
+def test_a_resumed_game_can_be_taken_up_from_an_earlier_event_and_nobody_counts_what_was_abandoned(database, tmp_path):
+    from fcsim.audit.auditor import record
+    from fcsim.play.gamedir import GameDirectory
+    from fcsim.play.rubric import measure
+    from fcsim.table import Table
+    budget = Budget(max_calls=400)
+    report = play_pod(decks(tmp_path), [ScriptedSeat(budget, fidgets=True) for _ in range(3)], FakeRunner([OK] * 40, budget), database, cycles=2, seed=4,
+                      out_root=tmp_path / "games", echo=lambda *_: None)
+    directory = Path(report["directory"])
+    events = GameDirectory.open(directory).events()
+    back = next(e["n"] for e in events if e["turn"] == 4 and e["tool"] == "act")   # the second round has begun, and something in it needs an audit
+    lands_before = sum(1 for e in events if e["tool"] == "play_land")
+    auditor = FakeRunner([OK] * 40, budget)
+    resumed = play_pod([], [ScriptedSeat(budget, fidgets=True) for _ in range(3)], auditor, database, cycles=1, resume=directory, echo=lambda *_: None,
+                       rewind_to=back, rewind_because="test")
+    events = GameDirectory.open(directory).events()
+    rewind = next(e for e in events if e["tool"] == "rewind")
+    gone = Table.undone(events)
+    assert gone == set(range(back + 1, rewind["n"])) and resumed["journal"] == "replays to the same game"
+    table = Table.replay(json.loads((directory / "config.json").read_text())["table"], events)
+    told = "\n".join(record(table, back + 1))
+    assert f"event {back + 1} " not in told and "The table is rewound to just after event" in told      # the auditor is not shown the abandoned line
+    assert "WHAT WAS DONE" in auditor.asked[0]["prompt"] and f"event {back} " in auditor.asked[0]["prompt"]   # the turn it went back into is audited from its start
+    played = sum(1 for e in events if e["tool"] == "play_land" and e["n"] not in gone)
+    assert sum(1 for turn in measure(directory)["turns"] if turn["land"]) == played <= lands_before + 3   # the scores count each land once

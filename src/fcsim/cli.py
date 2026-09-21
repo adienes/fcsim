@@ -205,6 +205,9 @@ def main(argv: list[str] | None = None) -> int:
     pod = commands.add_parser("pod", help="A multiplayer game: one agent per deck, audited")
     pod.add_argument("decks", nargs="*", help="Two to four decklists, in turn order after a random start")
     pod.add_argument("--resume", metavar="GAME_DIR", help="Play --cycles more rounds of an existing game instead of starting one")
+    pod.add_argument("--rewind-to", type=int, metavar="EVENT", help="With --resume: first return the game to just after this event. "
+                     "What was played after it stays in the journal and is counted by nobody")
+    pod.add_argument("--because", default="", help="With --rewind-to: why, for the log")
     pod.add_argument("--audit-every", choices=["turn", "checkpoint"], default="turn",
                      help="Audit each whole turn (default), or every time the pen moves after an action (stricter, much slower)")
     pod.add_argument("--triage-model", help="Model for respond-or-pass questions (default: the players' model)")
@@ -449,7 +452,8 @@ def _pod(args: argparse.Namespace) -> int:
                       seed=args.seed, out_root=args.out, rules=rules, resume=args.resume, audit_every=args.audit_every,
                       triage_runners=[make_runner(args.backend, model=args.triage_model or args.model, effort=args.triage_effort,
                                                   budget=budget) for _ in args.decks],
-                      hook_library=default_data_dir() / "hooks.json", shuffle_seats=not args.keep_seating)
+                      hook_library=default_data_dir() / "hooks.json", shuffle_seats=not args.keep_seating,
+                      rewind_to=args.rewind_to if args.resume else None, rewind_because=args.because)
     with open(f"{report['directory']}/report.md", encoding="utf-8") as text:
         print("\n" + text.read())
     print(f"Everything is in {report['directory']}")

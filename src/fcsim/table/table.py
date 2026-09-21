@@ -908,6 +908,16 @@ class Table:
         self._kill_wakes()
         return result
 
+    @staticmethod
+    def undone(events: list[dict]) -> set[int]:
+        """The numbers of the events a later rewind took back. The abandoned line stays in the journal,
+        which must replay as it was played, and nobody counts it: not the auditor, not the scores."""
+        gone: set[int] = set()
+        for index, event in enumerate(events):
+            if event["tool"] == "rewind":
+                gone.update(range(event["args"]["to"] + 1, index))
+        return gone
+
     def _kill_wakes(self) -> None:
         for wake in self._wakes.values():
             wake["alive"] = False
@@ -921,8 +931,9 @@ class Table:
         table = cls(config["seats"], seed=config["seed"], first=config["first"], gated=config.get("gated", False),
                     card_lookup=card_lookup, mechanics=config.get("mechanics", 0), _setup_random=events[0]["random"])
         table._replaying = True
+        gone = cls.undone(events) if before is not None else set()
         for event in events[1:]:
-            if before is not None:
+            if before is not None and event["n"] not in gone:  # a reader is not shown what was later taken back
                 before(table, event)
             if event["tool"] == "patch":
                 table.patch(event["args"]["mutations"], event["args"]["because"], _recorded=event["random"])

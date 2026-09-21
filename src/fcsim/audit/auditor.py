@@ -377,8 +377,9 @@ def record(table: Table, since_event: int, until_event: int | None = None) -> li
                           + ", ".join(dict.fromkeys(name for _, name, _ in passing)) + " passed priority.")
             passing.clear()
 
+    gone = table.undone(table.events)
     for event in table.events[since_event:until_event]:
-        if (not event["public"] and not event["lints"]) or event["tool"] in ("setup", "mulligan", "keep", "write_notes"):
+        if event["n"] in gone or (not event["public"] and not event["lints"]) or event["tool"] in ("setup", "mulligan", "keep", "write_notes"):
             continue  # the table's own bookkeeping, private notes, and the mulligans it enforces itself
         if event["tool"] == "pass_priority" and not event["lints"] and len(event["public"]) <= 1:
             passing.append((event["n"], table.game.seats[event["seat"]].name, event["step"]))

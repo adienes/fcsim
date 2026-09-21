@@ -128,7 +128,8 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
              seed: int | None = None, out_root: str | Path = "games", rules: RulesReference | None = None,
              resume: str | Path | None = None, audit_every: str = "turn", triage_runners: list[Runner] | None = None,
              refresh_before_blocks: bool = True, judge_runner: Runner | None = None, hook_library: str | Path | None = None,
-             shuffle_seats: bool = False, echo=lambda line: print(line, flush=True)) -> dict:
+             shuffle_seats: bool = False, rewind_to: int | None = None, rewind_because: str = "",
+             echo=lambda line: print(line, flush=True)) -> dict:
     """Play up to `cycles` turns per seat. `runners[i]` pilots seat i; share one Budget across all
     runners and the auditor to cap the whole game.
 
@@ -141,6 +142,8 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
     works out current power and toughness before blockers are chosen, if the battlefield has
     changed since it last did. `judge_runner` rules when a player contests an auditor's finding;
     by default the auditor's runner does, as a separate call with the judge's own brief.
+    With `rewind_to`, a resumed game first returns to just after that event (the table's `rewind`: the
+    abandoned line stays in the journal and nobody counts it), and whatever audit was owed there is made.
     `hook_library` is a JSON file of what auditors have written for each card in earlier games: a card
     in it has its triggers and holds from the moment it arrives, and the file learns from this game.
     With `shuffle_seats` the decks are seated in an order drawn from the seed, so that who sits to whose
@@ -168,7 +171,7 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
                      earlier.read("config.json")["seats"], decks, runners, auditor_runner, database, cycles, rules, echo,
                      earlier=earlier.read("report.json") if (earlier.path / "report.json").is_file() else {"wakes": []},
                      audit_every=audit_every, triage_runners=triage_runners, refresh_before_blocks=refresh_before_blocks,
-                     judge_runner=judge_runner, hook_library=hook_library, primers=primers)
+                     judge_runner=judge_runner, hook_library=hook_library, primers=primers, rewind_to=rewind_to, rewind_because=rewind_because)
     seed = seed if seed is not None else secrets.randbelow(2 ** 31)
     if shuffle_seats:
         order = random.Random(f"seating-{seed}").sample(range(count), count)
@@ -207,13 +210,16 @@ class _Pod:
     def __init__(self, directory: GameDirectory, table: Table, names: list[str], decks: list, runners: list, auditor_runner,
                  database: CardDatabase, cycles: int, rules: RulesReference | None, echo, *, earlier: dict | None = None,
                  audit_every: str = "turn", triage_runners: list | None = None, refresh_before_blocks: bool = True, judge_runner=None,
-                 hook_library: str | Path | None = None, ask_about_triggers: bool = True, primers: list[str] | None = None) -> None:
+                 hook_library: str | Path | None = None, ask_about_triggers: bool = True, primers: list[str] | None = None,
+                 rewind_to: int | None = None, rewind_because: str = "") -> None:
         self.directory, self.table, self.names, self.decks, self.runners, self.auditor_runner, self.database, self.cycles, self.rules = \
             directory, table, names, decks, runners, auditor_runner, database, cycles, rules
         self.echo, self.earlier, self.audit_every, self.triage_runners, self.refresh_before_blocks, self.judge_runner, self.hook_library, self.ask_about_triggers = \
             echo, earlier, audit_every, triage_runners, refresh_before_blocks, judge_runner, hook_library, ask_about_triggers
         self.count, self.seed = len(self.names), self.table.config["seed"]
         self.table.on_event = self.directory.journal  # a replayed table was built without its journal
+        if rewind_to is not None:  # a resumed game taken up again from an earlier event: journalled, like everything else
+            self.table.rewind(rewind_to, rewind_because or "the game is taken up again from here")
         # A game's length is counted in rounds, each living player's own turns, so that eliminations do
         # not shorten it. On a resume the turn in progress (or just begun) is the first of the new rounds.
         game = self.table.game
@@ -570,8 +576,23 @@ class _Pod:
         scratch.write_text(json.dumps({**on_disk, **hooks}, indent=1, ensure_ascii=False, sort_keys=True), encoding="utf-8")
         scratch.replace(self.library)
 
+    def owed(self) -> tuple | None:
+        """After a resume: the snapshot the audit still owed would have begun from, or None if nothing is owed.
+        A game can stop anywhere, and the second batch's second game stopped inside an audit, after the
+        finding (Cyclonic Rift resolved against the wrong permanent) and before its correction. The resume
+        then took its snapshot of the board as it found it, audited the nothing that had happened since,
+        and released the turn. What is owed is everything that stands since the last release that stands."""
+        events, gone = self.table.events, self.table.undone(self.table.events)
+        since = max((e["n"] + 1 for e in events if e["tool"] == "release" and e["n"] not in gone),
+                    default=next((e["n"] for e in events if e["turn"] >= 1), None))  # no audit yet: from the first turn's first event
+        if since is None or not any(e["seat"] is not None and e["n"] not in gone for e in events[since:]):
+            return None
+        past = Table.replay(self.table.config, events[:since], card_lookup=self.table.card_lookup)
+        return self.auditor.snapshot(past)
+
     def audit(self, server: McpServer, snapshot: tuple) -> None:
-        unit = self.table.events[snapshot[2]:]
+        gone = self.table.undone(self.table.events)
+        unit = [e for e in self.table.events[snapshot[2]:] if e["n"] not in gone]
 
         def needs_no_audit(event: dict) -> bool:
             """Nothing here for a rules check to find: talk and passing; and what the table itself has
@@ -828,7 +849,7 @@ class _Pod:
         with McpServer(self.tools_for) as server:
             try:
                 self.opening_hands(server)
-                snapshot = self.auditor.snapshot(self.table)
+                snapshot = (self.owed() if self.earlier is not None else None) or self.auditor.snapshot(self.table)
                 while True:
                     why = self.settle()
                     if why in ("over", "stuck"):
