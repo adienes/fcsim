@@ -4,10 +4,12 @@ What real games have shown about the harness: its speed, its flow, and the quali
 rulings. Each item says what was seen, the evidence, and where it stands. `fcsim status <game_dir>`
 produces the numbers quoted here.
 
-Games so far: a 3-turn Talrand goldfish, a 5-turn Zuko goldfish, and two four-player pods of the
-same decks (Zuko, Lathril, Miirym, Wilhelt; EDHREC average lists for the last three), both started
-2026-09-20. The first was resumed three times as the driver changed under it; the second ran on
-the driver as it stood after every item marked "built, not yet run with models" below.
+Games so far: a 3-turn Talrand goldfish, a 5-turn Zuko goldfish, and four four-player pods, all
+with Fire Lord Zuko in seat 0. Pods 1 to 3 (2026-09-20) used the same three EDHREC average lists
+(Lathril, Miirym, Wilhelt): Miirym won in round 6, Lathril in round 9, Miirym in round 10. Pod 4 drew
+its opponents at random from EDHREC's hundred most-built commanders (Ashling, Aragorn, The Wise
+Mothman) and is the first on the table's own rules layer. A running game is stopped and resumed on
+new code whenever a fix lands, so each pod's later turns test more than its early ones did.
 
 ## Speed
 
