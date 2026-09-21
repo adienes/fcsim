@@ -29,6 +29,8 @@ from .play.status import render as render_status
 from .play.status import status
 from .rules import RulesError, RulesReference
 from .workshop.check import check_deck, render
+from .workshop.learn import learn as learn_lessons
+from .workshop.project import DeckProject
 from .workshop.review import apply as apply_review
 from .workshop.review import review as review_deck
 
@@ -118,6 +120,15 @@ def main(argv: list[str] | None = None) -> int:
     where_to.add_argument("-o", "--out", help="Where to write the new list")
     where_to.add_argument("--in-place", action="store_true", help="Overwrite the list")
     applied.add_argument("--all", action="store_true", help="Make every proposed swap, ticked or not")
+    begun = deck_actions.add_parser("init", help="Make a deck project from a list: the deck's identity, its primer and its lessons, kept across list revisions")
+    begun.add_argument("path")
+    begun.add_argument("--name", help="The project's name (default: the commander's)")
+    begun.add_argument("--root", default="decks")
+    taught = deck_actions.add_parser("learn", help="Study finished games for piloting lessons and rewrite the project's primer (uses the model)")
+    taught.add_argument("project", help="A deck project directory")
+    taught.add_argument("game_dirs", nargs="+")
+    taught.add_argument("--max-calls", type=int, default=6)
+    _model_options(taught, audited=False, cost_default=5.0)
     sampled = deck_actions.add_parser("random", help="Write EDHREC average decks for commanders drawn at random from its hundred most built")
     sampled.add_argument("--count", type=int, default=3)
     sampled.add_argument("--seed", type=int)
@@ -247,6 +258,18 @@ def _cards(args: argparse.Namespace) -> int:
 
 
 def _deck(args: argparse.Namespace) -> int:
+    if args.action == "init":
+        project = DeckProject.init(args.path, CardDatabase(), root=args.root, name=args.name)
+        print(f"Made {project.path}: current.txt, primer.md (empty until `fcsim deck learn`), lessons.jsonl, CHANGELOG.md.\n"
+              f"Play it with `fcsim pod {project.path} ...`; its pilot is given the primer.")
+        return 0
+    if args.action == "learn":
+        runner = make_runner(args.backend, model=args.model, effort=args.effort, budget=_budget(args))
+        result = learn_lessons(args.project, args.game_dirs, runner, CardDatabase())
+        print(json.dumps(result, indent=2))
+        with open(os.path.join(args.project, "primer.md"), encoding="utf-8") as text:
+            print("\n" + text.read())
+        return 0
     if args.action == "apply":
         decklist, made, refused = apply_review(args.path, args.review, CardDatabase(), everything=args.all)
         for swap in made:

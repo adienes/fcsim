@@ -145,9 +145,18 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
     in it has its triggers and holds from the moment it arrives, and the file learns from this game.
     With `shuffle_seats` the decks are seated in an order drawn from the seed, so that who sits to whose
     left changes from game to game as well as who goes first; `runners[i]` still pilots `deck_paths[i]`."""
+    from ..workshop.project import deck_argument  # the workshop reads games, so it is imported here and not at the top
+
     earlier = GameDirectory.open(resume) if resume else None
     if earlier:
         deck_paths = [earlier.path / "decks" / f"seat-{index}.txt" for index in range(len(earlier.read("config.json")["seats"]))]
+        primers = [(p.read_text(encoding="utf-8") if (p := earlier.path / "decks" / f"seat-{index}.primer.md").is_file() else "")
+                   for index in range(len(deck_paths))]  # a game keeps the guidance it began with, whatever the project has learned since
+        projects = [None] * len(deck_paths)
+    else:
+        given = [deck_argument(path) for path in deck_paths]
+        deck_paths, projects = [path for path, _ in given], [project for _, project in given]
+        primers = [project.primer() if project else "" for project in projects]
     decks = [resolve(read_decklist(path), database, online=True) for path in deck_paths]
     for path, deck in zip(deck_paths, decks, strict=True):
         if deck.unknown or not deck.commanders:
@@ -159,12 +168,13 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
                      earlier.read("config.json")["seats"], decks, runners, auditor_runner, database, cycles, rules, echo,
                      earlier=earlier.read("report.json") if (earlier.path / "report.json").is_file() else {"wakes": []},
                      audit_every=audit_every, triage_runners=triage_runners, refresh_before_blocks=refresh_before_blocks,
-                     judge_runner=judge_runner, hook_library=hook_library)
+                     judge_runner=judge_runner, hook_library=hook_library, primers=primers)
     seed = seed if seed is not None else secrets.randbelow(2 ** 31)
     if shuffle_seats:
         order = random.Random(f"seating-{seed}").sample(range(count), count)
         deck_paths, decks, runners = [deck_paths[i] for i in order], [decks[i] for i in order], [runners[i] for i in order]
         triage_runners = [triage_runners[i] for i in order] if triage_runners else None
+        projects, primers = [projects[i] for i in order], [primers[i] for i in order]
         names = _names(decks)
     directory = GameDirectory(out_root, "pod_" + "-".join(names), seed)
     table = Table([{"name": name, "commanders": [c.name for c in deck.commanders], "library": [c.name for c in deck.library()]}
@@ -173,6 +183,8 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
                   card_lookup=_lookup(database))
     for index, path in enumerate(deck_paths):
         directory.write(f"decks/seat-{index}.txt", read_decklist(path).to_mtgo())
+        if primers[index]:
+            directory.write(f"decks/seat-{index}.primer.md", primers[index])  # exactly what this pilot was told, frozen with the game
     directory.pin_cards({card.name for deck in decks for card in [*deck.commanders, *(c for c, _ in deck.cards)]}, database)
     directory.pin_rules(rules)
     directory.write("config.json", {"mode": "pod", "decks": [str(p) for p in deck_paths], "seats": names, "cycles": cycles,
@@ -180,10 +192,11 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
                                     "backends": [getattr(r, "backend", "custom") for r in runners],
                                     "auditor_model": auditor_runner.model,
                                     "auditor_backend": getattr(auditor_runner, "backend", "custom"),
+                                    "projects": [project.hashes(database) if project else None for project in projects],
                                     "deck_issues": [[i.to_dict() for i in validate_deck(d, database)] for d in decks]})
     return _play(directory, table, names, decks, runners, auditor_runner, database, cycles, rules, echo,
                  audit_every=audit_every, triage_runners=triage_runners, refresh_before_blocks=refresh_before_blocks,
-                 judge_runner=judge_runner, hook_library=hook_library)
+                 judge_runner=judge_runner, hook_library=hook_library, primers=primers)
 
 
 class _Pod:
@@ -194,7 +207,7 @@ class _Pod:
     def __init__(self, directory: GameDirectory, table: Table, names: list[str], decks: list, runners: list, auditor_runner,
                  database: CardDatabase, cycles: int, rules: RulesReference | None, echo, *, earlier: dict | None = None,
                  audit_every: str = "turn", triage_runners: list | None = None, refresh_before_blocks: bool = True, judge_runner=None,
-                 hook_library: str | Path | None = None, ask_about_triggers: bool = True) -> None:
+                 hook_library: str | Path | None = None, ask_about_triggers: bool = True, primers: list[str] | None = None) -> None:
         self.directory, self.table, self.names, self.decks, self.runners, self.auditor_runner, self.database, self.cycles, self.rules = \
             directory, table, names, decks, runners, auditor_runner, database, cycles, rules
         self.echo, self.earlier, self.audit_every, self.triage_runners, self.refresh_before_blocks, self.judge_runner, self.hook_library, self.ask_about_triggers = \
@@ -208,8 +221,12 @@ class _Pod:
         self.context = f"A {self.count}-player Commander game. Seats, in turn order: " + ", ".join(f"{name} (seat {i})" for i, name in enumerate(self.names)) + "."
         self.auditor = Auditor(self.auditor_runner, self.database, context=self.context)
         self.judge = Judge(self.judge_runner or self.auditor_runner, self.database, rules=self.rules, context=self.context)
-        self.systems = [SYSTEM.format(name=name, count=self.count) + "\n\nYOUR DECK (count, name, cost, type, text)\n"
-                        + _deck_reference(deck, self.database) for name, deck in zip(self.names, self.decks, strict=True)]
+        self.primers = primers or [""] * len(names)
+        self.systems = [SYSTEM.format(name=name, count=self.count)
+                        + (f"\n\nHOW THIS DECK LIKES TO BE PLAYED (guidance accepted from its earlier games. It is advice, not orders: check the "
+                           f"board and the cards as they are, and play to win)\n{primer}" if primer else "")
+                        + "\n\nYOUR DECK (count, name, cost, type, text)\n" + _deck_reference(deck, self.database)
+                        for name, deck, primer in zip(self.names, self.decks, self.primers, strict=True)]
         self.current: dict = {}
         # Each seat's place in the log, so a wake can say what happened since its last one. After a
         # resume the players start from their notes and the board, not from the whole history again.

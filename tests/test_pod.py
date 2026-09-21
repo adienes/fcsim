@@ -897,3 +897,57 @@ def test_a_bug_in_the_driver_stops_the_game_where_it_can_be_resumed_instead_of_l
     monkeypatch.undo()
     resumed = play_pod([], [ScriptedSeat(budget) for _ in range(3)], FakeRunner([OK] * 20, budget), database, cycles=1, resume=directory, echo=lambda *_: None)
     assert resumed["stopped"] is None and resumed["turns_played"] >= 3                     # the journal had everything: the game goes on
+
+
+def test_a_deck_project_teaches_its_pilot_what_earlier_games_learned(combat_game, database, tmp_path):
+    from fcsim.cli import main
+    from fcsim.workshop.learn import learn
+    from fcsim.workshop.project import DeckProject, deck_argument
+
+    source = tmp_path / "talrand.txt"
+    source.write_text("99 Island\n\n1 Talrand, Sky Summoner\n", encoding="utf-8")
+    assert main(["deck", "init", str(source), "--name", "talrand drakes", "--root", str(tmp_path / "decks")]) == 0
+    project = DeckProject(tmp_path / "decks" / "talrand-drakes")
+    assert project.primer() == "" and project.deck_id == "talrand-drakes"
+    assert deck_argument(project.path)[0] == project.list_path and deck_argument(project.path)[1].path == project.path and deck_argument(source) == (source, None)
+
+    game = combat_game[0]["directory"]
+    lesson = {"claim": "Cast Talrand, Sky Summoner as soon as you have four lands; attack from the turn after.", "kind": "commander_timing",
+              "cards": ["Talrand, Sky Summoner"], "evidence": "Round 4: cast on four Islands; rounds 5 and 6: attacked Pir."}
+    invented = {"claim": "Hold Counterspell for Pir's commander.", "kind": "interaction", "cards": ["Counterspell"], "evidence": "Round 3: Counterspell was cast."}
+    teacher = FakeRunner([{"lessons": [lesson, invented]}, {"problems": [{"claim": "Hold Counterspell for Pir's commander.", "record": "No Counterspell is in the list."}]}])
+    teacher.ask_text = None
+
+    class Writes(FakeRunner):
+        def ask(self, system, prompt, *, schema=None, **_):
+            if schema is None:   # the primer is prose, not JSON
+                self.asked.append({"system": system, "prompt": prompt, "schema": None})
+                return Reply(data=None, text="## Gameplan\nCast Talrand on four lands and attack.", cost_usd=0.01, seconds=0.1, model="fake")
+            return super().ask(system, prompt, schema=schema)
+    teacher = Writes(teacher.answers)
+    first = learn(project.path, [game], teacher, database, echo=lambda *_: None)
+    assert (first["added"], first["validated"], first["dropped"]) == (1, 0, 1)                      # the invented lesson never reaches the file
+    kept = project.lessons()
+    assert [(k["id"], k["status"], k["games"], k["stale"]) for k in kept] == [("L001", "tentative", [Path(game).name], False)]
+    assert "Cast Talrand on four lands" in project.primer() and "studied 1 game(s)" in (project.path / "CHANGELOG.md").read_text()
+    assert "[tentative, 1 game(s), commander_timing]" in teacher.asked[-1]["prompt"]
+
+    # the same games studied again are not a second witness; a different game is, and the lesson becomes validated
+    again = Writes([{"lessons": [lesson]}, {"problems": []}])
+    assert learn(project.path, [game], again, database, echo=lambda *_: None)["validated"] == 0
+    assert project.record([lesson], games=["another-game"], database=database) == {"added": 0, "validated": 1, "total": 1}
+    assert project.lessons()[0]["status"] == "validated" and project.lessons()[0]["games"] == [Path(game).name, "another-game"]
+
+    # the next game's pilot is told, and the game keeps exactly what it was told
+    budget = Budget(max_calls=60)
+    seats = [ScriptedSeat(budget) for _ in range(3)]
+    others = decks(tmp_path)[1:]
+    report = play_pod([project.path, *others], seats, FakeRunner([OK] * 20, budget), database, cycles=1, seed=4, out_root=tmp_path / "games", echo=lambda *_: None)
+    directory = Path(report["directory"])
+    assert (directory / "decks" / "seat-0.primer.md").read_text().startswith("## Gameplan") and not (directory / "decks" / "seat-1.primer.md").exists()
+    config = json.loads((directory / "config.json").read_text())
+    assert config["projects"][0]["deck_id"] == "talrand-drakes" and config["projects"][1] is None and len(config["projects"][0]["guidance_hash"]) == 16
+    # a list revision keeps the identity and its lessons; a lesson about a card no longer in the list is flagged, not taught
+    project.list_path.write_text("99 Island\n\n1 Shorikai, Genesis Engine\n", encoding="utf-8")
+    project.record([], games=[], database=database)
+    assert project.lessons()[0]["stale"] is True

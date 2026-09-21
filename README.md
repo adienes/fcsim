@@ -184,6 +184,18 @@ transcript, usage, and `report.md`: lands, spells and attacks by turn, the pilot
 own account of each turn, and rules health. Findings are recorded but not yet
 corrected. A three-turn run took about four minutes and seven model calls.
 
+## Deck projects
+
+```sh
+uv run fcsim deck init examples/zuko.txt --name zuko       # decks/zuko/: current.txt, primer.md, lessons.jsonl, CHANGELOG.md
+uv run fcsim pod decks/zuko --random-opponents 3           # its pilot is given the primer; the game keeps exactly what it was told
+uv run fcsim deck learn decks/zuko games/<a> games/<b>     # piloting lessons from finished games, fact-checked; the primer rewritten
+```
+
+A project is a deck's identity across revisions of its list. What its pilots learn accumulates there: a lesson is recorded
+with its evidence, stays tentative until a different game bears it out, and is flagged rather than taught once none of the
+cards it leans on is in the list. Only the primer, 600 words at most, reaches a pilot.
+
 ## Opponents
 
 ```sh
