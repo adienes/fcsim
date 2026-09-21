@@ -426,7 +426,8 @@ def _pod(args: argparse.Namespace) -> int:
         with open(f"{args.resume}/config.json", encoding="utf-8") as config:
             args.decks = json.load(config)["seats"]  # one runner per seat; the decks are the game's own copies
     elif args.random_opponents:
-        mine = tuple(entry.name for path in args.decks for entry in read_decklist(path).commanders)
+        from .workshop.project import deck_argument  # a deck given may be a project directory
+        mine = tuple(entry.name for path in args.decks for entry in read_decklist(deck_argument(path)[0]).commanders)
         for pick in random_commanders(args.random_opponents, seed=args.seed, exclude=mine):
             os.makedirs("decks", exist_ok=True)
             target = os.path.join("decks", f"{pick['slug']}.txt")

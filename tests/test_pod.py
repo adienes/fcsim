@@ -951,3 +951,21 @@ def test_a_deck_project_teaches_its_pilot_what_earlier_games_learned(combat_game
     project.list_path.write_text("99 Island\n\n1 Shorikai, Genesis Engine\n", encoding="utf-8")
     project.record([], games=[], database=database)
     assert project.lessons()[0]["stale"] is True
+
+
+def test_a_deck_project_can_be_given_to_the_pod_command_with_random_opponents(database, tmp_path, monkeypatch):
+    from fcsim import cli
+    from fcsim.workshop.project import DeckProject
+
+    source = tmp_path / "talrand.txt"
+    source.write_text("99 Island\n\n1 Talrand, Sky Summoner\n", encoding="utf-8")
+    project = DeckProject.init(source, database, root=tmp_path / "decks", name="talrand")
+    drawn, played = [], {}
+    monkeypatch.setattr(cli, "random_commanders", lambda count, seed=None, exclude=(): drawn.append(exclude) or [])
+    monkeypatch.setattr(cli, "play_pod", lambda decks, *a, **k: played.update(decks=decks) or {"directory": str(tmp_path), "stopped": "stubbed"})
+    monkeypatch.setattr(cli, "CardDatabase", lambda: database)
+    monkeypatch.setattr(cli, "_stay_awake", lambda: None)
+    (tmp_path / "report.md").write_text("stub", encoding="utf-8")
+    other = decks(tmp_path)[1]
+    cli.main(["pod", str(project.path), str(other), "--random-opponents", "2", "--seed", "3"])
+    assert drawn == [("Talrand, Sky Summoner", "Pir, Imaginative Rascal")] and played["decks"][0] == str(project.path)   # read from the project's list; the project goes on to the game
