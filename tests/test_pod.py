@@ -450,6 +450,11 @@ def test_a_game_is_scored_against_the_rubric_from_its_log(combat_game, database,
     assert verdicts["threat rotation"] == "mixed" and "ending" not in verdicts                    # only Pir was ever leaned on
     assert "Thrasios" in next(s["finding"] for s in scored["scores"] if s["measure"] == "spotlight")
     assert "## Against the rubric" in (directory / "report.md").read_text()
+    # Audited a turn at a time, the table stops only between turns: one release a turn, not one every time the pen moved.
+    events = [json.loads(line) for line in (directory / "events.jsonl").read_text().splitlines()]
+    releases = [e for e in events if e["tool"] == "release"]
+    assert len(releases) == len({e["turn"] for e in releases}) and len(releases) >= report["turns_played"] - 1
+    assert json.loads((directory / "config.json").read_text())["table"]["gated"] == "turn"
     assert main(["rubric", str(directory)]) == 0
     assert "Thrasios did nothing on 4 of 4 turns" in capsys.readouterr().out
 

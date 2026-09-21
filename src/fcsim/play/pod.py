@@ -148,7 +148,8 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
     seed = seed if seed is not None else secrets.randbelow(2 ** 31)
     directory = GameDirectory(out_root, "pod_" + "-".join(names), seed)
     table = Table([{"name": name, "commanders": [c.name for c in deck.commanders], "library": [c.name for c in deck.library()]}
-                   for name, deck in zip(names, decks, strict=True)], seed=seed, gated=True, on_event=directory.journal,
+                   for name, deck in zip(names, decks, strict=True)], seed=seed,
+                  gated=True if audit_every == "checkpoint" else "turn", on_event=directory.journal,
                   card_lookup=_lookup(database))
     for index, path in enumerate(deck_paths):
         directory.write(f"decks/seat-{index}.txt", read_decklist(path).to_mtgo())
@@ -466,7 +467,8 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
             return card is not None and card.is_basic
         if all(needs_no_audit(e) for e in unit):
             return
-        echo(f"         auditing {len(unit)} events ...")
+        actions = sum(1 for e in unit if e["seat"] is not None and e["tool"] not in ("pass_priority", "say", "write_notes", "set_response_policy"))
+        echo(f"         auditing {actions} actions ...")
         verdict, reply = auditor.audit(table, snapshot)
         record = {"turn": table.game.turn.number, "events": [snapshot[2], len(table.events)], **verdict, "seconds": round(reply.seconds, 1)}
         report["audits"].append(record)

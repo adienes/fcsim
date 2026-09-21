@@ -175,7 +175,7 @@ class Game:
     facts: list[dict] = field(default_factory=list)  # what has happened since triggers were last collected
     whispers: list[list] = field(default_factory=list)  # [seat, sentence] to tell one seat privately with the next event
     audit_pending: bool = False   # something auditable has happened since the last checkpoint was released
-    gated: bool = False           # stop at audit checkpoints, and at the end of every turn
+    gated: bool | str = False     # True: stop at every audit checkpoint and between turns; "turn": only between turns
 
     def new_id(self) -> int:
         self.next_id += 1

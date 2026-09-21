@@ -72,7 +72,7 @@ def _gate(game: Game, resume: dict) -> bool:
     """The audit checkpoint. If anything auditable has happened since the last one, stop here,
     before the next seat receives priority and before any mechanical step runs, and remember
     what to do when the driver releases the table. The driver decides what to audit and when."""
-    if not game.audit_pending:
+    if not game.audit_pending or game.gated == "turn":  # "turn": the only checkpoint is the one between turns
         return False
     game.control = Control("audit", [], {"resume": resume})
     return True

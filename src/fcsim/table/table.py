@@ -39,14 +39,15 @@ _NOT_AUDITABLE = frozenset({"pass_priority", "say", "write_notes", "mulligan", "
 
 
 class Table:
-    def __init__(self, seats: list[dict], *, seed: int | None = None, first: int | None = None, gated: bool = False,
+    def __init__(self, seats: list[dict], *, seed: int | None = None, first: int | None = None, gated: bool | str = False,
                  card_lookup: Callable[[str], dict | None] | None = None, on_event: Callable[[dict], None] | None = None,
                  _setup_random: list | None = None):
         """`seats` is a list of {name, commanders: [card names], library: [card names]}.
 
         With `gated`, the table stops at an audit checkpoint whenever something auditable has
         happened and the pen would move on or a mechanical step would run; the driver calls
-        `release` when it is satisfied. `on_event` receives each event as it is committed, so a
+        `release` when it is satisfied. With `gated="turn"` it stops only between turns, which is all a
+        driver that audits whole turns needs: every other stop is journalled and released for nothing. `on_event` receives each event as it is committed, so a
         journal on disk never lags the game."""
         self.config = {"seats": copy.deepcopy(seats), "seed": seed, "first": first, "gated": gated}
         self.card_lookup, self.gated, self.on_event = card_lookup, gated, on_event
