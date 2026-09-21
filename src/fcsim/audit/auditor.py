@@ -34,6 +34,10 @@ guarantees a player really had the cards they used.
 - What the table enforces is not yours to audit and does not appear in the record: that cards \
 are conserved, whose turn and priority it is, and mulligans. (In multiplayer the first mulligan \
 is free, rule 103.5c, so a player who mulligans twice keeps six cards.)
+- Combat damage logged "as the table worked it out" is the table's own arithmetic from each \
+creature's stamped or printed power, toughness and keywords, deaths and lifelink included. Do not \
+re-add it; do report it if an effect in play should have changed it (prevention, protection, a \
+keyword the numbers missed).
 - When a creature should die or another state-based action applies, a player must carry it \
 out. State-based actions are checked before any player would receive priority, so a player \
 receiving or using priority while one is outstanding is an error.
@@ -119,9 +123,12 @@ since then may have others: read the card texts you are given.
 - THIS TURN SO FAR is what has been done this turn. An effect that lasts until end of turn and \
 appears there still applies even if nobody wrote it as a note.
 
-List every creature on the battlefield whose current power or toughness differs from what is \
-printed on it (for a token, from what it was created with), and every creature whose printed \
-value is not a number. Apply continuous effects in layer order (rule 613.4: characteristic-defining \
+List every creature on the battlefield whose current power, toughness or combat keywords differ \
+from what is printed on it (for a token, from what it was created with), and every creature whose \
+printed value is not a number. Under `keywords` give all the combat keywords the creature has now, \
+from this list only: flying, reach, first strike, double strike, deathtouch, trample, lifelink, \
+vigilance, menace, haste, defender, indestructible. The table does the arithmetic of combat from \
+your numbers, so an Equipment's or an anthem's keyword matters as much as its +1/+1. Apply continuous effects in layer order (rule 613.4: characteristic-defining \
 abilities, effects that set values, then modifications and counters, then switching), and use \
 timestamps within a layer. Give the values and, briefly, the reason. A creature you do not list is \
 taken at its printed values, and your list replaces the last one entirely.
@@ -168,6 +175,8 @@ VERDICT_SCHEMA = {
             "type": "object", "additionalProperties": False, "required": ["handle", "power", "toughness", "because"],
             "properties": {"handle": {"type": "string", "description": "The creature's handle, such as c12."},
                            "power": {"type": "string"}, "toughness": {"type": "string"},
+                           "keywords": {"type": "array", "items": {"type": "string"},
+                                        "description": "Every combat keyword it has now, if that differs from what is printed."},
                            "because": {"type": "string", "description": "What changes it, briefly."}}}},
     },
 }

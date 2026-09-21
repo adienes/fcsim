@@ -63,6 +63,24 @@ one to three minutes. Busy turns are still six to fifteen, which is what S3 and 
 | F11 | The card record ignored cards exiled from the library, and the reviewer's "stuck on lands" was half wrong. | Asked how an exile deck gets stuck on lands, the journal says: in the first pod Zuko made every land drop (the reviewer invented a stall, and I repeated it); in the second it saw 23 cards, 7 of them exiled face up, and 4 were lands, none among the exiled ones. Six of the seven exiled cards were never played, an exiled Arcane Signet among them while the pilot sat on four lands | **Fixed**: a card exiled face up from the library counts as seen, and the record says whether it was played from exile. `play_land` now says a land can be played from exile or wherever an effect allows, given `because`; it used to read "from your hand". **Fixed**: the reviewer is given each of the seat's own turns as the log has them (lands held, land played, spells cast), the list in numbers (counts by type and mana value, the cheap instants and the top end by name), and is told these outrank the round accounts; a second pass then checks every statement of fact in the draft against the record, and the review is written again if any does not hold, with the corrections listed at its foot |
 | F8 | No narrative or rubric score at the end. | Only `report.md` standings and each player's own account | **Partly built**: `fcsim summarize <game_dir>` condenses each round with full information (the log, private draws, each player's own account, audit findings), then writes one file, `narrative.md`: the story, with a closing section that judges the game against the group's rubric, followed by the round accounts it was written from. Finished rounds are read back from that file, so another style costs two calls. Building it showed that the turn's own draw was recorded nowhere: every draw is now told privately to its seat. **Rubric scores built**: `fcsim rubric <game_dir>` replays the journal and scores length, participation, sitting out, interaction, threat rotation, turn weight and the ending, each with its threshold stated, plus a row per seat. The scores go into `report.md` and `rubric.json` at the end of a game and into the narrative's prompt. On the first pod they say what a reader said: Lathril idle on 3 of 4 turns, a 50-action turn against a typical 4, and three players killed in one turn from 27, 37 and 28 life. Spotlight and salt stay with the reader |
 
+## Direction: the table takes over whatever depends on no card's text
+
+After two pods the ask was less hallucination, more robustness and more speed, by baking rules
+into the table so that a model's context is structured and it does no work the table can do. The
+project stays self-contained: no outside rules engine. What the table now owns, with `because` as
+the way past it when a card says otherwise:
+
+| Rule | Status |
+| --- | --- |
+| Land plays only in one's own main phase with an empty stack | refused (R9) |
+| Non-instant, non-flash cards only at sorcery timing | refused (R13) |
+| Casting or playing from an unusual zone | needs the effect named (R10, F11) |
+| State-based losses: 0 life, 10 poison, 21 commander damage, empty library | applied by the driver (R6) |
+| Attacking: tapped, defender, arrived this turn without haste | refused |
+| Blocking: tapped blocker; a flier blocked without flying or reach | refused |
+| Combat damage: first strike and double strike steps, trample, deathtouch, lifelink, indestructible, lethal damage, a commander's move to the command zone | worked out by the table from printed numbers, counters and the auditor's stamps (which now carry keywords); offered to the attacker as `as_proposed`, and applied without a wake when nothing has happened since the attack that could change it |
+| Still the agents' and the auditor's: everything a card's text says | mana and costs, menace, the legend rule and zero toughness are next |
+
 ## Second pod: what the new driver did
 
 Three rounds (12 table turns) of the same four decks, every player at medium effort:

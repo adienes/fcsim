@@ -1,7 +1,7 @@
 [
  {
   "id": "summoning-sick-attack",
-  "about": "A creature cast this turn attacks without haste.",
+  "about": "A creature cast this turn attacks without haste. The table refused the attack until the player gave a reason, and the reason is no reason.",
   "battlefield": {
    "Ann": [
     {
@@ -65,7 +65,8 @@
         "seat": 1
        }
       }
-     ]
+     ],
+     "because": "Grizzly Bears is a creature, so it can attack."
     }
    ]
   ],

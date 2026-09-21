@@ -75,6 +75,12 @@ class Card:
     def front(self) -> Face:
         return self.faces[0]
 
+    def table_facts(self) -> dict:
+        """What the table is handed about a card: numbers and words it carries and does sums with,
+        and never the text of what the card does."""
+        return {"mana_value": self.mana_value, "types": sorted(self.types), "type_line": self.front.type_line,
+                "keywords": sorted(self.keywords), "power": self.front.power, "toughness": self.front.toughness}
+
     @property
     def text(self) -> str:
         """Oracle text of every face, which is what role heuristics should read."""

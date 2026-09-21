@@ -19,8 +19,7 @@ def slug(text: str) -> str:
 
 def table_facts(card: Card) -> dict:
     """What the card-blind table is handed about a card: numbers and words it carries but never interprets."""
-    return {"mana_value": card.mana_value, "types": sorted(card.types), "type_line": card.front.type_line,
-            "keywords": sorted(card.keywords)}
+    return card.table_facts()
 
 
 class GameDirectory:

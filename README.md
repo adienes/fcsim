@@ -212,6 +212,14 @@ ask to be given priority in the end step before its own turn. Opening hands are 
 same way, all seats together. Table talk works the same way too: a `say` addressed to named players
 gets their answers back in the same call, so a deal can be struck before the speaker acts.
 
+**What the table enforces itself.** Whatever depends on no card's text: turn order and priority,
+land and spell timing, which creatures may attack and block (tapped, defender, summoning
+sickness, flying), state-based losses, and the arithmetic of combat damage (first strike, trample,
+deathtouch, lifelink, indestructible, deaths), worked out from printed numbers, counters and the
+auditor's stamps and offered to the attacker as `combat_damage {as_proposed: true}`. A player gets
+past a refusal by naming, in `because`, the effect that allows the play, which the auditor then
+reads.
+
 **Rules integrity.** The auditor checks each whole turn before the next begins (`--audit-every
 checkpoint` checks every time the pen moves: stricter, several times slower). Its hooks go into
 the ledger; a trigger it reports is put in front of its controller; event triggers it has

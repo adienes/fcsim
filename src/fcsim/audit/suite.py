@@ -54,7 +54,7 @@ def build(scenario: dict, database=None) -> tuple[Table, ScriptedRunner]:
     active = scenario.get("active", 0)
     table = Table([{"name": name, "commanders": commanders.get(name, []), "library": ["Wastes"] * 40}
                    for name in names], seed=1, first=active,
-                  card_lookup=(lambda n: (c := database.find(n)) and {"mana_value": c.mana_value}) if database else None)
+                  card_lookup=(lambda n: (c := database.find(n)) and c.table_facts()) if database else None)
     for seat in range(len(names)):
         table.act(seat, "keep")
     game = table.game

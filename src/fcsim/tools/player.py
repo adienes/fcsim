@@ -99,16 +99,22 @@ PLAYER_TOOLS = [
           {"mutations": _BATCH, "because": {"type": "string"}}, ("mutations", "because")),
     _tool("finish_step", "You have finished a step the table handed you (a held untap or draw, or the cleanup discard)."),
     _tool("declare_attackers", "Declare attackers; an empty list attacks with nothing. Attackers are tapped unless "
-          "`tap` is false (vigilance).",
-          {"attacks": {"type": "array", "items": {"type": "object"},
+          "`tap` is false (vigilance). The table refuses a tapped creature, one with defender, and one that arrived this turn "
+          "without haste, unless `because` names the effect that lets it attack.",
+          {"because": {"type": "string"}, "attacks": {"type": "array", "items": {"type": "object"},
                        "description": "Each is {\"attacker\": handle, \"target\": {\"seat\": n} or {\"object\": planeswalker handle}, \"tap\"?: false}."}}),
-    _tool("declare_blockers", "Declare blockers; an empty list blocks nothing.",
-          {"blocks": {"type": "array", "items": {"type": "object"}, "description": "Each is {\"blocker\": handle, \"attacker\": handle}."}}),
-    _tool("combat_damage", "As the attacking player, deal this combat damage step's damage for every creature in "
-          "combat. The table itself updates life totals, damage marked on creatures and commander damage from these "
-          "assignments, so never repeat them as mutations. `then` is only for what follows (creatures that died, "
-          "lifelink, poison counters). Set `another_step` after a first-strike step.",
-          {"assignments": {"type": "array", "items": {"type": "object"},
+    _tool("declare_blockers", "Declare blockers; an empty list blocks nothing. The table refuses a tapped blocker, and one "
+          "without flying or reach against a flier, unless `because` names the effect that allows it.",
+          {"because": {"type": "string"}, "blocks": {"type": "array", "items": {"type": "object"}, "description": "Each is {\"blocker\": handle, \"attacker\": handle}."}}),
+    _tool("combat_damage", "As the attacking player, deal this combat damage step's damage for every creature in combat. "
+          "The table does the arithmetic: it shows you what it worked out from each creature's current power, toughness and "
+          "keywords (first strike, deathtouch, trample, lifelink, indestructible), and `as_proposed`: true deals exactly that, "
+          "moves the creatures that die, gains lifelink life and handles a first-strike step. Accept it unless a card changes "
+          "how this combat's damage works (prevention, protection, a different division among several blockers): then give "
+          "`assignments` yourself. The table updates life totals, damage marked on creatures and commander damage from the "
+          "assignments, so never repeat them as mutations; `then` is only for what follows that the table did not do. Set "
+          "`another_step` after a first-strike step you dealt by hand.",
+          {"as_proposed": {"type": "boolean"}, "assignments": {"type": "array", "items": {"type": "object"},
                            "description": "Each is {\"source\": handle, \"target\": {\"seat\": n} or {\"object\": handle}, \"amount\": n}."},
            "then": _BATCH, "another_step": {"type": "boolean"}}),
     _tool("answer", "Answer a question another player's effect asks you (from `questions`).",

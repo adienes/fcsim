@@ -145,6 +145,7 @@ class Turn:
     extra_turns: list[int] = field(default_factory=list)
     attackers: list[dict] = field(default_factory=list)
     blockers: list[dict] = field(default_factory=list)
+    damage_steps: int = 0      # combat damage steps dealt this combat: a first-strike step makes two
 
 
 @dataclass

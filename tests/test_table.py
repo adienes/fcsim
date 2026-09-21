@@ -5,7 +5,7 @@ import random
 
 import pytest
 
-from fcsim.table import ScriptedRunner, Table
+from fcsim.table import ScriptedRunner, Table, mutations
 from fcsim.table.script import ScriptError
 
 
@@ -732,3 +732,103 @@ def test_a_land_can_be_played_from_exile_when_the_player_names_what_allows_it():
     assert "error" not in table.act(0, "play_land", {"card": exiled, "because": "Exiled with Prosper: I may play it this turn."})
     assert table.events[-1]["public"][0] == "Ann plays Island from Ann's exile (allowed by: Exiled with Prosper: I may play it this turn.)."
     assert table.view(0)["turn"]["land_plays"] == 1
+
+
+def combat_table(facts: dict) -> tuple[Table, ScriptedRunner, dict]:
+    """Ann and Bob each get two creatures from their hands onto the battlefield on Ann's first main
+    phase; `facts` maps A1, A2, B1, B2 to what the table is told about them. Returns their names too."""
+    told: dict[str, dict] = {}
+    table = Table(seats(), seed=5, first=0, card_lookup=lambda name: told.get(name))
+    runner = ScriptedRunner(table)
+    for seat in range(3):
+        runner.step(seat, "keep")
+    pass_until(table, runner, "main1")
+    names = {}
+    for seat, keys in ((0, ("A1", "A2")), (1, ("B1", "B2"))):
+        spells = [n for n in hand(table, seat) if "spell" in n][:2]
+        for key, name in zip(keys, spells, strict=True):
+            names[key] = name
+            told[name] = {"types": ["Creature"], "keywords": [], **facts.get(key, {"power": "1", "toughness": "1"})}
+            handle = next(c["handle"] for c in table.view(seat)["seats"][seat]["hand"]["cards"] if c["name"] == name)
+            if seat == 0:
+                assert "error" not in table.act(0, "act", {"because": "test set-up", "mutations": [{"op": "move", "obj": handle, "to": "battlefield"}]})
+            else:  # Bob's hand is hidden from Ann, who holds the pen: the test reaches into the state directly
+                mutations.move(table.game, next(o for o in table.game.objects.values() if o.name == name), "battlefield", controller=seat)
+    for obj in table.game.objects.values():
+        if obj.zone == "battlefield":
+            obj.entered_turn = 0  # they have been here a while
+    return table, runner, names
+
+
+def to_damage(table: Table, runner: ScriptedRunner, attacks: list[tuple[str, int]], blocks: list[tuple[str, str]]) -> None:
+    pass_until(table, runner, "begin_combat")
+    for seat in (0, 1, 2):
+        runner.step(seat, "pass_priority")
+    runner.step(0, "declare_attackers", {"attacks": [{"attacker": f"@{name}", "target": {"seat": seat}} for name, seat in attacks]})
+    for seat in (0, 1, 2):
+        runner.step(seat, "pass_priority")
+    if table.expected() == [(1, "declare_blockers")]:
+        runner.step(1, "declare_blockers", {"blocks": [{"blocker": f"@{b}", "attacker": f"@{a}"} for b, a in blocks]})
+        for seat in (0, 1, 2):
+            runner.step(seat, "pass_priority")
+    assert table.expected() == [(0, "combat_damage")]
+
+
+def test_the_table_does_the_arithmetic_of_combat():
+    table, runner, n = combat_table({"A1": {"power": "4", "toughness": "4", "keywords": ["Trample"]},
+                                     "A2": {"power": "2", "toughness": "2", "keywords": ["Lifelink"]},
+                                     "B1": {"power": "1", "toughness": "2", "keywords": ["Deathtouch"]}})
+    to_damage(table, runner, [(n["A1"], 1), (n["A2"], 1)], [(n["B1"], n["A1"])])
+    offered = table.proposed_damage(0)
+    assert offered["lines"] == [f"{n['A1']} deals 2 to {n['B1']}", f"{n['A1']} deals 2 to Bob", f"{n['B1']} deals 1 to {n['A1']}",
+                                f"{n['A2']} deals 2 to Bob", "Ann gains 2 (lifelink)", f"{n['B1']} dies", f"{n['A1']} dies"]
+    assert offered["basis"] == ["printed values and counters"] and offered["needs_your_choice"] == []
+    done = runner.step(0, "combat_damage", {"as_proposed": True})
+    assert done["log"][0] == "Combat damage as the table worked it out from printed values and counters:"
+    view = table.view(2)
+    assert view["seats"][1]["life"] == 36 and view["seats"][0]["life"] == 42
+    assert [c["name"] for c in view["seats"][0]["graveyard"]] == [n["A1"]] and [c["name"] for c in view["seats"][1]["graveyard"]] == [n["B1"]]
+    assert table.game.turn.step != "combat_damage" or table.expected() != [(0, "combat_damage")]   # one step: nobody had first strike
+
+
+def test_first_strike_makes_two_steps_only_when_someone_is_left_to_strike_second():
+    table, runner, n = combat_table({"A1": {"power": "2", "toughness": "2", "keywords": ["First strike"]},
+                                     "A2": {"power": "3", "toughness": "3"}, "B1": {"power": "2", "toughness": "2"}})
+    to_damage(table, runner, [(n["A1"], 1), (n["A2"], 1)], [(n["B1"], n["A1"])])
+    assert table.proposed_damage(0)["first_strike_step"] and table.proposed_damage(0)["lines"] == [f"{n['A1']} deals 2 to {n['B1']}", f"{n['B1']} dies"]
+    runner.step(0, "combat_damage", {"as_proposed": True})
+    for seat in (0, 1, 2):
+        if table.expected() and table.expected()[0] == (seat, "priority"):
+            runner.step(seat, "pass_priority")
+    assert table.expected() == [(0, "combat_damage")]                       # the 3/3 has yet to strike
+    assert table.proposed_damage(0)["lines"] == [f"{n['A2']} deals 3 to Bob"]
+    runner.step(0, "combat_damage", {"as_proposed": True})
+    assert table.view(0)["seats"][1]["life"] == 37 and n["A1"] in [c["name"] for c in table.view(0)["battlefield"]]
+
+
+def test_the_auditors_stamp_a_commander_and_what_the_table_refuses():
+    table, runner, n = combat_table({"A1": {"power": "2", "toughness": "2"}, "A2": {"power": "1", "toughness": "1", "keywords": ["Flying"]},
+                                     "B1": {"power": "3", "toughness": "3"}, "B2": {"power": "*", "toughness": "*"}})
+    handles = {o["name"]: o["handle"] for o in table.view(None)["battlefield"]}
+    table.apply_computed([{"handle": handles[n["A1"]], "power": "5", "toughness": "5", "keywords": ["indestructible"], "because": "an Equipment"}])
+    pass_until(table, runner, "begin_combat")
+    for seat in (0, 1, 2):
+        runner.step(seat, "pass_priority")
+    table.game.objects[next(o.id for o in table.game.objects.values() if o.name == n["A2"])].entered_turn = table.game.turn.number
+    sick = table.act(0, "declare_attackers", {"attacks": [{"attacker": table.view(0)["battlefield"][1]["handle"], "target": {"seat": 1}}]})
+    assert sick["error"]["code"] == "say_why" and "no haste" in sick["error"]["message"]
+    table.game.objects[next(o.id for o in table.game.objects.values() if o.name == n["A2"])].entered_turn = 0
+    runner.step(0, "declare_attackers", {"attacks": [{"attacker": f"@{n['A1']}", "target": {"seat": 1}}, {"attacker": f"@{n['A2']}", "target": {"seat": 1}}]})
+    for seat in (0, 1, 2):
+        runner.step(seat, "pass_priority")
+    grounded = table.act(1, "declare_blockers", {"blocks": [{"blocker": table.view(1)["battlefield"][2]["handle"], "attacker": table.view(1)["battlefield"][1]["handle"]}]})
+    assert grounded["error"]["code"] == "say_why" and "has flying" in grounded["error"]["message"]
+    runner.step(1, "declare_blockers", {"blocks": [{"blocker": f"@{n['B1']}", "attacker": f"@{n['A1']}"}]})
+    for seat in (0, 1, 2):
+        runner.step(seat, "pass_priority")
+    offered = table.proposed_damage(0)
+    assert f"{n['A1']} deals 5 to {n['B1']}" in offered["lines"] and f"{n['B1']} dies" in offered["lines"] and f"{n['A1']} dies" not in offered["lines"]
+    assert any(b.startswith("the auditor's numbers as of turn 1") for b in offered["basis"])
+    # A creature the table has no numbers for (a printed "*") in combat: no proposal, and the player deals damage by hand.
+    table.game.turn.blockers.append({"blocker": next(o.id for o in table.game.objects.values() if o.name == n["B2"]), "attacker": table.game.turn.attackers[1]["attacker"]})
+    assert table.proposed_damage(0) is None and table.act(0, "combat_damage", {"as_proposed": True})["error"]["code"] == "no_proposal"

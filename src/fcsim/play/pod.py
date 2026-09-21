@@ -230,7 +230,7 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
                     control = table.game.control
                     why = control.detail.get("action", control.kind)
                     result = {**result, "pen": {"kind": why, "seats": control.seats},
-                              "carry_on": f"Nobody else acted and the table is waiting for you again: {_WHY.get(why, why)} "
+                              "carry_on": f"Nobody else acted and the table is waiting for you again: {_WHY.get(why, why)}{_arithmetic(table, me)} "
                                           "Here is the table as it now stands.", "news": news(me), "table": briefing(me)}
                     seen[me] = len(table.events)
                 else:
@@ -429,7 +429,7 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
         windows.get((game.turn.number, game.turn.step), set()).discard(seat)
         if kind == "correction" and not extra:
             extra = _correction(game.control.detail)
-        prompt = f"{when()} {extra or _WHY.get(kind, 'The table is waiting for you.')}\n\n{news(seat)}\n\n{briefing(seat)}"
+        prompt = f"{when()} {extra or _WHY.get(kind, 'The table is waiting for you.')}{_arithmetic(table, seat)}\n\n{news(seat)}\n\n{briefing(seat)}"
         echo(f"turn {game.turn.number} {game.turn.step}: {names[seat]} ({kind}) ...")
         started = len(table.events)
         reply = runners[seat].ask(systems[seat], prompt, tools=server.connection(
@@ -602,6 +602,11 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
             if kind in ("priority", "declare_blockers") and _cannot_act(table, seat, kind):
                 table.act(seat, _DEFAULTS[kind])  # an empty hand and nothing untapped; or nothing that could block
                 continue
+            if kind == "combat_damage" and seat != me and _plain_combat(table):
+                # Nothing has happened since the attack that could change how damage is dealt, and the sums
+                # are the table's: no session is opened for the attacker to say yes to them.
+                if "error" not in table.act(seat, "combat_damage", {"as_proposed": True}):
+                    continue
             if kind == "declare_blockers" and refresh_before_blocks and stamped[0] != _characteristics_print(table):
                 if me is not None:
                     return "wake"  # the attacker's wake is over either way: somebody has to choose blocks
@@ -685,6 +690,36 @@ def _must_lose(table: Table) -> list[tuple[int, str]]:
         if reason:
             lost.append((seat.index, reason))
     return lost
+
+
+def _arithmetic(table: Table, seat: int) -> str:
+    """What the table has worked out for the combat damage step it is waiting on, for the prompt of the player who deals it."""
+    proposal = table.proposed_damage(seat)
+    if proposal is None:
+        return ""
+    return (" THE TABLE'S ARITHMETIC for this " + ("first-strike " if proposal["first_strike_step"] else "") + "damage step, from "
+            + " and ".join(proposal["basis"]) + ": " + "; ".join(proposal["lines"]) + ". Call combat_damage with as_proposed true to deal "
+            "exactly this, unless a card changes how this combat's damage works"
+            + (f" or you want to divide the damage of {', '.join(proposal['needs_your_choice'])} among its blockers differently"
+               if proposal["needs_your_choice"] else "") + ".")
+
+
+def _plain_combat(table: Table) -> bool:
+    """True when the table's arithmetic can simply be applied: it has the numbers, no attacker's damage
+    needs dividing, nothing was cast, activated or resolved since attackers were declared, no creature
+    in combat carries a note, and nothing on the ledger speaks of damage, prevention or protection."""
+    game = table.game
+    proposal = table.proposed_damage(None)
+    if proposal is None or proposal["needs_your_choice"]:
+        return False
+    declared = next((e["n"] for e in reversed(table.events) if e["tool"] == "declare_attackers" and e["turn"] == game.turn.number), None)
+    if declared is None or any(e["tool"] in ("cast", "activate", "add_trigger", "resolve", "act", "finish_resolution") for e in table.events[declared + 1:]):
+        return False
+    fighting = {a["attacker"] for a in game.turn.attackers} | {b["blocker"] for b in game.turn.blockers}
+    if any(game.objects[i].annotations for i in fighting if i in game.objects):
+        return False
+    return not any(re.search(r"damage|prevent|protection|can't be blocked|assign", str(e.get("text", "")), re.I)
+                   for e in game.ledger if e.get("kind") == "static")
 
 
 def _relative(entry: dict, controller: int) -> dict:

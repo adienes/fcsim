@@ -10,7 +10,7 @@ from __future__ import annotations
 import copy
 from collections.abc import Callable
 
-from . import mutations, ops, turn
+from . import mechanics, mutations, ops, turn
 from .model import STEPS, Dice, Game, Obj, Seat, StackItem, TableError
 from .views import Handles, obj_view, view
 
@@ -461,6 +461,10 @@ class Table:
         lints, names = [], []
         for attack in args.get("attacks", []):
             attacker = self._own(game, seat, attack["attacker"], "attack")
+            problem = mechanics.attack_problem(game, attacker, self.card_lookup)
+            if problem and self.card_lookup and not args.get("because") and not self._replaying:
+                raise TableError("say_why", f"{problem} If an effect lets it attack all the same, declare the attack again with `because` "
+                                            "naming that effect; nothing has been declared.")
             if attacker.entered_turn == game.turn.number:
                 lints.append(f"{ops._named(attacker)} came under your control this turn; it needs haste to attack.")
             if attack.get("tap", True):
@@ -480,6 +484,10 @@ class Table:
             blocker = self._own(game, seat, block["blocker"], "block")
             if block["attacker"] not in attacking:
                 raise TableError("not_attacking", "You can only block a creature that is attacking.")
+            problem = mechanics.block_problem(game, blocker, mutations.get(game, block["attacker"]), self.card_lookup)
+            if problem and self.card_lookup and not args.get("because") and not self._replaying:
+                raise TableError("say_why", f"{problem} If an effect allows this block all the same, declare your blocks again with "
+                                            "`because` naming that effect; nothing has been declared.")
             game.turn.blockers.append({"blocker": blocker.id, "attacker": block["attacker"]})
             names.append(f"{ops._named(blocker)} blocks {ops._named(mutations.get(game, block['attacker']))}")
         turn.turn_action_done(game)
@@ -487,7 +495,16 @@ class Table:
 
     def _do_combat_damage(self, game: Game, seat: int, args: dict):
         self._expect_action(game, "combat_damage")
-        told = ops.Told()
+        told, proposal = ops.Told(), None
+        if args.get("as_proposed"):
+            proposal = mechanics.propose_damage(game, self.card_lookup)
+            if proposal is None:
+                raise TableError("no_proposal", "The table cannot work this combat out: it lacks the numbers of a creature in it. "
+                                                "Give the assignments yourself.")
+            told.public.append("Combat damage as the table worked it out from " + " and ".join(proposal["basis"]) + ":")
+            # Written into the recorded call, so that the journal says what was dealt without a reader redoing the sums.
+            args.update(assignments=proposal["assignments"], another_step=False, deaths=proposal["deaths"])
+        game.turn.damage_steps += 1
         for hit in args.get("assignments", []):
             source, amount = mutations.get(game, hit["source"]), ops._count(hit, "amount")
             if "seat" in hit["target"]:
@@ -501,6 +518,20 @@ class Table:
                 victim = mutations.get(game, hit["target"]["obj"])
                 victim.damage += amount
                 told.public.append(f"{ops._named(source)} deals {amount} to {ops._named(victim)}.")
+        if proposal:
+            for who, amount in proposal["gains"].items():
+                game.seats[who].life += amount
+                told.public.append(f"{game.seats[who].name} gains {amount} life (lifelink) and is at {game.seats[who].life}.")
+            for obj_id in proposal["deaths"]:
+                dead = game.objects[obj_id]
+                gone = mutations.move(game, dead, "graveyard")
+                told.public.append(f"{ops._named(dead)} has lethal damage and dies.")
+                if gone is not None and gone.is_commander:  # it did die; its owner may choose the graveyard instead, by hand
+                    mutations.move(game, gone, "command")
+                    told.public.append(f"{gone.name} is a commander, and goes from the graveyard to the command zone (rule 903.9a).")
+            later = mechanics.propose_damage(game, self.card_lookup) if proposal["first_strike_step"] else None
+            if later and later["assignments"]:  # somebody is left to deal regular damage after the first-strike step
+                game.turn.remaining.insert(0, "combat_damage")
         if args.get("then"):
             followup = ops.apply_batch(game, self.dice, seat, args["then"])
             told.public += followup.public
@@ -510,6 +541,25 @@ class Table:
         if game.control.kind == "turn_action":  # unless a follow-up ended the game or asked a question
             turn.turn_action_done(game)
         return told
+
+    def proposed_damage(self, viewer: int | None) -> dict | None:
+        """This combat damage step as the table works it out, in `viewer`'s handles, with a line of
+        text for each thing that would happen. None when it cannot, or no damage step is waiting."""
+        game = self.game
+        if game.control.detail.get("action") != "combat_damage":
+            return None
+        proposal = mechanics.propose_damage(game, self.card_lookup)
+        if proposal is None:
+            return None
+        handles = self.handles[viewer]
+
+        def name(target: dict) -> str:
+            return game.seats[target["seat"]].name if "seat" in target else ops._named(game.objects[target["obj"]])
+        lines = [f"{ops._named(game.objects[a['source']])} deals {a['amount']} to {name(a['target'])}" for a in proposal["assignments"]]
+        lines += [f"{game.seats[who].name} gains {amount} (lifelink)" for who, amount in proposal["gains"].items()]
+        lines += [f"{ops._named(game.objects[i])} dies" for i in proposal["deaths"]]
+        return {"lines": lines or ["no damage is dealt"], "first_strike_step": proposal["first_strike_step"], "basis": proposal["basis"],
+                "needs_your_choice": [handles.of("c", i) for i in proposal["needs_choice"]]}
 
     def _expect_action(self, game: Game, action: str) -> None:
         if game.control.detail.get("action") != action:
@@ -588,7 +638,8 @@ class Table:
             obj = self.game.objects.get(self.handles[None].resolve("c", entry.get("handle")) or -1)
             if obj is not None and obj.zone == "battlefield":
                 resolved.append({"id": obj.id, "power": str(entry.get("power", "")), "toughness": str(entry.get("toughness", "")),
-                                 "because": str(entry.get("because", ""))})
+                                 "because": str(entry.get("because", "")),
+                                 **({"keywords": [str(k).lower() for k in entry["keywords"]]} if isinstance(entry.get("keywords"), list) else {})})
         return self._execute(None, "computed", {"computed": resolved})
 
     def _do_computed(self, game: Game, seat: None, args: dict):
@@ -597,7 +648,8 @@ class Table:
             obj.computed = None
         for entry in args["computed"]:
             if entry["id"] in game.objects:
-                game.objects[entry["id"]].computed = {k: entry[k] for k in ("power", "toughness", "because")} | {"as_of": when}
+                game.objects[entry["id"]].computed = {k: entry[k] for k in ("power", "toughness", "because", "keywords") if k in entry} \
+                    | {"as_of": when}
         return ops.Told()
 
     def queue_trigger(self, seat: int, text: str) -> dict:
