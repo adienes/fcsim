@@ -14,8 +14,9 @@ SEAT_ZONES = ("library", "hand", "graveyard", "exile", "command")
 
 
 # 1: the rad counter trigger (rule 728.1) is the table's. 2: a permanent's hooks are one set, replaced when it is described
-# again, and identical triggers queued together are one item with a count.
-MECHANICS = 2
+# again, and identical triggers queued together are one item with a count. 3: a trusted scripted trigger goes on the stack
+# and resolves by itself.
+MECHANICS = 3
 
 
 class TableError(ValueError):
@@ -113,6 +114,8 @@ class StackItem:
     modes: list[str] = field(default_factory=list)
     payment: str = ""
     auto_permanent: bool = False  # declared at cast: enters with nothing to decide, so no wake
+    script: list | None = None    # a triggered ability the table resolves itself (see `scripts`)
+    bound: dict = field(default_factory=dict)  # what "self" and "it" meant when it triggered, by uid
 
 
 @dataclass
@@ -178,6 +181,7 @@ class Game:
     winner: int | None = None
     next_id: int = 1
     facts: list[dict] = field(default_factory=list)  # what has happened since triggers were last collected
+    announcements: list[str] = field(default_factory=list)  # what the table did by itself, to tell everyone with the next event
     whispers: list[list] = field(default_factory=list)  # [seat, sentence] to tell one seat privately with the next event
     audit_pending: bool = False   # something auditable has happened since the last checkpoint was released
     gated: bool | str = False     # True: stop at every audit checkpoint and between turns; "turn": only between turns

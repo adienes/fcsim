@@ -73,6 +73,8 @@ def item_view(game: Game, item: StackItem, handles: Handles) -> dict:
     for key in ("x", "modes", "payment"):
         if getattr(item, key):
             view[key] = getattr(item, key)
+    if item.script:
+        view["resolves_by_script"] = True  # nobody has to carry it out; it can still be responded to
     return view
 
 

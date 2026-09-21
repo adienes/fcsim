@@ -776,3 +776,50 @@ def test_an_untargeted_trigger_is_not_asked_about_unless_a_player_wants_everythi
     about = [(t["seat"], t["about"]) for t in report["triage"]]
     assert (2, "a triggered ability") in about and (1, "a triggered ability") not in about        # Pir is asked about the spell only
     assert (1, "Talrand, Sky Summoner") in about and (2, "Talrand, Sky Summoner") in about
+
+
+def test_a_script_is_trusted_only_when_the_card_the_vocabulary_and_two_audits_all_agree(database):
+    from fcsim.play.pod import _absolute, _script_trusted
+    scry = [{"op": "draw", "who": "you", "count": 1}]
+    talrand = database.find("Talrand, Sky Summoner")   # "Whenever you cast an instant or sorcery spell, create a 2/2 blue Drake creature token with flying."
+    drake = [{"op": "create_token", "token": {"name": "Drake", "types": "Creature — Drake", "power": 2, "toughness": 2, "text": "Flying"}, "count": 1}]
+    hook = {"kind": "event_trigger", "text": "Whenever you cast an instant or sorcery spell, create a 2/2 blue Drake creature token with flying.",
+            "on": {"event": "cast", "who": "you", "type": "Instant"}, "script": drake}
+    assert not _script_trusted(talrand, {**hook, "script_seen": 1})                         # written once: not yet
+    assert _script_trusted(talrand, {**hook, "script_seen": 2})                             # twice, a plain effect, the table's own operations
+    assert not _script_trusted(talrand, {**hook, "script_seen": 5, "script_revoked": True})  # one finding against it, and never again
+    assert not _script_trusted(talrand, {**hook, "script_seen": 2, "script": [{"op": "shuffle"}]})
+    assert not _script_trusted(talrand, {**hook, "script_seen": 2, "text": "Whenever a land enters, draw a card."})   # not what the card says
+    rhystic = database.find("Rhystic Study")           # "... you may draw a card unless that player pays {1}."
+    assert not _script_trusted(rhystic, {"kind": "event_trigger", "text": "Whenever an opponent casts a spell, you may draw a card unless that player pays {1}.",
+                                         "on": {"event": "cast", "who": "opponent"}, "script": scry, "script_seen": 9})
+    made = _absolute([{**hook, "controller": "its controller", "script_seen": 2}], type("P", (), {"controller": 2, "name": "Talrand, Sky Summoner"})(), database)
+    assert made[0]["scripted"] is True and made[0]["controller"] == 2 and "script_seen" not in made[0]
+
+
+def test_a_script_earns_its_trust_over_two_audits_and_is_then_left_alone(database, tmp_path):
+    drake = [{"op": "create_token", "token": {"name": "Drake", "types": "Creature — Drake", "power": 2, "toughness": 2, "text": "Flying"}, "count": 1}]
+
+    class Describes(FakeRunner):
+        """Writes Talrand's hook, script included, whenever the board shows Talrand without "(hooks written)"."""
+        def ask(self, system, prompt, *, schema=None, **_):
+            line = re.search(r"Talrand, Sky Summoner \[(c\d+)\][^\n]*", prompt.split("THE TABLE NOW")[-1]) if "THE TABLE NOW" in prompt else None
+            if line and "(hooks written)" not in line[0]:
+                self.answers.insert(0, {**OK, "hooks": [{"kind": "event_trigger", "handle": line[1], "source": "Talrand, Sky Summoner", "controller": 0, "script": drake,
+                                                       "text": "Whenever you cast an instant or sorcery spell, create a 2/2 blue Drake creature token with flying.",
+                                                       "on": {"event": "cast", "who": "you", "type": "Instant"}}]})
+                self.wrote = getattr(self, "wrote", 0) + 1
+            return super().ask(system, prompt, schema=schema)
+
+    library, states = tmp_path / "hooks.json", []
+    for seed in (4, 9, 5):
+        budget = Budget(max_calls=400)
+        auditor = Describes([OK] * 150, budget)
+        report = play_pod(decks(tmp_path), [ScriptedSeat(budget, cast_commander=True), ScriptedSeat(budget), ScriptedSeat(budget)], auditor, database,
+                          cycles=6, seed=seed, out_root=tmp_path / "games", echo=lambda *_: None, hook_library=library)
+        ledger = json.loads((Path(report["directory"]) / "state.json").read_text())["ledger"]
+        kept = json.loads(library.read_text())["Talrand, Sky Summoner"][0]
+        states.append((auditor.wrote if hasattr(auditor, "wrote") else 0, kept["script_seen"], [e.get("scripted") for e in ledger]))
+        assert report["journal"] == "replays to the same game"
+    # game 1: described once, not trusted. game 2: described again, the same, and trusted from then. game 3: trusted on arrival, and not described at all.
+    assert states == [(1, 1, [False]), (1, 2, [True]), (0, 2, [True])]

@@ -1080,3 +1080,56 @@ def test_a_game_recorded_under_older_table_rules_is_upgraded_at_a_point_the_jour
     assert [e["text"] for e in old.game.ledger] == ["The one description."] and old.game.mechanics >= 2
     rebuilt = Table.replay(old.config, old.events)
     assert rebuilt.game.to_dict() == old.game.to_dict() and old.config["mechanics"] == 1      # the journal, not the config, carries the change
+
+
+NORIN = [{"op": "move", "what": "self", "to": "exile"},
+         {"op": "delay", "step": "end", "text": "Return Norin to the battlefield under its owner's control.",
+          "script": [{"op": "move", "what": "self", "to": "battlefield"}]}]
+
+
+def test_a_trusted_script_puts_its_trigger_on_the_stack_and_resolves_it_with_nobody_woken():
+    table, runner = started()
+    pass_until(table, runner, "main1")
+    norin, bobs = spell_in_hand(table, 0), spell_in_hand(table, 1)
+    runner.step(0, "act", {"because": "test set-up", "mutations": [{"op": "move", "obj": f"@{norin}", "to": "battlefield"}]})
+    handle = next(o["handle"] for o in table.view(None)["battlefield"] if o["name"] == norin)
+    table.apply_hooks([{"kind": "event_trigger", "handle": handle, "text": "When a player casts a spell or a creature attacks, exile Norin. Return it at the next end step.",
+                        "on": {"who": "any", "any_of": [{"event": "cast"}, {"event": "attacks"}]}, "script": NORIN, "scripted": True}])
+    runner.step(0, "cast", {"card": f"@{spell_in_hand(table, 0)}", "resolves": "auto_permanent"})
+    runner.step(0, "pass_priority")
+    stack = table.view(1)["stack"]
+    assert [i.get("resolves_by_script", False) for i in stack] == [False, True] and table.expected() == [(1, "priority")]   # above the spell, and nobody asked to put it there
+    for seat in (1, 2, 0):
+        runner.step(seat, "pass_priority")
+    assert any("resolves by script" in line and "to Ann's exile" in line for line in table.events[-1]["public"])
+    assert norin in [c["name"] for c in table.view(1)["seats"][0]["exile"]] and [e["kind"] for e in table.game.ledger] == ["delayed"]
+    seen = set()
+    for _ in range(60):   # through to the end step: the return stacks and resolves by itself too
+        seat, kind = table.expected()[0]
+        seen.add(kind)
+        if table.game.turn.number == 2:
+            break
+        runner.step(seat, {"priority": "pass_priority", "declare_attackers": "declare_attackers", "discard": "finish_step"}.get(kind, kind))
+    assert norin in [o["name"] for o in table.view(1)["battlefield"]] and seen <= {"priority", "declare_attackers", "discard"}   # no trigger or resolution was anybody's to do
+    assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()
+
+
+def test_only_a_script_in_the_tables_own_words_is_kept_and_an_untrusted_one_waits_for_its_player():
+    from fcsim.table import scripts
+    assert scripts.problem(NORIN) is None and scripts.problem([{"op": "counters", "on": "each_player", "kind": "rad", "delta": 1}]) is None
+    assert "is not one of" in scripts.problem([{"op": "shuffle"}]) and "takes only" in scripts.problem([{"op": "life", "who": "you", "delta": 1, "obj": "c1"}])
+    assert "one of" in scripts.problem([{"op": "move", "what": "target creature", "to": "exile"}]) and scripts.problem([]) is not None
+    assert "cannot delay again" in scripts.problem([{"op": "delay", "step": "end", "text": "x", "script": [{"op": "delay", "step": "end", "text": "y", "script": NORIN[:1]}]}])
+    table, runner = started()
+    pass_until(table, runner, "main1")
+    norin = spell_in_hand(table, 0)
+    runner.step(0, "act", {"because": "test set-up", "mutations": [{"op": "move", "obj": f"@{norin}", "to": "battlefield"}]})
+    handle = next(o["handle"] for o in table.view(None)["battlefield"] if o["name"] == norin)
+    table.apply_hooks([{"kind": "event_trigger", "handle": handle, "text": "When a player casts a spell, exile Norin.", "on": {"event": "cast", "who": "any"},
+                        "script": NORIN},                                        # a script, but nobody has vouched for it
+                       {"kind": "event_trigger", "handle": handle, "text": "Something else.", "on": {"event": "attacks", "self": True},
+                        "script": [{"op": "shuffle"}], "scripted": True}])       # vouched for, but not a script the table runs
+    assert [(e.get("scripted"), "script" in e) for e in table.game.ledger] == [(False, True), (None, False)]
+    runner.step(0, "cast", {"card": f"@{spell_in_hand(table, 0)}", "resolves": "auto_permanent"})
+    runner.step(0, "pass_priority")
+    assert table.expected() == [(0, "triggers")]                                 # as before: its controller puts it on the stack

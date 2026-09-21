@@ -17,6 +17,12 @@ def slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:40]
 
 
+def _plain_pass(event: dict) -> bool:
+    """A pass with nothing else in it. One that also carries what the table did by itself (a scripted trigger
+    going on the stack or resolving) is told in full."""
+    return event["tool"] == "pass_priority" and not event["lints"] and len(event["public"]) <= 1
+
+
 def _passer(event: dict) -> str:
     """Who passed, and until when if they said: "Wilhelt (until end)"."""
     text = " ".join(event["public"])
@@ -68,11 +74,11 @@ class GameDirectory:
         a run of passes in one line. Three quarters of the third pod's log was "passes priority"."""
         self.append("events.jsonl", event)
         passes = getattr(self, "_passes", [])
-        if event["tool"] == "pass_priority" and not event["lints"] and (not passes or passes[-1]["turn"] == event["turn"]):
+        if _plain_pass(event) and (not passes or passes[-1]["turn"] == event["turn"]):
             self._passes = [*passes, event]
             return
         self.flush_log()
-        if event["tool"] == "pass_priority" and not event["lints"]:
+        if _plain_pass(event):
             self._passes = [event]
         elif event["public"] or event["lints"]:
             with (self.path / "log.md").open("a", encoding="utf-8") as out:
@@ -86,11 +92,11 @@ class GameDirectory:
         self._passes = []
         for event in events:
             passes = self._passes
-            if event["tool"] == "pass_priority" and not event["lints"] and (not passes or passes[-1]["turn"] == event["turn"]):
+            if _plain_pass(event) and (not passes or passes[-1]["turn"] == event["turn"]):
                 self._passes = [*passes, event]
                 continue
             self.flush_log()
-            if event["tool"] == "pass_priority" and not event["lints"]:
+            if _plain_pass(event):
                 self._passes = [event]
             elif event["public"] or event["lints"]:
                 with (self.path / "log.md").open("a", encoding="utf-8") as out:

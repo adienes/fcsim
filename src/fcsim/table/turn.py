@@ -225,11 +225,16 @@ def _queue_step_triggers(game: Game, step: str) -> None:
     due = [e for e in game.ledger if e.get("kind") == "delayed" and e.get("step") == step and e.get("whose", "any") in ("any", game.turn.active)]
     for entry in due:  # once: a delayed trigger is used up by the step it waited for
         game.ledger.remove(entry)
-        if game.seats[entry["controller"]].status == "alive":
+        if game.mechanics >= 3 and entry.get("script") and game.seats[entry["controller"]].status == "alive":
+            _stack_script(game, entry, f"the {step} step began")
+        elif game.seats[entry["controller"]].status == "alive":
             game.pending_triggers.append({"id": game.new_id(), "seat": entry["controller"], "text": entry.get("text", ""), "source": None})
     for entry in game.ledger:
         if entry.get("kind") == "step_trigger" and entry.get("step") == step \
                 and entry.get("whose", "each") in ("each", game.turn.active):
+            if game.mechanics >= 3 and entry.get("scripted") and entry.get("script"):
+                _stack_script(game, entry, f"the {step} step began")
+                continue
             game.pending_triggers.append({"id": game.new_id(), "seat": entry["controller"],
                                           "text": entry.get("text", ""), "source": entry.get("source")})
 
@@ -250,6 +255,9 @@ def collect_triggers(game: Game) -> None:
             if not (on.get("event") or on.get("any_of")):
                 continue
             cause = triggers.because(game, fact)
+            if game.mechanics >= 3 and hook.get("scripted") and hook.get("script"):
+                _stack_script(game, hook, cause, fact)
+                continue
             if on.get("once") or game.mechanics >= 2:
                 if id(hook) in fired:
                     # The same ability triggering again for something that happened together: one waiting item with a
@@ -264,6 +272,19 @@ def collect_triggers(game: Game) -> None:
             _describe(waiting, hook)
             grouped[id(hook)] = waiting
             game.pending_triggers.append(waiting)
+
+
+def _stack_script(game: Game, entry: dict, cause: str, fact: dict | None = None) -> None:
+    """A trigger whose effect the table carries out itself goes straight on the stack: nobody has to be
+    woken to put it there, and nobody to resolve it. It can still be responded to."""
+    source = game.objects.get(entry.get("source"))
+    it = game.objects.get((fact or {}).get("id"))
+    bound = dict(entry.get("bound") or {"self": source.uid if source else None, "it": it.uid if it else None})
+    game.stack.append(StackItem(id=game.new_id(), kind="triggered", controller=entry["controller"], source=entry.get("source"),
+                                source_name=source.name if source is not None and source.public else "a triggered ability",
+                                text=str(entry.get("text", "")), script=list(entry["script"]), bound=bound))
+    game.turn.passed = []
+    game.announcements.append(f"The table puts {game.seats[entry['controller']].name}'s trigger on the stack: {entry.get('text', '')} (because {cause})")
 
 
 def _describe(waiting: dict, hook: dict) -> None:
@@ -349,6 +370,13 @@ def _begin_resolution(game: Game) -> None:
     game.turn.passed = []
     if item.auto_permanent and item.obj in game.objects:
         mutations.move(game, game.objects[item.obj], "battlefield", controller=item.controller)
+        return grant_priority(game, game.turn.active)
+    if item.script:
+        from . import ops, scripts  # ops imports this module
+        told = ops.Told()
+        scripts.run(game, item.script, item.controller, item.bound, lambda op: ops.apply_op(game, None, item.controller, op, told))
+        game.announcements.append(f"{item.source_name} ({game.seats[item.controller].name}) resolves by script: "
+                                  + (" ".join(told.public) or "it does nothing now."))
         return grant_priority(game, game.turn.active)
     game.resolution = {"item": item, "batches": 0, "status": "open"}
     game.control = Control("resolution", [item.controller])

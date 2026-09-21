@@ -23,7 +23,7 @@ from ..audit.auditor import card_reference
 from ..cards import CardDatabase, read_decklist, resolve, validate_deck
 from ..mcp import McpServer
 from ..rules import RulesReference
-from ..table import Table, triggers
+from ..table import Table, scripts, triggers
 from ..table.model import MECHANICS
 from ..table.ops import _named as ops_named
 from ..tools import SeatTools
@@ -221,8 +221,7 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
             mine = [_relative(e, obj.controller) for e in table.game.ledger if e.get("source") == obj.id]
             if obj.name in known_hooks and mine and sorted(map(str, mine)) != sorted(map(str, known_hooks[obj.name])):
                 try:
-                    table.rewrite_hooks(table.handles[None].of("c", obj.id),
-                                        [{k: (obj.controller if v == "its controller" else v) for k, v in h.items()} for h in known_hooks[obj.name]])
+                    table.rewrite_hooks(table.handles[None].of("c", obj.id), _absolute(known_hooks[obj.name], obj, database))
                 except ValueError:
                     pass
     greeted: set[int] = set()  # permanents whose controller has had its chance to see to them on someone else's turn
@@ -319,7 +318,8 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
     def news(seat: int) -> str:
         events = table.act(seat, "get_log", {"since": seen[seat]})["events"]
         lines = [f"[{e['step']}] " + " ".join(e["text"]) + (" (to you: " + " ".join(e["private"]) + ")" if e.get("private") else "")
-                 for e in events if (e["text"] and e["tool"] != "pass_priority") or e.get("private")][-40:]  # passes are noise
+                 for e in events if (e["text"] and not e.get("passes") and (e["tool"] != "pass_priority" or len(e["text"]) > 1))
+                 or e.get("private")][-40:]  # passes are noise, unless the table did something by itself as one was made
         return "Since your last wake:\n" + "\n".join(lines) if lines else "Nothing has happened since your last wake."
 
     def ask_all(prompts: dict[int, str], schema: dict, *, quick: bool = False) -> list:
@@ -515,6 +515,16 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
         report["audits"].append(record)
         directory.append("audits.jsonl", record)
         if verdict.get("hooks"):
+            counts: dict[tuple, int] = {}
+            for hook in verdict["hooks"]:
+                hook.pop("scripted", None)  # trust is the driver's to give, never the auditor's to claim
+                source = table.game.objects.get(table.handles[None].resolve("c", hook.get("handle")) or -1)
+                if source is None or not hook.get("script"):
+                    continue
+                known = next((h for h in known_hooks.get(source.name, []) if _hook_key(h) == _hook_key(hook)), {})
+                seen = (known.get("script_seen", 0) if known.get("script") == hook["script"] else 0) + 1
+                counts[(source.name, _hook_key(hook))] = seen
+                hook["scripted"] = _script_trusted(database.find(source.name), {**hook, "script_seen": seen, "script_revoked": known.get("script_revoked")})
             try:
                 table.apply_hooks(verdict["hooks"])
             except ValueError as error:
@@ -526,6 +536,10 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
                 if source is not None and source.id in described:
                     hooked.add(source.id)
                     learned = _own_trigger(source.name, _relative(entry, source.controller))
+                    learned.pop("scripted", None)
+                    if learned.get("script"):
+                        before = next((h for h in known_hooks.get(source.name, []) if _hook_key(h) == _hook_key(learned)), {})
+                        learned |= {"script_seen": counts.get((source.name, _hook_key(learned)), 1), "script_revoked": bool(before.get("script_revoked"))}
                     if learned not in fresh.setdefault(source.name, []):
                         fresh[source.name].append(learned)
             known_hooks.update(fresh)
@@ -535,6 +549,20 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
                 scratch = library.with_suffix(f".{secrets.token_hex(4)}.tmp")
                 scratch.write_text(json.dumps({**on_disk, **fresh}, indent=1, ensure_ascii=False, sort_keys=True), encoding="utf-8")
                 scratch.replace(library)
+        for finding in verdict.get("findings", []):
+            # One finding against a scripted resolution and the script is never trusted again, in this game or a later one.
+            told = table.events[finding["event"]]["public"] if isinstance(finding.get("event"), int) and 0 <= finding["event"] < len(table.events) else []
+            for line in told:
+                if " resolves by script" in line and finding.get("kind") in SERIOUS:
+                    blamed = line.split(" (")[0]
+                    for hook in known_hooks.get(blamed, []):
+                        hook["script_revoked"] = True
+                    echo(f"         the script for {blamed} is revoked: {finding['summary'][:120]}")
+                    for obj in [o for o in table.game.objects.values() if o.zone == "battlefield" and o.name == blamed]:
+                        table.rewrite_hooks(table.handles[None].of("c", obj.id), _absolute(known_hooks[blamed], obj, database))
+                    if library:
+                        on_disk = json.loads(library.read_text(encoding="utf-8")) if library.is_file() else {}
+                        library.write_text(json.dumps({**on_disk, blamed: known_hooks[blamed]}, indent=1, ensure_ascii=False, sort_keys=True), encoding="utf-8")
         table.apply_computed(verdict.get("computed") or [])
         stamped[0] = _characteristics_print(table)
         actors = [e["seat"] for e in unit if e["seat"] is not None]
@@ -593,8 +621,7 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
             hooked.add(obj.id)
             if obj.face_down or obj.name not in known_hooks:
                 continue
-            hooks = [{**{k: (obj.controller if v == "its controller" else v) for k, v in hook.items()},
-                      "handle": table.handles[None].of("c", obj.id)} for hook in known_hooks[obj.name]]
+            hooks = [{**hook, "handle": table.handles[None].of("c", obj.id)} for hook in _absolute(known_hooks[obj.name], obj, database)]
             try:
                 table.apply_hooks(hooks)
             except ValueError:
@@ -811,6 +838,8 @@ def _plain_combat(table: Table) -> bool:
 def _needs_nothing_written(card, known_hooks: dict) -> bool:
     """A card the auditor has nothing to write down for: it only taps for mana or has keywords the
     table is already told, or every hook an auditor wrote for it before is one the table handles."""
+    if any(h.get("script") and h.get("script_seen", 0) < 2 and not h.get("script_revoked") for h in known_hooks.get(card.name, [])):
+        return False  # its script is waiting for a second opinion, which only an audit can give
     if card.name in known_hooks:
         return all(h.get("kind") in ("step_trigger", "hold") or (h.get("kind") == "event_trigger" and (h.get("on") or {}).get("event"))
                    for h in known_hooks[card.name])
@@ -823,16 +852,51 @@ def _needs_nothing_written(card, known_hooks: dict) -> bool:
     return True
 
 
+_CHOICES = re.compile(r"\b(may|targets?|chooses?|up to|unless|if|random|any number|instead|x|that many|for each|equal to|where|or|each time|twice)\b", re.I)
+
+
+def _script_trusted(card, hook: dict) -> bool:
+    """Whether the table may carry this hook's script out by itself. All of: the script uses only the
+    table's own operations; the auditor has written the same script for this card at two audits or more;
+    no finding has ever been made against it; and the card's printed ability, found from the hook's
+    text, has no choice, target, condition or variable amount in its effect."""
+    if card is None or not hook.get("script") or scripts.problem(hook["script"]) or hook.get("script_revoked") or hook.get("script_seen", 0) < 2:
+        return False
+    lines = [re.sub(r"\([^)]*\)", "", line).strip() for face in card.faces for line in face.oracle_text.splitlines()]
+    scored = [(difflib.SequenceMatcher(None, str(hook.get("text", "")).lower(), line.lower()).ratio(), line) for line in lines if line]
+    ratio, printed = max(scored, default=(0, ""))
+    effect = printed.split(", ", 1)[1] if ", " in printed else printed
+    return ratio >= 0.55 and not _CHOICES.search(effect)
+
+
+def _absolute(hooks: list[dict], obj, database: CardDatabase) -> list[dict]:
+    """Library hooks made ready for one permanent: its controller put back where the library says "its
+    controller", and each script marked trusted or not."""
+    ready = []
+    for hook in hooks:
+        made = {k: (obj.controller if v == "its controller" else v) for k, v in hook.items() if k not in ("script_seen", "script_revoked", "scripted")}
+        if hook.get("script"):
+            made["scripted"] = _script_trusted(database.find(obj.name), hook)
+        ready.append(made)
+    return ready
+
+
+def _hook_key(hook: dict) -> tuple | None:
+    """What makes two hooks the same ability: their kind and what they fire on, not their wording."""
+    on = hook.get("on") or {}
+    if not on and hook.get("kind") == "event_trigger":
+        return None
+    return (hook.get("kind"), hook.get("step"), str(hook.get("whose", hook.get("seat"))),
+            *(str(triggers.pattern(on).get(k)) for k in ("event", "from", "to", "who", "self", "other", "kind", "sign")), len(on.get("any_of") or []))
+
+
 def _tidy(hooks: list[dict]) -> list[dict]:
     """One hook for one ability. Descriptions of the same card written at different times differ in
     wording and in detail; of those that would fire on the same thing, the first stands. A hook that is
     text alone is dropped when a patterned one says much the same."""
     kept: list[dict] = []
     for hook in hooks:
-        on = hook.get("on") or {}
-        key = (hook.get("kind"), hook.get("step"), str(hook.get("whose", hook.get("seat"))),
-               *(str(triggers.pattern(on).get(k)) for k in ("event", "from", "to", "who", "self", "other", "kind", "sign")),
-               len(on.get("any_of") or [])) if on or hook.get("kind") != "event_trigger" else None
+        key = _hook_key(hook)
         if key is not None and hook.get("kind") == "static":
             key = (*key, hook.get("text"))
         if key is None or not any(key == k for k, _ in kept):

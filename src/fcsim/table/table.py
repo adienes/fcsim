@@ -10,7 +10,7 @@ from __future__ import annotations
 import copy
 from collections.abc import Callable
 
-from . import mana, mechanics, mutations, ops, triggers, turn
+from . import mana, mechanics, mutations, ops, scripts, triggers, turn
 from .model import MECHANICS, STEPS, Dice, Game, Obj, Seat, StackItem, TableError
 from .views import Handles, obj_view, view
 
@@ -140,7 +140,7 @@ class Table:
             entry = {"n": e["n"], "seat": e["seat"], "tool": e["tool"], "turn": e["turn"], "step": e["step"], "text": e["public"],
                      **({"private": e["private"][str(seat)]} if str(seat) in e["private"] else {}),
                      **({"lints": e["lints"]} if e["lints"] else {})}
-            plain = e["tool"] == "pass_priority" and "private" not in entry and "lints" not in entry
+            plain = e["tool"] == "pass_priority" and "private" not in entry and "lints" not in entry and len(e["public"]) <= 1
             if plain and shown and shown[-1].get("passes") and shown[-1]["turn"] == e["turn"]:
                 # A run of passes is one entry: who passed matters now and then, a line each never does.
                 run = shown[-1]
@@ -208,6 +208,8 @@ class Table:
             raise
         told = outcome if isinstance(outcome, ops.Told) else outcome[0]
         lints = [] if isinstance(outcome, ops.Told) else outcome[1]
+        told.public += game.announcements
+        game.announcements = []
         for whispered_to, sentence in game.whispers:
             told.secretly([whispered_to], sentence)
         game.whispers = []
@@ -807,6 +809,9 @@ class Table:
                      "controller": hook.get("controller", source.controller)}
             if hook["kind"] == "event_trigger" and isinstance(hook.get("on"), dict):
                 entry["on"] = {k: v for k, v in hook["on"].items() if isinstance(v, (str, int, bool, list))}  # a pattern over facts: see `triggers`
+            if hook.get("script") and hook["kind"] in ("event_trigger", "step_trigger") and scripts.problem(hook["script"]) is None:
+                # `scripted` is the driver's word that this script has earned its trust; without it the script is only kept.
+                entry |= {"script": hook["script"], "scripted": bool(hook.get("scripted"))}
             if hook["kind"] == "hold":
                 entry |= {"step": hook.get("step"), "seat": hook.get("seat", source.controller)}
             elif hook["kind"] == "step_trigger":

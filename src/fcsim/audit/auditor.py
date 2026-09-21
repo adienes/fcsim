@@ -103,6 +103,23 @@ turn"): then the text alone stands, and you check it after the fact as now.
 - static: a continuous effect that changes other objects, players or the rules while the \
 permanent stays: "other Zombie creatures you control get +1/+1", "spells cost {1} less", \
 "players can't gain life". Players will read it at the top of their view, so state it exactly.
+Scripts. If a triggered ability is mandatory, has no target and leaves nothing to choose, and its \
+whole effect can be written with the operations below, also give the hook a `script`: the table then \
+puts the trigger on the stack and resolves it by itself, with nobody woken. Write one only when you \
+are certain; an ability with "may", "target", "choose", "up to", "if", "unless", X or "for each" gets \
+none, and nor does one whose effect needs any other operation. Operations, each an object with `op`: \
+counters {on, kind, delta}; life {who, delta}; draw {who, count}; mill {who, count}; create_token \
+{token: {name, types, power, toughness, text}, count}; move {what, to}; tap {what}; untap {what}; \
+delay {step, text, script} for "at the beginning of the next end step, ..." (its script may not \
+delay again; add "whose": "mine" for "your next ..."). `what` is "self" (this permanent) or "it" (the \
+object that caused the trigger); `on` is one of those, "each_creature_you_control", \
+"each_other_creature_you_control", or a player; a player (`who`) is "you", "each_opponent", \
+"each_player" or "its_controller"; `to` is battlefield, graveyard, exile, hand or command. Example, \
+Norin the Wary: [{"op": "move", "what": "self", "to": "exile"}, {"op": "delay", "step": "end", "text": \
+"Return Norin the Wary to the battlefield under its owner's control.", "script": [{"op": "move", \
+"what": "self", "to": "battlefield"}]}]. A scripted resolution appears in the record as "resolves by \
+script": check it like any other play, and report it if the script got the card wrong.
+
 One hook for one ability. An ability with two triggers ("whenever a player casts a spell or a \
 creature attacks") is one hook whose `on` lists the alternatives under `any_of`, each a pattern of \
 its own. What you write for a permanent replaces everything the ledger held for it, so give all of \
@@ -181,6 +198,8 @@ VERDICT_SCHEMA = {
                 "whose": {"anyOf": [{"type": "string", "enum": ["each"]}, {"type": "integer"}],
                           "description": "For a step_trigger: \"each\" or a seat number."},
                 "controller": {"type": "integer"},
+                "script": {"type": "array", "items": {"type": "object"},
+                           "description": "Only for a mandatory ability with no target and nothing to choose: its whole effect, in the table's operations."},
                 "on": {"type": "object", "additionalProperties": False, "required": ["event"], "properties": {
                     "event": {"type": "string", "description": "What the table sees (moved, cast, attacks, blocks, damage, life, counters, "
                               "tapped, untapped) or the name of a common pattern (enters, dies, milled, gains_life, ...)."},
@@ -283,7 +302,10 @@ def describe(view: dict, database: CardDatabase | None = None) -> str:
                 lines.append(f"  revealed in {zone}: " + ", ".join(o.get("name", "?") for o in seat[zone]["known"]))
         mine = [obj for obj in view["battlefield"] if obj.get("controller") == index]
         lines.append("  controls, in order of arrival:" if mine else "  controls nothing.")
-        described = {e.get("source") for e in view["ledger"] if e.get("kind") != "delayed"}
+        # A permanent whose script is still waiting for a second opinion is not marked: the auditor describes it
+        # again without seeing the first description, and only agreement makes the script trusted.
+        unsure = {e.get("source") for e in view["ledger"] if e.get("script") and not e.get("scripted")}
+        described = {e.get("source") for e in view["ledger"] if e.get("kind") != "delayed"} - unsure
         lines += [f"    - {_object_line(obj, names, combat, database)}" + (" (hooks written)" if obj["handle"] in described else "") for obj in mine]
     effects = [e for e in view["ledger"] if e.get("kind") == "static"]
     if effects:
@@ -348,7 +370,7 @@ def record(table: Table, since_event: int, until_event: int | None = None) -> li
     for event in table.events[since_event:until_event]:
         if (not event["public"] and not event["lints"]) or event["tool"] in ("setup", "mulligan", "keep", "write_notes"):
             continue  # the table's own bookkeeping, private notes, and the mulligans it enforces itself
-        if event["tool"] == "pass_priority" and not event["lints"]:
+        if event["tool"] == "pass_priority" and not event["lints"] and len(event["public"]) <= 1:
             passing.append((event["n"], table.game.seats[event["seat"]].name, event["step"]))
             continue
         flush_passes()

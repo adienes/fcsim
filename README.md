@@ -229,6 +229,15 @@ auditor's stamps and offered to the attacker as `combat_damage {as_proposed: tru
 past a refusal by naming, in `because`, the effect that allows the play, which the auditor then
 reads.
 
+**Triggers.** The auditor writes down, for each permanent, what it triggers on as a pattern over the
+few things the table can see happen (a card moving between zones, damage, life, counters, tapping,
+attacks, blocks, casts), and the table puts a matching trigger in front of its controller the moment
+it happens; several at once are one item with a count. What is learned about a card is kept in
+`data/hooks.json` for later games. A delayed trigger is recorded by the player with the `delay`
+mutation and comes back at its step. An ability with nothing to decide can carry its effect as a
+script, which the table runs by itself once the card's text, the script's vocabulary and two
+separate audits all agree; one finding against it revokes it.
+
 **Rules integrity.** The auditor checks each whole turn before the next begins (`--audit-every
 checkpoint` checks every time the pen moves: stricter, several times slower). Its hooks go into
 the ledger; a trigger it reports is put in front of its controller; event triggers it has
