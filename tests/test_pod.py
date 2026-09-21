@@ -1210,6 +1210,7 @@ def test_the_mulligan_question_counts_the_hand_for_the_pilot(database, tmp_path)
     hand = asked.split("YOUR HAND")[1].split("\n\n")[0]
     lands = sum(1 for line in hand.splitlines() if line.startswith("- [") and ("] Island" in line or "] Forest" in line))
     assert f"Counted for you: {lands} land(s)" in asked and "the free mulligan is there to be used" in asked
+    assert "Your commander costs {2}{U}{U}. This hand's mana makes U. In the whole list of 100, sources of each: U 99" in asked   # colours nobody can count at the table
 
 
 def test_an_opponent_drawn_at_random_is_a_deck_project_and_every_project_that_played_can_be_taught(database, tmp_path, monkeypatch, capsys):

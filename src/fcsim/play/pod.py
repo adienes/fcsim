@@ -329,8 +329,21 @@ class _Pod:
         spells = [card for card in known if card not in lands]
         rocks = [card.name for card in spells if card.table_facts().get("produces") and card.table_facts()["mana_value"] <= 3]
         cheap = [card.name for card in spells if card.table_facts()["mana_value"] <= 2]
+        # Colours, which no pilot can count at the table: one kept four lands without white for a commander that costs {R}{W}{B},
+        # sure that "the deck has plenty of white sources to draw into". It had 14 in 104 cards, and saw none in six turns.
+        def makes(card) -> set[str]:
+            facts = card.table_facts()
+            return set(facts.get("produces") or []) & set("WUBRG") if "Land" in facts["types"] or (facts.get("produces") and facts["mana_value"] <= 3) else set()
+        deck = self.decks[seat]
+        wanted = [c for c in "WUBRG" if any(c in (commander.table_facts().get("mana_cost") or "") for commander in deck.commanders)]
+        here = set().union(*(makes(card) for card in known)) if known else set()
+        in_list = {c: sum(count for card, count in deck.cards if c in makes(card)) for c in wanted}
+        size = sum(count for _, count in deck.cards) + len(deck.commanders)
+        colours = (f" Your commander costs {' and '.join(c.table_facts().get('mana_cost') or '?' for c in deck.commanders)}. This hand's mana makes "
+                   f"{', '.join(c for c in 'WUBRG' if c in here) or 'no colour'}" + (f" and not {', '.join(c for c in wanted if c not in here)}" if set(wanted) - here else "")
+                   + f". In the whole list of {size}, sources of each: " + ", ".join(f"{c} {n}" for c, n in in_list.items()) + " (lands that fetch are not counted).") if wanted else ""
         return (f"Counted for you: {len(lands)} land(s), {len(rocks)} cheap mana source(s) besides ({', '.join(rocks) or 'none'}), "
-                f"{len(cheap)} spell(s) costing two or less, out of {len(cards)} cards. As the format is usually played, a hand to keep has "
+                f"{len(cheap)} spell(s) costing two or less, out of {len(cards)} cards.{colours} As the format is usually played, a hand to keep has "
                 "three or four lands, or two with cheap mana beside them, makes the colours of its first plays, and has something to do in "
                 "the first three turns; the free mulligan is there to be used on a hand that does not.")
 
