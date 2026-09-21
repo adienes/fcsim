@@ -247,6 +247,8 @@ def collect_triggers(game: Game) -> None:
                 continue  # "whenever you cast a spell from exile": the third pod declined this trigger on every cast from hand
             if on.get("other") and hook.get("source") in (fact.get("id"), fact.get("old_id")):
                 continue
+            if on.get("self") and hook.get("source") not in (fact.get("id"), fact.get("old_id")):
+                continue  # "whenever The Wise Mothman enters" was offered to its controller each time a land entered
             what = {"cast": "cast", "attacks": "attacked", "enters": "entered", "leaves": "left the battlefield", "dies": "died"}
             game.pending_triggers.append({"id": game.new_id(), "seat": hook["controller"], "source": hook.get("source"),
                                           "text": f"{hook.get('text', '')} (because {fact['name']} {what[on['event']]})"})

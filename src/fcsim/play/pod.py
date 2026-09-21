@@ -194,11 +194,23 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
     library = Path(hook_library) if hook_library else None
     known_hooks: dict[str, list[dict]] = json.loads(library.read_text(encoding="utf-8")) if library and library.is_file() else {}
     hooked: set[int] = set()
-    for entry in table.game.ledger:  # a resumed game already has a ledger to learn from
+    from_ledger: dict[str, list[dict]] = {}
+    for entry in table.game.ledger:  # a resumed game already has a ledger to learn from, where the library knows nothing better
         source = table.game.objects.get(entry.get("source"))
         if source is not None:
             hooked.add(source.id)
-            known_hooks.setdefault(source.name, []).append(_relative(entry, source.controller))
+            from_ledger.setdefault(source.name, []).append(_relative(entry, source.controller))
+    known_hooks = {**from_ledger, **known_hooks}
+    if earlier is not None:
+        # A resumed game may have been hooked from an older description of a card than the library now holds.
+        for obj in [table.game.objects[i] for i in table.game.battlefield]:
+            mine = [_relative(e, obj.controller) for e in table.game.ledger if e.get("source") == obj.id]
+            if obj.name in known_hooks and mine and sorted(map(str, mine)) != sorted(map(str, known_hooks[obj.name])):
+                try:
+                    table.rewrite_hooks(table.handles[None].of("c", obj.id),
+                                        [{k: (obj.controller if v == "its controller" else v) for k, v in h.items()} for h in known_hooks[obj.name]])
+                except ValueError:
+                    pass
     windows: dict = {}  # (table turn, step) -> the seats that said they would act in that empty-stack window
     stamped: list = [None]  # what the battlefield looked like when power and toughness were last worked out
     report: dict = {"directory": str(directory.path), "seed": seed, "seats": names, "stopped": None,
@@ -554,7 +566,15 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
             try:
                 table.apply_hooks(hooks)
             except ValueError:
-                pass  # the next audit writes them afresh
+                continue  # the next audit writes them afresh
+            # It has already entered, and the table matched that event before these hooks existed: its own
+            # "when this enters" is put in front of its controller now, unless the player has seen to it.
+            seen_to = any(e["tool"] == "add_trigger" and e["args"].get("source") == obj.id for e in table.events[-40:])
+            for hook in hooks:
+                on = hook.get("on") or {}
+                if hook.get("kind") == "event_trigger" and on.get("event") == "enters" and on.get("self") and not seen_to \
+                        and obj.entered_turn == game.turn.number:
+                    table.queue_trigger(obj.controller, f"{hook.get('text', '')} (because {obj.name} entered)")
 
     def settle(me: int | None = None) -> str:
         """Do everything that needs no full wake: release mid-turn checkpoints, pass for seats with

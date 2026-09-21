@@ -890,3 +890,22 @@ def test_get_log_tells_a_run_of_passes_as_one_entry():
     assert shown[-1]["tool"] == "play_land" and all(e["tool"] != "pass_priority" or e.get("passes") or e.get("private") for e in shown)
     mine = table.act(0, "get_log", {"since": 0})["events"]
     assert any(e["tool"] == "pass_priority" and e.get("private") for e in mine)    # the pass that drew Ann's card stays its own entry, for Ann
+
+
+def test_a_trigger_on_the_permanent_itself_is_not_offered_when_something_else_enters_or_attacks():
+    table, runner = started()
+    pass_until(table, runner, "main1")
+    moth, other = [name for name in hand(table, 0) if "spell" in name][:2]
+    runner.step(0, "act", {"because": "test set-up", "mutations": [{"op": "move", "obj": f"@{moth}", "to": "battlefield"}]})
+    handle = next(o["handle"] for o in table.view(None)["battlefield"] if o["name"] == moth)
+    table.apply_hooks([{"kind": "event_trigger", "handle": handle, "text": "Whenever this enters or attacks, each player gets a rad counter.",
+                        "on": {"event": "enters", "who": "you", "self": True}}])
+    runner.step(0, "play_land", {"card": "@Island"})
+    runner.step(0, "act", {"because": "test set-up", "mutations": [{"op": "move", "obj": f"@{other}", "to": "battlefield"}]})
+    runner.step(0, "pass_priority")
+    # Its own arrival is its business, once; the land and the other creature that entered are not.
+    assert [t["text"] for t in table.view(0)["waiting_triggers"]] == [f"Whenever this enters or attacks, each player gets a rad counter. (because {moth} entered)"]
+    # Rewriting a permanent's hooks replaces what the ledger held for it, and nothing else.
+    table.rewrite_hooks(handle, [{"kind": "event_trigger", "text": "Whenever a creature enters under your control, gain 1 life.", "on": {"event": "enters", "who": "you"}}])
+    assert [e["text"] for e in table.game.ledger] == ["Whenever a creature enters under your control, gain 1 life."]
+    assert Table.replay(table.config, table.events).game.ledger == table.game.ledger

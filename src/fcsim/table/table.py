@@ -735,6 +735,15 @@ class Table:
             game.seats[who].failed_disputes += 1
         return ops.Told(public=[f"The auditor {'agrees with' if args['upheld'] else 'rejects'} {self._name(who)}'s dispute: {args['answer']}"])
 
+    def rewrite_hooks(self, handle: str, hooks: list[dict]) -> dict:
+        """Replace everything the ledger holds for one permanent, named by its public handle, with
+        `hooks`: for when a better description of the card has been learned since the first was written."""
+        source = self.game.objects.get(self.handles[None].resolve("c", handle) or -1)
+        if source is None or source.zone != "battlefield":
+            raise TableError("bad_hook", f"{handle!r} is not a permanent on the battlefield.")
+        return self._execute(None, "hooks", {"replace": source.id, "hooks": [{**{k: v for k, v in h.items() if k != "handle"}, "source_id": source.id}
+                                                                          for h in hooks]})
+
     def apply_hooks(self, hooks: list[dict]) -> dict:
         """Write an auditor's hooks into the ledger. A hook lasts until its source leaves the battlefield.
 
@@ -762,6 +771,8 @@ class Table:
 
     def _do_hooks(self, game: Game, seat: None, args: dict):
         told = ops.Told()
+        if args.get("replace") is not None:
+            game.ledger[:] = [e for e in game.ledger if e.get("source") != args["replace"]]
         for hook in args["hooks"]:
             source = game.objects.get(hook.get("source_id"))
             if hook.get("kind") not in ("hold", "step_trigger", "event_trigger", "static") or source is None:
@@ -769,7 +780,7 @@ class Table:
             entry = {"kind": hook["kind"], "text": str(hook.get("text", "")), "source": source.id,
                      "controller": hook.get("controller", source.controller)}
             if hook["kind"] == "event_trigger" and isinstance(hook.get("on"), dict):
-                entry["on"] = {k: hook["on"][k] for k in ("event", "who", "type", "nontoken", "other", "from") if k in hook["on"]}
+                entry["on"] = {k: hook["on"][k] for k in ("event", "who", "type", "nontoken", "other", "from", "self") if k in hook["on"]}
             if hook["kind"] == "hold":
                 entry |= {"step": hook.get("step"), "seat": hook.get("seat", source.controller)}
             elif hook["kind"] == "step_trigger":

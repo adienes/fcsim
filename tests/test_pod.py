@@ -712,3 +712,13 @@ def test_a_card_the_auditor_has_seen_gets_its_hooks_the_moment_it_comes_back(dat
                       never, database, cycles=5, seed=9, out_root=tmp_path / "games", echo=lambda *_: None, hook_library=library)
     ledger = json.loads((Path(second["directory"]) / "state.json").read_text())["ledger"]
     assert [(entry["kind"], entry["on"]["event"]) for entry in ledger] == [("event_trigger", "cast")]
+    # A known card's own "when this enters" is put in front of its controller as it arrives: the table had matched
+    # the event before the hooks existed.
+    kept["Talrand, Sky Summoner"].append({"kind": "event_trigger", "controller": "its controller", "text": "When Talrand enters, scry 1.",
+                                         "on": {"event": "enters", "who": "you", "self": True}})
+    library.write_text(json.dumps(kept))
+    third = play_pod(decks(tmp_path), [ScriptedSeat(budget, cast_commander=True), ScriptedSeat(budget), ScriptedSeat(budget)],
+                     FakeRunner([OK] * 150, budget), database, cycles=5, seed=9, out_root=tmp_path / "games", echo=lambda *_: None, hook_library=library)
+    log = (Path(third["directory"]) / "log.md").read_text()
+    assert log.count("A trigger is waiting for Talrand: When Talrand enters, scry 1. (because Talrand, Sky Summoner entered)") == 1
+    assert log.count("Talrand puts a trigger on the stack") == 1 and "Pir plays Forest" in log and "does not put a trigger" not in log

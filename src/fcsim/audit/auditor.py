@@ -87,7 +87,10 @@ that the table can put the trigger in front of its controller the moment the eve
 `event` is cast, enters, dies, leaves or attacks; `who` is "you" (the permanent's controller cast \
 the spell or controlled the object), "opponent" or "any"; `type` is a word that must be in the \
 object's type line, such as Creature, Dragon, Zombie or Instant; `nontoken` is true if tokens do \
-not count; `other` is true if the ability says "another"; `from` is the zone a spell must be cast \
+not count; `other` is true if the ability says "another"; `self` is true if the ability triggers \
+only on the permanent itself ("whenever this creature attacks", "when The Wise Mothman enters or \
+attacks", "when this dies"): without it the table offers the trigger every time anything attacks, \
+enters or dies. Always give `on` when the event is one of the five; `from` is the zone a spell must be cast \
 from or a permanent must enter from, when the ability names one (hand, exile, graveyard, command, \
 library; a permanent spell that resolves enters from the stack). Leave `on` out when the trigger does not \
 fit these words, and describe it in text alone.
@@ -171,6 +174,7 @@ VERDICT_SCHEMA = {
                     "event": {"type": "string", "enum": ["cast", "enters", "dies", "leaves", "attacks"]},
                     "who": {"type": "string", "enum": ["you", "opponent", "any"]},
                     "type": {"type": "string"}, "nontoken": {"type": "boolean"}, "other": {"type": "boolean"},
+                    "self": {"type": "boolean"},
                     "from": {"type": "string", "enum": ["hand", "exile", "graveyard", "command", "library", "stack"]}}}}}},
         "disputes": {"type": "array", "items": {
             "type": "object", "additionalProperties": False, "required": ["event", "upheld", "answer"],
