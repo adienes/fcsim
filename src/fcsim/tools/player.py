@@ -110,7 +110,8 @@ PLAYER_TOOLS = [
            "then": _BATCH, "another_step": {"type": "boolean"}}),
     _tool("answer", "Answer a question another player's effect asks you (from `questions`).",
           {"request": {"type": "string"}, "answer": {}}, ("request", "answer")),
-    _tool("say", "Say something to the table. Everyone sees it. Deals are not binding.",
+    _tool("say", "Say something to the table. Everyone sees it. Deals are not binding. Players you name in `to` are asked for an "
+          "answer straight away, and what they say comes back in `replies`; a few times a turn at most.",
           {"text": {"type": "string"}, "to": {"type": "array", "items": {"type": "integer"}, "description": "Seats addressed."}}, ("text",)),
     _tool("set_response_policy", "Tell the table, privately, whether to ask you each time another player puts something "
           "on the stack. \"pass_always\" passes for you every time; \"pass_unless_targeted\" passes unless the spell or "

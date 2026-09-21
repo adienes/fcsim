@@ -32,7 +32,8 @@ You are {name}, one of {count} players in a game of Magic: The Gathering (Comman
 table, played through tools. Play to win, as a strong and fair player would: develop your board, \
 judge who is the real threat, hold interaction for what matters, attack where it helps you most. \
 Talk to the table with `say` when it serves you: make deals, point at threats, bluff about what \
-you hold. Deals are not binding. Never misstate the public game state or the rules.
+you hold. Deals are not binding. If you name the players you are speaking to in `to`, they answer \
+at once and their answers come back in the result, so you can settle something before you act. Never misstate the public game state or the rules.
 
 How the table works. The table is a tabletop, not a rules engine: it knows zones, turns and \
 priority, and no card text. You carry out every rule and card effect yourself with your tools, \
@@ -77,6 +78,9 @@ _OPENING = {"type": "object", "additionalProperties": False, "required": ["keep"
             "properties": {"keep": {"type": "boolean"}, "why": {"type": "string", "description": "One short sentence."},
                            "bottom": {"type": "array", "items": {"type": "string"},
                                       "description": "Handles of the cards to put on the bottom of your library, if you keep after more than one mulligan."}}}
+_REPLY = {"type": "object", "additionalProperties": False, "required": ["reply"],
+          "properties": {"reply": {"type": "string", "description": "What you say back, in a sentence or two; empty to stay silent."}}}
+_REPLIES_PER_WAKE = 3
 _WINDOW = {"type": "object", "additionalProperties": False, "required": ["act", "why"],
            "properties": {"act": {"type": "boolean"}, "why": {"type": "string", "description": "One short sentence."}}}
 _DEFAULTS = {"priority": "pass_priority", "mulligan": "keep", "declare_attackers": "declare_attackers",
@@ -183,7 +187,7 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
     windows: dict = {}  # (table turn, step) -> the seats that said they would act in that empty-stack window
     stamped: list = [None]  # what the battlefield looked like when power and toughness were last worked out
     report: dict = {"directory": str(directory.path), "seed": seed, "seats": names, "stopped": None,
-                    "rulings": list((earlier or {}).get("rulings", [])),
+                    "rulings": list((earlier or {}).get("rulings", [])), "talk": list((earlier or {}).get("talk", [])),
                     "triage": list((earlier or {}).get("triage", [])), "refreshes": list((earlier or {}).get("refreshes", [])),
                     "wakes": list((earlier or {}).get("wakes", [])), "audits": list((earlier or {}).get("audits", [])),
                     "earlier_usage": [*(earlier or {}).get("earlier_usage", []), *([earlier["usage"]] if (earlier or {}).get("usage") else [])]}
@@ -199,6 +203,12 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
         def call(request_id: str, name: str, arguments: dict) -> dict:
             result = tools.call(request_id, name, arguments)
             me = current["seat"]
+            if name == "say" and result.get("ok") and arguments.get("to") and current["replies"] < _REPLIES_PER_WAKE:
+                current["replies"] += 1
+                try:
+                    result = {**result, "replies": replies(me, str(arguments.get("text", "")), arguments["to"])}
+                except RunnerError:
+                    pass  # talk is a courtesy: a failed question must not cost the speaker its turn
             if not holds_pen(me) and not current["ended"]:
                 # The pen has left this seat. A new session costs seconds of start-up and a fresh read of
                 # everything, so first do what needs no other player's full attention: if nobody responds
@@ -349,6 +359,33 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
                         report["wakes"][-1]["forced"] = "the driver kept the hand and chose what went on the bottom"
                 seen[seat] = len(table.events)
 
+    def replies(speaker: int, text: str, to: list) -> list[dict]:
+        """A player has spoken to others by name. Each is asked at once, with no tools, what it says
+        back, so that a deal can be struck before the speaker acts and not a round later."""
+        game = table.game
+        asked = [s for s in dict.fromkeys(to) if isinstance(s, int) and 0 <= s < count and s != speaker and game.seats[s].status == "alive"]
+        prompts = {seat: (f"{when()} {names[speaker]} has just said to you, at the table: \"{text}\" You are not acting now, only "
+                          "talking. Say what serves you: agree, refuse, bargain, bluff, point at the real threat. Deals are not "
+                          f"binding. Leave `reply` empty to stay silent.\n\n{news(seat)}\n\n{briefing(seat)}") for seat in asked}
+
+        def one(seat: int):
+            return seat, runners[seat].ask(systems[seat], prompts[seat], schema=_REPLY)
+        if not asked:
+            return []
+        with ThreadPoolExecutor(max_workers=len(asked)) as pool:
+            answers = list(pool.map(one, asked))
+        said = []
+        for seat, reply in answers:
+            words = str((reply.data or {}).get("reply", "")).strip()
+            record = {"turn": game.turn.number, "seat": seat, "to": speaker, "asked": text, "reply": words, "seconds": round(reply.seconds, 1)}
+            report["talk"].append(record)
+            directory.append(f"transcript-seat-{seat}.jsonl", {"kind": "reply", **record})
+            if words and "error" not in table.act(seat, "say", {"text": words, "to": [speaker]}):
+                said.append({"from": names[seat], "seat": seat, "text": words})
+        echo(f"turn {game.turn.number} {game.turn.step}: {names[speaker]} spoke to {', '.join(names[s] for s in asked)}; "
+             f"{len(said)} answered")
+        return said
+
     def window(seats: list[int], situation: str) -> set[int]:
         """Ask several seats at once whether they would act now, with the stack empty on another player's
         turn. Without this nobody could ever kill an attacker, play a combat trick after blocks, or
@@ -378,7 +415,7 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
     def wake(server: McpServer, seat: int, kind: str, extra: str = "") -> None:
         token, handle = secrets.token_hex(16), table.open_wake(seat, kind)
         current.update(tools=SeatTools(table, seat, handle, database=database, rules=rules), token=token, wake=handle,
-                       seat=seat, ended=False)
+                       seat=seat, ended=False, replies=0)
         game = table.game
         windows.get((game.turn.number, game.turn.step), set()).discard(seat)
         if kind == "correction" and not extra:

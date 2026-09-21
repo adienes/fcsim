@@ -42,9 +42,10 @@ class ScriptedSeat:
 
     def __init__(self, budget: Budget, *, cast_commander: bool = False, with_trigger: bool = False, triage: dict | None = None,
                  attack: int | None = None, contests: bool = False, disputes: str = "", mulligans: int = 0, bottoms: bool = True,
-                 acts: bool = False, holds: bool = False, fidgets: bool = False):
+                 acts: bool = False, holds: bool = False, fidgets: bool = False, asks: str = "", answers: str = ""):
         self.budget, self.prompts, self.cast_commander, self.attack, self.contests = budget, [], cast_commander, attack, contests
         self.disputes, self.mulligans, self.bottoms, self.acts, self.holds = disputes, mulligans, bottoms, acts, holds
+        self.asks, self.answers, self.heard = asks, answers, []   # a question for seat 1, once; what this seat says when spoken to
         self.fidgets = fidgets  # does something auditable each turn: a basic land alone is not sent to the auditor
         self.with_trigger, self.triage = with_trigger, triage or {}   # a made-up trigger on top of the commander; triage answers
 
@@ -56,6 +57,8 @@ class ScriptedSeat:
                 owed = int(re.search(r"you owe (\d+)", prompt)[1]) if self.bottoms else 0
                 data = {"keep": self.mulligans <= 0, "bottom": re.findall(r"^- \[(c\d+)\]", prompt.split("YOUR HAND")[1], re.M)[:owed], "why": "scripted"}
                 self.mulligans -= 1
+            elif "reply" in (schema or {}).get("properties", {}):
+                data = {"reply": self.answers}
             elif "act" in (schema or {}).get("properties", {}):
                 data = {"act": self.acts, "why": "scripted"}
             else:
@@ -86,6 +89,9 @@ class ScriptedSeat:
                 self.disputes = ""
             if self.holds and waiting_for == "priority" and view["turn"]["active"] == me and not view["seats"][me]["holds_for_end_step"]:
                 tool("set_response_policy", policy="ask", hold_for_end_step=True)
+            if self.asks and waiting_for == "priority" and view["turn"]["active"] == me:
+                self.heard.append(tool("say", text=self.asks, to=[1, 2]).get("replies"))
+                self.asks = ""
             if waiting_for == "setup":
                 result = tool("keep")
             elif waiting_for == "triggers":
@@ -586,3 +592,17 @@ def test_a_turn_that_is_only_a_basic_land_is_not_sent_to_the_auditor(database, t
                       cycles=2, seed=4, out_root=tmp_path / "games", echo=lambda *_: None)
     assert report["stopped"] is None and len(report["audits"]) == 2 == len(auditor.asked)       # Pir's two turns, and nobody else's
     assert all("Pir acts: Tapping and untapping" in a["prompt"] for a in auditor.asked)
+
+
+def test_a_player_spoken_to_by_name_answers_before_the_speaker_acts(database, tmp_path):
+    budget = Budget(max_calls=200)
+    seats = [ScriptedSeat(budget, asks="Pir, Thrasios: truce until Talrand's fliers are dealt with?"), ScriptedSeat(budget, answers="Deal, for two turns."),
+             ScriptedSeat(budget, answers="")]
+    report = play_pod(decks(tmp_path), seats, FakeRunner([OK] * 20, budget), database, cycles=1, seed=4, out_root=tmp_path / "games", echo=lambda *_: None)
+    assert report["stopped"] is None
+    assert seats[0].heard == [[{"from": "Pir", "seat": 1, "text": "Deal, for two turns."}]]          # Thrasios stayed silent
+    log = (Path(report["directory"]) / "log.md").read_text()
+    assert log.index("Talrand (to Pir, Thrasios): Pir, Thrasios: truce") < log.index("Pir (to Talrand): Deal, for two turns.")
+    assert [(t["seat"], t["reply"]) for t in report["talk"]] == [(1, "Deal, for two turns."), (2, "")]
+    asked = next(p for p in seats[1].prompts if "has just said to you" in p)
+    assert "You are not acting now, only talking." in asked and "YOUR HAND" in asked

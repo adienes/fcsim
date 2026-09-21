@@ -208,7 +208,8 @@ whether to respond when something goes on the stack (one answer can cover the wh
 whether to act when attackers have been declared and again when blocks have. Only a yes is a
 wake. A player can set a private standing policy (`pass_always`, `pass_unless_targeted`), and can
 ask to be given priority in the end step before its own turn. Opening hands are decided the
-same way, all seats together.
+same way, all seats together. Table talk works the same way too: a `say` addressed to named players
+gets their answers back in the same call, so a deal can be struck before the speaker acts.
 
 **Rules integrity.** The auditor checks each whole turn before the next begins (`--audit-every
 checkpoint` checks every time the pen moves: stricter, several times slower). Its hooks go into
@@ -240,8 +241,7 @@ better means better games, not more power. Swaps are checked against the card da
 beside the list as checkboxes; `deck apply` makes the ones you tick into a new list.
 
 `FINDINGS.md` logs what real games have shown about the harness, with evidence and status. Not
-built yet: rewinds as a judge's remedy, `ask_judge`, reply wakes for table talk, several games
-at once.
+built yet: rewinds as a judge's remedy, `ask_judge`, several games at once.
 
 ## Model backends
 
