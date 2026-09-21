@@ -480,6 +480,10 @@ def test_a_player_can_contest_a_finding_and_a_judge_rules(database, tmp_path, de
     assert "WHAT WAS DONE" in asked and "Pir plays Forest" in asked and judge.asked[0]["schema"]["required"][0] == "decision"
     directory = Path(report["directory"])
     log = (directory / "log.md").read_text()
+    # The readable log tells a run of passes in one line; the journal keeps every one of them.
+    assert "passes priority" not in log and re.search(r"- `\d+-\d+` turn 1 \w+ to \w+: .+ passed priority \(\d+ passes\)\.", log)
+    journal = [json.loads(line) for line in (directory / "events.jsonl").read_text().splitlines()]
+    assert sum(e["tool"] == "pass_priority" for e in journal) > 5 * log.count("passed priority")
     assert "Talrand contests the auditor's finding" in log and f"The judge {decision}" in log.replace("upholds", "uphold").replace("overrules", "overrule")
     # The ruling binds the rest of the game: every later audit and every later briefing carries it.
     assert "RULINGS ALREADY MADE IN THIS GAME\n- (turn 1) A land drop costs no life." in auditor.asked[-1]["prompt"]

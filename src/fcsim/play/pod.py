@@ -672,6 +672,7 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
         except RunnerError as error:
             report["stopped"] = f"model error: {error}"
     game = table.game
+    directory.flush_log()
     report["standings"] = [{"seat": s.index, "name": s.name, "status": s.status, "life": s.life, "hand": len(s.hand),
                             "permanents": sum(1 for i in game.battlefield if game.objects[i].controller == s.index),
                             "commander_damage": s.commander_damage, "commander_casts": s.commander_casts} for s in game.seats]

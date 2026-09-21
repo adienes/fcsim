@@ -878,3 +878,15 @@ def test_an_event_trigger_can_depend_on_where_the_spell_was_cast_from():
     runner.step(0, "pass_priority")                                                               # triggers go on before anyone gets priority
     assert table.expected() == [(0, "triggers")]
     assert [t["text"] for t in table.view(0)["waiting_triggers"]] == [f"Whenever you cast a spell from exile, put a counter on each creature. (because {second} cast)"]
+
+
+def test_get_log_tells_a_run_of_passes_as_one_entry():
+    table, runner = started()
+    pass_until(table, runner, "main1")
+    runner.step(0, "play_land", {"card": "@Island"})
+    shown = table.act(1, "get_log", {"since": 0})["events"]
+    runs = [e for e in shown if e.get("passes")]
+    assert runs and runs[-1]["passes"] >= 6 and runs[-1]["text"] == ["Ann, Bob, Cat passed priority."] and runs[-1]["to"] > runs[-1]["n"]
+    assert shown[-1]["tool"] == "play_land" and all(e["tool"] != "pass_priority" or e.get("passes") or e.get("private") for e in shown)
+    mine = table.act(0, "get_log", {"since": 0})["events"]
+    assert any(e["tool"] == "pass_priority" and e.get("private") for e in mine)    # the pass that drew Ann's card stays its own entry, for Ann

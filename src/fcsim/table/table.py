@@ -132,12 +132,27 @@ class Table:
 
     def _get_log(self, seat: int | None, args: dict) -> dict:
         since = int(args.get("since", 0))
-        return {"events": [{"n": e["n"], "seat": e["seat"], "tool": e["tool"], "turn": e["turn"], "step": e["step"],
-                            "text": e["public"],
-                            **({"private": e["private"][str(seat)]} if str(seat) in e["private"] else {}),
-                            **({"lints": e["lints"]} if e["lints"] else {})}
-                           for e in self.events[since:] if e["public"] or str(seat) in e["private"] or e["lints"]],
-                "next": len(self.events)}  # an event with nothing for this viewer is not shown, tool name included
+        shown: list[dict] = []
+        for e in self.events[since:]:
+            if not (e["public"] or str(seat) in e["private"] or e["lints"]):
+                continue  # an event with nothing for this viewer is not shown, tool name included
+            entry = {"n": e["n"], "seat": e["seat"], "tool": e["tool"], "turn": e["turn"], "step": e["step"], "text": e["public"],
+                     **({"private": e["private"][str(seat)]} if str(seat) in e["private"] else {}),
+                     **({"lints": e["lints"]} if e["lints"] else {})}
+            plain = e["tool"] == "pass_priority" and "private" not in entry and "lints" not in entry
+            if plain and shown and shown[-1].get("passes") and shown[-1]["turn"] == e["turn"]:
+                # A run of passes is one entry: who passed matters now and then, a line each never does.
+                run = shown[-1]
+                run["to"], run["passes"] = e["n"], run["passes"] + 1
+                name = self._name(e["seat"])
+                run["who"] += [] if name in run["who"] else [name]
+                run["text"] = [f"{', '.join(run['who'])} passed priority."]
+            elif plain:
+                shown.append({**entry, "seat": None, "to": e["n"], "passes": 1, "who": [self._name(e["seat"])],
+                              "text": [f"{self._name(e['seat'])} passed priority."]})
+            else:
+                shown.append(entry)
+        return {"events": shown, "next": len(self.events)}
 
     def _get_notes(self, seat: int, args: dict) -> dict:
         return {"notes": self.notes[seat]}

@@ -17,6 +17,13 @@ def slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:40]
 
 
+def _passer(event: dict) -> str:
+    """Who passed, and until when if they said: "Wilhelt (until end)"."""
+    text = " ".join(event["public"])
+    until = re.search(r"keep passing until the (\w+) step", text)
+    return text.split(" passes priority")[0] + (f" (until {until[1]})" if until else "")
+
+
 def table_facts(card: Card) -> dict:
     """What the card-blind table is handed about a card: numbers and words it carries but never interprets."""
     return card.table_facts()
@@ -56,12 +63,52 @@ class GameDirectory:
             out.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     def journal(self, event: dict) -> None:
-        """One committed event: the authoritative record, and the readable log beside it."""
+        """One committed event: the authoritative record, and the readable log beside it. The record
+        keeps every pass of priority, because a replay needs them; the log, which is for reading, tells
+        a run of passes in one line. Three quarters of the third pod's log was "passes priority"."""
         self.append("events.jsonl", event)
-        if event["public"] or event["lints"]:
+        passes = getattr(self, "_passes", [])
+        if event["tool"] == "pass_priority" and not event["lints"] and (not passes or passes[-1]["turn"] == event["turn"]):
+            self._passes = [*passes, event]
+            return
+        self.flush_log()
+        if event["tool"] == "pass_priority" and not event["lints"]:
+            self._passes = [event]
+        elif event["public"] or event["lints"]:
             with (self.path / "log.md").open("a", encoding="utf-8") as out:
                 out.write(f"- `{event['n']}` turn {event['turn']} {event['step']}: " + " ".join(event["public"]) + "\n")
                 out.writelines(f"  - table warning: {lint}\n" for lint in event["lints"])
+
+    def rewrite_log(self) -> None:
+        """Write log.md again from the journal, for a game logged before passes were told in runs."""
+        events = self.events()
+        (self.path / "log.md").write_text("", encoding="utf-8")
+        self._passes = []
+        for event in events:
+            passes = self._passes
+            if event["tool"] == "pass_priority" and not event["lints"] and (not passes or passes[-1]["turn"] == event["turn"]):
+                self._passes = [*passes, event]
+                continue
+            self.flush_log()
+            if event["tool"] == "pass_priority" and not event["lints"]:
+                self._passes = [event]
+            elif event["public"] or event["lints"]:
+                with (self.path / "log.md").open("a", encoding="utf-8") as out:
+                    out.write(f"- `{event['n']}` turn {event['turn']} {event['step']}: " + " ".join(event["public"]) + "\n")
+                    out.writelines(f"  - table warning: {lint}\n" for lint in event["lints"])
+        self.flush_log()
+
+    def flush_log(self) -> None:
+        """Write the run of passes held back so far. Call it when a game stops."""
+        passes, self._passes = getattr(self, "_passes", []), []
+        if not passes:
+            return
+        who = list(dict.fromkeys(_passer(e) for e in passes))
+        steps = list(dict.fromkeys(e["step"] for e in passes))
+        numbers = f"{passes[0]['n']}" + (f"-{passes[-1]['n']}" if len(passes) > 1 else "")
+        with (self.path / "log.md").open("a", encoding="utf-8") as out:
+            out.write(f"- `{numbers}` turn {passes[0]['turn']} {steps[0]}" + (f" to {steps[-1]}" if len(steps) > 1 else "")
+                      + f": {', '.join(who)} passed priority" + (f" ({len(passes)} passes)" if len(passes) > len(who) else "") + ".\n")
 
     def pin_cards(self, names: set[str], database: CardDatabase) -> None:
         """Oracle text and rulings as they were on the day, so the game stays readable after errata."""

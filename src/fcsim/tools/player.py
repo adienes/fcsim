@@ -52,7 +52,7 @@ PLAYER_TOOLS = [
           "ledger of continuing effects, and warnings. Other players' hands and libraries are counts. Handles "
           "change when a card changes zones, so look again after acting."),
     _tool("get_log", "What has happened, as the table saw it, plus anything private to you (cards you drew or "
-          "looked at).", {"since": {"type": "integer", "description": "First event number wanted; use the last `next`."}}),
+          "looked at). A run of passes of priority is one entry.", {"since": {"type": "integer", "description": "First event number wanted; use the last `next`."}}),
     _tool("lookup_card", "Oracle text, type, cost and official rulings for a card by name. Always read a card "
           "before relying on what it does.", {"name": {"type": "string"}}, ("name",)),
     _tool("lookup_rule", "Look up the Comprehensive Rules by rule number (\"117.3c\"), glossary term, or a search "

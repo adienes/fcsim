@@ -225,6 +225,7 @@ def goldfish(deck_path: str | Path, runner: Runner, auditor_runner: Runner, data
     report["usage"] = runner.budget.to_dict()
     directory.write("state.json", table.game.to_dict())
     directory.write("usage.json", report["usage"])
+    directory.flush_log()
     directory.write("report.json", report)
     directory.write("report.md", render(report, deck))
     return report
