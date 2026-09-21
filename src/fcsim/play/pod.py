@@ -290,8 +290,10 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
                           "THE TABLE (the codes in brackets are your handles; NOW is a creature's current power and toughness as "
                           "the auditor last worked it out: trust it unless the board has changed since)",
                           describe(view, database), "", "YOUR HAND", *(hand or ["(empty)"]),
-                          "", "BY THE TABLE'S COUNT your untapped mana sources can pay for: " + (", ".join(table.affordable(seat)) or "nothing")
-                          + " (one at a time; before any cost reducers, extra costs, Treasures or X).",
+                          "", "WHAT YOUR UNTAPPED MANA CAN PAY FOR, by the table's count (one at a time; before cost reducers, extra costs, "
+                          "Treasures or X), with a payment you can use as it stands:",
+                          *([f"- {a['name']}: cast {{\"card\": \"{a['card']}\", \"payment\": {{\"tap\": {json.dumps(a['tap'])}}}}}"
+                             for a in table.affordable(seat)] or ["- nothing"]),
                           *(["", "YOUR TRIGGERS WAITING TO GO ON THE STACK", *waiting] if waiting else []),
                           *(["", "QUESTIONS FOR YOU", *asked] if asked else []),
                           *(["", "THE JUDGE'S RULINGS IN THIS GAME (they bind everyone, the auditor included)",
@@ -471,12 +473,28 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
         unit = table.events[snapshot[2]:]
 
         def needs_no_audit(event: dict) -> bool:
-            """Talk, passing, and a basic land played when the table allows it: nothing there for a rules check to find."""
-            if event["seat"] is None or not event["public"] or event["tool"] in ("pass_priority", "say", "write_notes", "keep", "mulligan"):
+            """Nothing here for a rules check to find: talk and passing; and what the table itself has
+            verified, where the card involved needs nothing written down for later. That is a land or a
+            permanent spell the table accepted without a warning or a `because` (timing, zone and payment
+            checked), whose card either does nothing but tap for mana or have keywords, or is already in
+            the hook library with every trigger as a pattern; and combat declared without a `because` and
+            dealt as the table worked it out."""
+            tool, args = event["tool"], event["args"]
+            if event["seat"] is None or not event["public"] or tool in ("pass_priority", "say", "write_notes", "keep", "mulligan"):
                 return True
-            played = re.search(r" plays (.+) from .+'s hand\.$", event["public"][0]) if event["tool"] == "play_land" and not event["lints"] else None
-            card = database.find(played[1]) if played else None
-            return card is not None and card.is_basic
+            if event["lints"] or args.get("because"):
+                return False
+            if tool in ("declare_attackers", "declare_blockers"):
+                return True
+            if tool == "combat_damage":
+                return bool(args.get("as_proposed")) and not args.get("then")
+            named = re.search(r" plays (.+) from .+'s hand(?: \(|\.)", event["public"][0]) if tool == "play_land" else \
+                re.search(r" casts (.+?) from .+'s (?:hand|command)(?: targeting|,|\.| \[)", event["public"][0]) if tool == "cast" else None
+            card = database.find(named[1]) if named else None
+            if card is None or (tool == "cast" and (args.get("resolves") != "auto_permanent" or args.get("targets") or args.get("x") is not None
+                                                    or (args.get("payment") or {}).get("note"))):
+                return False
+            return _needs_nothing_written(card, known_hooks)
         if all(needs_no_audit(e) for e in unit):
             return
         actions = sum(1 for e in unit if e["seat"] is not None and e["tool"] not in ("pass_priority", "say", "write_notes", "set_response_policy"))
@@ -700,6 +718,11 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
     report["turns_played"] = game.turn.number
     report["rounds"] = max(s.turns_taken for s in game.seats)
     report["usage"] = auditor_runner.budget.to_dict()
+    try:  # the journal is the game: say at once if it no longer rebuilds what was played, not when a later tool trips on it
+        rebuilt = Table.replay(table.config, directory.events(), card_lookup=table.card_lookup)
+        report["journal"] = "replays to the same game" if rebuilt.game.to_dict() == game.to_dict() else "REPLAYS TO A DIFFERENT GAME"
+    except Exception as error:  # noqa: BLE001 - whatever stops a replay is the finding
+        report["journal"] = f"DOES NOT REPLAY: {error}"
     directory.write("state.json", game.to_dict())
     directory.write("usage.json", report["usage"])
     directory.write("report.json", report)
@@ -756,6 +779,21 @@ def _plain_combat(table: Table) -> bool:
         return False
     return not any(re.search(r"damage|prevent|protection|can't be blocked|assign", str(e.get("text", "")), re.I)
                    for e in game.ledger if e.get("kind") == "static")
+
+
+def _needs_nothing_written(card, known_hooks: dict) -> bool:
+    """A card the auditor has nothing to write down for: it only taps for mana or has keywords the
+    table is already told, or every hook an auditor wrote for it before is one the table handles."""
+    if card.name in known_hooks:
+        return all(h.get("kind") in ("step_trigger", "hold") or (h.get("kind") == "event_trigger" and (h.get("on") or {}).get("event"))
+                   for h in known_hooks[card.name])
+    keywords = {k.lower() for k in card.keywords}
+    for line in (re.sub(r"\([^)]*\)", "", line).strip() for face in card.faces for line in face.oracle_text.splitlines()):
+        if not line or re.fullmatch(r"\{T\}: Add [^.]*\.", line):
+            continue
+        if not all(part.strip().lower() in keywords for part in re.split(r"[,;]", line)):
+            return False
+    return True
 
 
 def _own_trigger(name: str, hook: dict) -> dict:
@@ -892,7 +930,7 @@ def render(report: dict) -> str:
     serious = [(a["turn"], f) for a in report["audits"] for f in a.get("findings", []) if f["kind"] in SERIOUS]
     rulings = report.get("rulings", [])
     lines += ["", "## Rules health", "",
-              f"{len(report['audits'])} audits; {len(serious)} finding(s); "
+              f"The journal {report.get('journal', 'was not checked')}. {len(report['audits'])} audits; {len(serious)} finding(s); "
               + (f"{len(rulings)} contested ({', '.join(f'{n} {d}' for d in ('uphold', 'overrule', 'amend') if (n := sum(1 for r in rulings if r['decision'] == d)))}); " if rulings else "") +
               f"{sum(len(w['tool_errors']) for w in report['wakes'])} rejected tool call(s); "
               f"{sum(1 for w in report['wakes'] if w['forced'])} wake(s) the driver had to finish."]

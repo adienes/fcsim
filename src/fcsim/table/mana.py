@@ -70,6 +70,29 @@ def pays(cost: tuple[int, list[set[str]]], sources: list[dict]) -> bool:
     return place(0, sorted(pool, key=len))
 
 
+def plan(cost: tuple[int, list[set[str]]], sources: list[dict]) -> list[dict] | None:
+    """Which of `sources` to tap for the cost, or None if they cannot pay it. The least flexible
+    sources go first, so that a land that makes any color is kept for later."""
+    generic, colored = cost
+    order = sorted(sources, key=lambda s: (len(s["colors"]), s["amount"]))
+
+    def place(index: int, free: list[dict], used: list[dict], spare: int) -> list[dict] | None:
+        if index == len(colored):
+            owed = generic - spare
+            for source in free:
+                if owed <= 0:
+                    break
+                used, owed = [*used, source], owed - source["amount"]
+            return used if owed <= 0 else None
+        for i, source in enumerate(free):
+            if source["colors"] & colored[index] or ("C" in colored[index] and "C" in source["colors"]):
+                found = place(index + 1, free[:i] + free[i + 1:], [*used, source], spare + source["amount"] - 1)
+                if found is not None:
+                    return found
+        return None
+    return place(0, order, [], 0)
+
+
 def payment_problem(game: Game, seat: int, told: dict | None, tapped: list[int], *, x: int = 0, tax: int = 0,
                     lookup: Callable[[str], dict | None] | None = None) -> str | None:
     """Why the permanents tapped cannot pay this card's cost, as far as the table can tell; None if
@@ -87,9 +110,9 @@ def payment_problem(game: Game, seat: int, told: dict | None, tapped: list[int],
     return (f"{told['mana_cost']}" + (f" plus {{{tax}}} commander tax" if tax else "") + f" cannot be paid with what you tapped ({made or 'nothing'}).")
 
 
-def affordable(game: Game, seat: int, cards: list[tuple[str, dict | None, int]], lookup) -> list[str]:
+def affordable(game: Game, seat: int, cards: list[tuple[str, dict | None, int]], lookup) -> list[tuple[str, list[int]]]:
     """Of `cards` (name, what the table was told, commander tax), those the seat's untapped mana
-    sources could pay for right now, before any cost changes."""
+    sources could pay for right now, before any cost changes, each with the permanents to tap for it."""
     ready = []
     for obj in (game.objects[i] for i in game.battlefield):
         if obj.controller != seat or obj.tapped:
@@ -97,11 +120,12 @@ def affordable(game: Game, seat: int, cards: list[tuple[str, dict | None, int]],
         made = source(game, obj, lookup)
         told = (lookup(obj.name) if lookup and obj.token is None else None) or {}
         sick = "Creature" in told.get("types", []) and obj.entered_turn == game.turn.number and "Haste" not in told.get("keywords", [])
-        if made and not sick:
-            ready.append(made)
-    names = []
+        if made and not sick and obj.token is None:  # a Treasure is not tapped for mana but sacrificed: left to the player
+            ready.append({**made, "id": obj.id})
+    found = []
     for name, told, tax in cards:
         cost = parse_cost((told or {}).get("mana_cost") or "") if told and "Land" not in told.get("types", []) else None
-        if cost is not None and pays((cost[0] + tax, cost[1]), ready):
-            names.append(name)
-    return names
+        tapped = plan((cost[0] + tax, cost[1]), ready) if cost is not None else None
+        if tapped is not None:
+            found.append((name, [s["id"] for s in tapped]))
+    return found

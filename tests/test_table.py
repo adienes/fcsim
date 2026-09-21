@@ -862,7 +862,12 @@ def test_the_table_checks_that_what_was_tapped_can_pay_the_cost():
     told[blue] = {"types": ["Creature"], "keywords": [], "mana_cost": "{U}{U}", "produces": [], "mana_amount": 1}
     for _ in range(2):
         runner.step(0, "play_land", {"card": "@Island"})
-    assert table.affordable(0) == [blue]                                              # what the briefing will say
+    offered = table.affordable(0)                                                     # what the briefing will say
+    assert [a["name"] for a in offered] == [blue] and len(offered[0]["tap"]) == 2 and offered[0]["card"].startswith("c")
+    from fcsim.table.mana import parse_cost, plan
+    rainbow, forest, swamp = {"colors": set("WUBRG"), "amount": 1, "id": 1}, {"colors": {"G"}, "amount": 1, "id": 2}, {"colors": {"B"}, "amount": 1, "id": 3}
+    assert [s["id"] for s in plan(parse_cost("{1}{G}"), [rainbow, forest, swamp])] == [2, 3]    # the land that makes any color is kept back
+    assert plan(parse_cost("{G}{G}"), [forest, swamp]) is None
     refused = table.act(0, "cast", {"card": next(c["handle"] for c in table.view(0)["seats"][0]["hand"]["cards"] if c["name"] == green),
                                     "payment": {"tap": [c["handle"] for c in table.view(0)["battlefield"]]}})
     assert refused["error"]["code"] == "cannot_pay" and "{1}{G} cannot be paid with what you tapped (U, U)" in refused["error"]["message"]

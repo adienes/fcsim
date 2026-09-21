@@ -577,15 +577,17 @@ class Table:
             turn.turn_action_done(game)
         return told
 
-    def affordable(self, seat: int) -> list[str]:
-        """The cards in `seat`'s hand and command zone that its untapped mana sources could pay for now."""
+    def affordable(self, seat: int) -> list[dict]:
+        """The cards in `seat`'s hand and command zone that its untapped mana sources could pay for now,
+        each with a payment ready to use, in the seat's own handles: {name, card, tap}."""
         if not self.card_lookup:
             return []
-        game, me = self.game, self.game.seats[seat]
-        cards = [(game.objects[i].name, self.card_lookup(game.objects[i].name), 0) for i in me.hand]
-        cards += [(game.objects[i].name, self.card_lookup(game.objects[i].name), 2 * me.commander_casts.get(game.objects[i].name, 0))
-                  for i in me.command]
-        return mana.affordable(game, seat, cards, self.card_lookup)
+        game, me, handles = self.game, self.game.seats[seat], self.handles[seat]
+        held = [(i, 0) for i in me.hand] + [(i, 2 * me.commander_casts.get(game.objects[i].name, 0)) for i in me.command]
+        cards = [(game.objects[i].name, self.card_lookup(game.objects[i].name), tax) for i, tax in held]
+        by_name = {game.objects[i].name: i for i, _ in reversed(held)}
+        return [{"name": name, "card": handles.of("c", by_name[name]), "tap": [handles.of("c", i) for i in tapped]}
+                for name, tapped in mana.affordable(game, seat, cards, self.card_lookup)]
 
     def proposed_damage(self, viewer: int | None) -> dict | None:
         """This combat damage step as the table works it out, in `viewer`'s handles, with a line of

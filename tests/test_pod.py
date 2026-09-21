@@ -484,6 +484,7 @@ def test_a_player_can_contest_a_finding_and_a_judge_rules(database, tmp_path, de
     assert "passes priority" not in log and re.search(r"- `\d+-\d+` turn 1 \w+ to \w+: .+ passed priority \(\d+ passes\)\.", log)
     journal = [json.loads(line) for line in (directory / "events.jsonl").read_text().splitlines()]
     assert sum(e["tool"] == "pass_priority" for e in journal) > 5 * log.count("passed priority")
+    assert report["journal"] == "replays to the same game" and "The journal replays to the same game." in (directory / "report.md").read_text()
     assert "Talrand contests the auditor's finding" in log and f"The judge {decision}" in log.replace("upholds", "uphold").replace("overrules", "overrule")
     # The ruling binds the rest of the game: every later audit and every later briefing carries it.
     assert "RULINGS ALREADY MADE IN THIS GAME\n- (turn 1) A land drop costs no life." in auditor.asked[-1]["prompt"]
@@ -618,6 +619,17 @@ def test_seats_are_asked_at_attacks_and_at_an_end_step_they_hold_for_though_the_
 def events_turn_active(events: list[dict], turn: int) -> int:
     """Whose turn a table turn was: the seat that played a land or passed first in it."""
     return next(e["seat"] for e in events if e["turn"] == turn and e["seat"] is not None and e["step"] in ("upkeep", "main1"))
+
+
+def test_what_the_table_verified_and_needs_nothing_written_is_not_sent_to_the_auditor(database):
+    from fcsim.play.pod import _needs_nothing_written
+    assert _needs_nothing_written(database.find("Island"), {}) and _needs_nothing_written(database.find("Command Tower"), {})
+    assert not _needs_nothing_written(database.find("Talrand, Sky Summoner"), {})                 # "Whenever you cast ..." wants a hook
+    assert not _needs_nothing_written(database.find("Evolving Wilds"), {}) and not _needs_nothing_written(database.find("Mystic Sanctuary"), {})
+    patterned = {"Talrand, Sky Summoner": [{"kind": "event_trigger", "text": "...", "on": {"event": "cast", "who": "you", "type": "Instant"}}]}
+    assert _needs_nothing_written(database.find("Talrand, Sky Summoner"), patterned)             # known, and the table can queue it
+    text_only = {"Talrand, Sky Summoner": [{"kind": "event_trigger", "text": "Whenever you cast your second spell each turn, ..."}]}
+    assert not _needs_nothing_written(database.find("Talrand, Sky Summoner"), text_only)
 
 
 def test_a_turn_that_is_only_a_basic_land_is_not_sent_to_the_auditor(database, tmp_path):
