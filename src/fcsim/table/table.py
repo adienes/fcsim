@@ -458,7 +458,7 @@ class Table:
             if source is None and waiting and waiting.get("source") in game.objects:
                 source = game.objects[waiting["source"]]  # the table knows what triggered: no need to say it again
         text = str(args.get("text") or (waiting or {}).get("text", ""))
-        script = args["script"] = scripts.shaped(args.get("script"))
+        script = args["script"] = scripts.shaped(args.get("script")) or None  # an empty script is none: six calls in one game were refused for it
         if script is not None:
             # The player says what the ability does, in the few operations the table carries out itself, and nobody
             # has to be woken to resolve it. Anything else it needs is resolved by hand, as ever.

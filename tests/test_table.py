@@ -532,8 +532,8 @@ def test_at_a_checkpoint_a_trigger_can_be_queued_and_a_finding_corrected():
     table.queue_trigger(2, "Soul Warden: you gain 1 life")
     table.release()
     assert table.expected() == [(2, "triggers")]                        # before anyone receives priority
-    runner.step(2, "add_trigger", {"pending": table.view(2)["waiting_triggers"][0]["handle"]})
-    assert table.awaiting_audit                                         # putting a trigger on the stack is auditable too
+    runner.step(2, "add_trigger", {"pending": table.view(2)["waiting_triggers"][0]["handle"], "script": []})   # an empty script is no script
+    assert table.awaiting_audit and table.game.stack[-1].script is None  # putting a trigger on the stack is auditable too
     table.release()
     assert table.expected() == [(1, "priority")]
     assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()
