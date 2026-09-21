@@ -560,6 +560,16 @@ class _Pod:
         self.directory.write(f"notes-seat-{seat}.md", self.table.notes[seat])
         self.current.update(tools=None, token=None, wake=None)
 
+    def remember(self, hooks: dict[str, list[dict]]) -> None:
+        """Write these cards' hooks into the library. Other games may be writing too: merge into what is on disk now, and swap the file in whole."""
+        if not self.library or not hooks:
+            return
+        on_disk = json.loads(self.library.read_text(encoding="utf-8")) if self.library.is_file() else {}
+        self.library.parent.mkdir(parents=True, exist_ok=True)
+        scratch = self.library.with_suffix(f".{secrets.token_hex(4)}.tmp")
+        scratch.write_text(json.dumps({**on_disk, **hooks}, indent=1, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+        scratch.replace(self.library)
+
     def audit(self, server: McpServer, snapshot: tuple) -> None:
         unit = self.table.events[snapshot[2]:]
 
@@ -623,26 +633,22 @@ class _Pod:
                     if learned not in fresh.setdefault(source.name, []):
                         fresh[source.name].append(learned)
             self.known_hooks.update(fresh)
-            if self.library and fresh:  # other games may be writing too: merge into what is on disk now, and swap the file in whole
-                on_disk = json.loads(self.library.read_text(encoding="utf-8")) if self.library.is_file() else {}
-                self.library.parent.mkdir(parents=True, exist_ok=True)
-                scratch = self.library.with_suffix(f".{secrets.token_hex(4)}.tmp")
-                scratch.write_text(json.dumps({**on_disk, **fresh}, indent=1, ensure_ascii=False, sort_keys=True), encoding="utf-8")
-                scratch.replace(self.library)
+            self.remember(fresh)
         for finding in verdict.get("findings", []):
             # One finding against a scripted resolution and the script is never trusted again, in this game or a later one.
             told = self.table.events[finding["event"]]["public"] if isinstance(finding.get("event"), int) and 0 <= finding["event"] < len(self.table.events) else []
             for line in told:
-                if " resolves by script" in line and finding.get("kind") in SERIOUS:
-                    blamed = line.split(" (")[0]
-                    for hook in self.known_hooks.get(blamed, []):
+                # Only a finding that the resolution itself was wrong. A trigger somebody missed at the same event is not the
+                # script's doing, and a script its player gave for one resolution is in no library: the second batch's second
+                # game died here looking up "a triggered ability", the name a delayed trigger went by.
+                blamed = line.split(" (")[0]
+                if " resolves by script" in line and finding.get("kind") in ("illegal", "misresolved") and blamed in self.known_hooks:
+                    for hook in self.known_hooks[blamed]:
                         hook["script_revoked"] = True
                     self.echo(f"         the script for {blamed} is revoked: {finding['summary'][:120]}")
                     for obj in [o for o in self.table.game.objects.values() if o.zone == "battlefield" and o.name == blamed]:
                         self.table.rewrite_hooks(self.table.handles[None].of("c", obj.id), _absolute(self.known_hooks[blamed], obj, self.database))
-                    if self.library:
-                        on_disk = json.loads(self.library.read_text(encoding="utf-8")) if self.library.is_file() else {}
-                        self.library.write_text(json.dumps({**on_disk, blamed: self.known_hooks[blamed]}, indent=1, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+                    self.remember({blamed: self.known_hooks[blamed]})
         self.table.apply_computed(verdict.get("computed") or [])
         self.stamped[0] = _characteristics_print(self.table)
         actors = [e["seat"] for e in unit if e["seat"] is not None]

@@ -300,6 +300,8 @@ def _stack_script(game: Game, entry: dict, cause: str, fact: dict | None = None)
     source = game.objects.get(entry.get("source"))
     it = game.objects.get((fact or {}).get("id"))
     bound = dict(entry.get("bound") or {"self": source.uid if source else None, "it": it.uid if it else None})
+    if source is None:  # a delayed trigger belongs to no permanent, but the card it came from is still somewhere ("return Norin the Wary")
+        source = next((o for o in game.objects.values() if bound.get("self") is not None and o.uid == bound["self"]), None)
     game.stack.append(StackItem(id=game.new_id(), kind="triggered", controller=entry["controller"], source=entry.get("source"),
                                 source_name=source.name if source is not None and source.public else "a triggered ability",
                                 text=str(entry.get("text", "")), script=list(entry["script"]), bound=bound))

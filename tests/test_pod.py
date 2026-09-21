@@ -973,3 +973,26 @@ def test_a_deck_project_can_be_given_to_the_pod_command_with_random_opponents(da
     other = decks(tmp_path)[1]
     cli.main(["pod", str(project.path), str(other), "--random-opponents", "2", "--seed", "3"])
     assert drawn == [("Talrand, Sky Summoner", "Pir, Imaginative Rascal")] and played["decks"][0] == str(project.path)   # read from the project's list; the project goes on to the game
+
+
+def test_a_finding_at_a_scripted_resolution_that_is_in_no_library_stops_nothing(database, tmp_path):
+    """The second batch's second game died in the audit: a missed trigger was found at the event where a
+    delayed trigger had resolved by script, and the driver looked its name up among the cards it knew."""
+    budget = Budget(max_calls=200)
+
+    class Blaming(FakeRunner):
+        def ask(self, system, prompt, **more):
+            found = re.search(r"(\d+)\D[^\n]*resolves by script", prompt)
+            if found and not getattr(self, "blamed", False):
+                self.blamed = True
+                self.answers.insert(0, {"verdict": "findings", "hooks": [], "findings": [
+                    {"kind": "misresolved", "event": int(found[1]), "seat": 2, "summary": "blames the scripted resolution", "basis": "test", "fix": "none needed", "confidence": "high"}]})
+            return super().ask(system, prompt, **more)
+
+    seats = [ScriptedSeat(budget, fidgets=True), ScriptedSeat(budget, fidgets=True),
+             ScriptedSeat(budget, fidgets=True, triggers={"action": "script", "script": [{"op": "life", "who": "you", "delta": 1}]})]
+    trigger = {"kind": "trigger", "seat": 2, "summary": "Thrasios gains 1 life", "basis": "test", "fix": "put it on the stack", "confidence": "high"}
+    auditor = Blaming([{"verdict": "findings", "findings": [trigger], "hooks": []}] + [OK] * 40, budget)
+    report = play_pod(decks(tmp_path), seats, auditor, database, cycles=2, seed=4, out_root=tmp_path / "games", echo=lambda *_: None,
+                      hook_library=tmp_path / "hooks.json")
+    assert auditor.blamed and report["stopped"] is None and not (Path(report["directory"]) / "error.txt").exists()
