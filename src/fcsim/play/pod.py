@@ -24,7 +24,7 @@ from ..table import Table
 from ..table.ops import _named as ops_named
 from ..tools import SeatTools
 from . import rubric
-from .gamedir import GameDirectory
+from .gamedir import GameDirectory, table_facts
 from .goldfish import _deck_reference
 
 SYSTEM = """\
@@ -96,11 +96,9 @@ _WHY = {"mulligan": "Your opening hand has been dealt. Keep it or mulligan.",
 
 
 def _lookup(database: CardDatabase):
-    """What the card-blind table is handed about a card: numbers and words it carries but never interprets."""
     def lookup(name: str) -> dict | None:
         card = database.find(name)
-        return card and {"mana_value": card.mana_value, "types": sorted(card.types), "type_line": card.front.type_line,
-                         "keywords": sorted(card.keywords)}
+        return card and table_facts(card)
     return lookup
 
 

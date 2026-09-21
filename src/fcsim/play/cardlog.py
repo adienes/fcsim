@@ -47,7 +47,7 @@ def card_record(game_dir: str | Path) -> dict:
                 where[obj.uid] = obj.zone
             row["ended_in"] = obj.zone
 
-    table = Table.replay(config["table"], directory.events(), before=look)
+    table = Table.replay(config["table"], directory.events(), card_lookup=directory.card_lookup(), before=look)
     look(table)
     last_round = max((s.turns_taken for s in table.game.seats), default=0)
     seats = [{"name": name, "cards": []} for name in names]

@@ -426,7 +426,7 @@ def test_power_and_toughness_are_worked_out_again_before_blocks(combat_game):
     assert "NOW 4/4 (a test anthem" in blocking                                # the blocker reads the fresh numbers
 
 
-def test_a_game_is_scored_against_the_rubric_from_its_log(combat_game, capsys):
+def test_a_game_is_scored_against_the_rubric_from_its_log(combat_game, database, capsys):
     from fcsim.cli import main
     from fcsim.play.rubric import measure
 
@@ -434,6 +434,12 @@ def test_a_game_is_scored_against_the_rubric_from_its_log(combat_game, capsys):
     directory = Path(report["directory"])
     scored = measure(directory)
     assert scored == report["rubric"] == json.loads((directory / "rubric.json").read_text())
+    # A replay is handed what the table was told when the game was played, from the copy pinned in its directory:
+    # triggers are queued by card type, so without it a rebuilt game can leave the path its journal records.
+    from fcsim.play import pod
+    from fcsim.play.gamedir import GameDirectory
+    pinned = GameDirectory.open(directory).card_lookup()
+    assert pinned("Talrand, Sky Summoner") == pod._lookup(database)("Talrand, Sky Summoner") and pinned("A card nobody played") is None
     talrand, pir, thrasios = scored["seats"]
     assert (talrand["attackers"], talrand["damage_to_players"], talrand["spells"], talrand["idle_turns"]) == (2, 4, 1, 1)
     assert pir["attacked_by_others"] == 2 and pir["blockers"] == 0 and thrasios["spells"] == 0

@@ -107,7 +107,7 @@ def summarize(game_dir: str | Path, runner, database: CardDatabase, *, style: st
     directory = GameDirectory.open(game_dir)
     config = directory.read("config.json")
     names = config.get("seats") or [seat["name"] for seat in config["table"]["seats"]]
-    table = Table.replay(config["table"], directory.events(), card_lookup=_lookup(database))  # replaying numbers the rounds
+    table = Table.replay(config["table"], directory.events(), card_lookup=directory.card_lookup() or _lookup(database))  # replaying numbers the rounds
     events = [e for e in table.events if e.get("round")]
     rows = [row for index in range(len(names)) for row in _jsonl(directory.path / f"transcript-seat-{index}.jsonl")]
     wakes = [{"seat": row.get("seat", 0), **row, "turn": row.get("table_turn", row.get("turn"))} for row in rows]

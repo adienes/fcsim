@@ -9,11 +9,18 @@ from datetime import datetime
 from pathlib import Path
 
 from ..cards import CardDatabase
+from ..cards.model import Card
 from ..rules import RulesError, RulesReference
 
 
 def slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:40]
+
+
+def table_facts(card: Card) -> dict:
+    """What the card-blind table is handed about a card: numbers and words it carries but never interprets."""
+    return {"mana_value": card.mana_value, "types": sorted(card.types), "type_line": card.front.type_line,
+            "keywords": sorted(card.keywords)}
 
 
 class GameDirectory:
@@ -65,6 +72,15 @@ class GameDirectory:
             if card is not None:
                 cards[name] = {**card.to_dict(), "rulings": database.rulings(card)}
         self.write("cards.json", cards)
+
+    def card_lookup(self):
+        """What the table was told about each card when this game was played, from the pinned copy.
+        A replay must hand the table the same: triggers are queued by card type, so without it the
+        rebuilt game takes another path and the journal stops fitting."""
+        if not (self.path / "cards.json").is_file():
+            return None
+        cards = {name: Card.from_dict({k: v for k, v in data.items() if k != "rulings"}) for name, data in self.read("cards.json").items()}
+        return lambda name: table_facts(cards[name]) if name in cards else None
 
     def pin_rules(self, rules: RulesReference | None) -> None:
         if rules is not None:

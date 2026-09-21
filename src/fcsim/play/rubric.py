@@ -88,7 +88,7 @@ def measure(game_dir: str | Path) -> dict:
                 if "seat" in hit.get("target", {}) and source is not None and source.controller != hit["target"]["seat"]:
                     seats[source.controller]["damage_to_players"] += int(hit.get("amount") or 0)
 
-    table = Table.replay(config["table"], directory.events(), before=before)
+    table = Table.replay(config["table"], directory.events(), card_lookup=directory.card_lookup(), before=before)
     game = table.game
     before(table, {"seat": None, "tool": "end", "args": {}})  # whoever left during the last event
     over = game.control.kind == "over"
