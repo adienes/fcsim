@@ -16,7 +16,7 @@ from datetime import date
 from .agents import BACKENDS, Budget, RunnerError, make_runner
 from .audit import Auditor, build, load_scenarios, materials, play, run_suite
 from .audit import render as render_report
-from .cards import CardDatabase, CardsError
+from .cards import CardDatabase, CardsError, read_decklist
 from .cards.database import default_data_dir
 from .cards.edhrec import average_deck, random_commanders
 from .play import goldfish, play_pod
@@ -187,6 +187,9 @@ def main(argv: list[str] | None = None) -> int:
     pod.add_argument("--triage-effort", default="low", help="Reasoning effort for respond-or-pass questions (default: low)")
     pod.add_argument("--cycles", type=int, default=3, help="Turns per seat before the game is stopped")
     pod.add_argument("--seed", type=int)
+    pod.add_argument("--random-opponents", type=int, default=0, metavar="N",
+                     help="Add N opponents drawn at random from EDHREC's most-built commanders (their average lists); with --games, "
+                          "each game draws its own")
     pod.add_argument("--games", type=int, default=1, help="Play this many games of the same pod, with seeds counting up from --seed")
     pod.add_argument("--parallel", type=int, default=2, help="With --games, how many to play at once (default 2)")
     _model_options(pod, audited=True, cost_default=40.0)
@@ -363,7 +366,16 @@ def _pod(args: argparse.Namespace) -> int:
     if args.resume:
         with open(f"{args.resume}/config.json", encoding="utf-8") as config:
             args.decks = json.load(config)["seats"]  # one runner per seat; the decks are the game's own copies
-    elif not 2 <= len(args.decks) <= 4:
+    elif args.random_opponents:
+        mine = tuple(entry.name for path in args.decks for entry in read_decklist(path).commanders)
+        for pick in random_commanders(args.random_opponents, seed=args.seed, exclude=mine):
+            os.makedirs("decks", exist_ok=True)
+            target = os.path.join("decks", f"{pick['slug']}.txt")
+            with open(target, "w", encoding="utf-8") as out:
+                out.write(average_deck(pick["name"], page_slug=pick["slug"]))
+            print(f"opponent: {pick['name']} ({target})", flush=True)
+            args.decks.append(target)
+    if not args.resume and not 2 <= len(args.decks) <= 4:
         raise ValueError("A pod is two to four decks.")
     budget = _budget(args)
     try:

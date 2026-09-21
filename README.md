@@ -191,7 +191,7 @@ uv run fcsim deck average "Miirym, Sentinel Wyrm" --out decks/miirym.txt    # ED
 uv run fcsim deck random --count 3 --seed 4 --exclude "Fire Lord Zuko"      # three drawn from its hundred most built
 ```
 
-Average lists are seeds for opponents, not tuned decks. `deck random` prints the paths it wrote, ready to paste after your own list in `fcsim pod`.
+`fcsim pod examples/zuko.txt --random-opponents 3` does the draw as the game starts, and with `--games N` every game draws its own three. Average lists are seeds for opponents, not tuned decks. `deck random` prints the paths it wrote, ready to paste after your own list in `fcsim pod`.
 
 ## Pod
 
