@@ -169,14 +169,30 @@ class Table:
             return value  # `tap: false` on an attacker is a flag; `tap: [handles]` in a payment is a list of cards
         kind = "c" if key in _OBJECT_KEYS else _OTHER_KEYS[key]
         internal = self.handles[seat].resolve(kind, value)
+        if internal is None and kind == "c" and isinstance(value, str):
+            # A card's name where a handle belongs: players write it again and again. It is taken when it can mean only one thing.
+            named = [o for o in self.game.objects.values() if o.addressable_by(seat) and o.face_known_to(seat) and o.name.casefold() == value.casefold()
+                     and o.zone != "library"]
+            if len(named) == 1:
+                return named[0].id
+            if named:
+                raise TableError("unknown_handle", f"{len(named)} cards you can point at are called {value!r}: "
+                                 + ", ".join(f"{self.handles[seat].of('c', o.id)} ({ops._where(self.game, o)})" for o in named[:8]) + ". Use the handle.")
+        if internal is None and kind == "t" and value is None:
+            return value
         if internal is None:
             raise TableError("unknown_handle", f"{value!r} is not one of your handles for `{key}`. Handles come "
                                                "from get_view and change when a card changes zones.")
         if kind == "c":
             obj = self.game.objects.get(internal)
             if obj is None or not obj.addressable_by(seat):
-                raise TableError("gone", f"{value!r} is no longer there: the card changed zones or was shuffled "
-                                         "away. Call get_view for current handles.")
+                now = internal
+                while now in self.game.renamed:
+                    now = self.game.renamed[now]
+                moved = self.game.objects.get(now)
+                where = f" It is now {self.handles[seat].of('c', moved.id)}, in {ops._where(self.game, moved)}." \
+                    if moved is not None and moved.addressable_by(seat) and moved.zone != "library" else " Call get_view for current handles."
+                raise TableError("gone", f"{value!r} is no longer there: the card changed zones or was shuffled away.{where}")
         return internal
 
     # ---- execution, shared by live calls and replay ------------------------------------------
@@ -419,9 +435,13 @@ class Table:
         source = mutations.get(game, args["source"]) if args.get("source") is not None else None
         waiting = None
         if game.control.kind == "triggers":
-            if args.get("pending") is None:
-                raise TableError("pending_required", "Say which waiting trigger this is with `pending`, "
-                                                     "or decline it with skip_trigger.")
+            if args.get("pending") is None:  # nine calls were lost to leaving this out when only one trigger could be meant
+                mine = [t for t in game.pending_triggers if t["seat"] == seat]
+                match = [t for t in mine if source is not None and t.get("source") == source.id] or (mine if len(mine) == 1 else [])
+                if len(match) != 1:
+                    raise TableError("pending_required", "Say which waiting trigger this is with `pending`, "
+                                                         "or decline it with skip_trigger.")
+                args["pending"] = match[0]["id"]
             waiting = next((t for t in game.pending_triggers if t["id"] == args["pending"]), None)
             if source is None and waiting and waiting.get("source") in game.objects:
                 source = game.objects[waiting["source"]]  # the table knows what triggered: no need to say it again

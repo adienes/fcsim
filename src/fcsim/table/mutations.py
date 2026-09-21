@@ -30,6 +30,10 @@ def renew(game: Game, obj: Obj) -> Obj:
     old = obj.id
     del game.objects[old]
     obj.id = game.new_id()
+    game.renamed[old] = obj.id
+    if len(game.renamed) > 600:  # only recent moves are worth a hint
+        for stale in list(game.renamed)[:200]:
+            del game.renamed[stale]
     game.objects[obj.id] = obj
     zone = _zone_list(game, obj)
     if old in zone:

@@ -182,6 +182,7 @@ class Game:
     winner: int | None = None
     next_id: int = 1
     facts: list[dict] = field(default_factory=list)  # what has happened since triggers were last collected
+    renamed: dict = field(default_factory=dict)  # an object's old id -> its next, so a stale handle can be told where its card went
     announcements: list[str] = field(default_factory=list)  # what the table did by itself, to tell everyone with the next event
     whispers: list[list] = field(default_factory=list)  # [seat, sentence] to tell one seat privately with the next event
     audit_pending: bool = False   # something auditable has happened since the last checkpoint was released

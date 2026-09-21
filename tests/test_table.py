@@ -176,9 +176,7 @@ def test_holds_and_step_triggers_hand_mechanical_steps_to_a_seat():
     assert table.expected() == [(0, "discard")]   # eight cards in hand at cleanup
     assert runner.step(0, "finish_step")["lints"] == ["Ann ends the turn with 8 cards in hand."]
     assert table.game.turn.active == 1 and table.expected() == [(2, "triggers")]  # before anyone has priority
-    waiting = table.view(2)["waiting_triggers"][0]["handle"]
-    runner.step(2, "add_trigger", {"text": "x"}, error="pending_required")
-    runner.step(2, "add_trigger", {"pending": waiting})
+    runner.step(2, "add_trigger", {})   # the only trigger waiting: no need to say which
     assert table.expected() == [(1, "priority")] and table.view(0)["stack"][0]["text"] == "Cat's upkeep trigger"
     for seat in (1, 2, 0):
         runner.step(seat, "pass_priority")
@@ -1211,3 +1209,17 @@ def test_a_player_can_say_what_its_trigger_does_and_the_table_resolves_it():
     assert [s["life"] for s in table.view(0)["seats"]] == [41, 39, 39] and table.expected() == [(0, "priority")]   # nobody was handed a resolution
     assert any("resolves by script" in line for line in table.events[-1]["public"])
     assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()
+
+
+def test_a_slip_with_one_possible_meaning_is_understood_and_a_stale_handle_says_where_its_card_went():
+    table, runner = started()
+    pass_until(table, runner, "main1")
+    spell = spell_in_hand(table, 0)
+    old = next(c["handle"] for c in table.view(0)["seats"][0]["hand"]["cards"] if c["name"] == spell)
+    assert "error" not in table.act(0, "act", {"because": "test", "mutations": [{"op": "move", "obj": spell, "to": "exile"}]})   # a name, where a handle belongs
+    stale = table.act(0, "cast", {"card": old, "because": "exiled: I may play it"})
+    now = table.view(0)["seats"][0]["exile"][0]["handle"]
+    assert stale["error"]["code"] == "gone" and f"It is now {now}, in Ann's exile." in stale["error"]["message"]
+    several = table.act(0, "play_land", {"card": "Island"})
+    assert several["error"]["code"] == "unknown_handle" and "cards you can point at are called 'Island'" in several["error"]["message"]
+    assert table.act(0, "play_land", {"card": "An Island nobody has"})["error"]["code"] == "unknown_handle"
