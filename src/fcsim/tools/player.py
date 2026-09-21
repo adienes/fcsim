@@ -75,8 +75,9 @@ PLAYER_TOOLS = [
            "modes": {"type": "array", "items": {"type": "string"}},
            "text": {"type": "string", "description": "What the spell will do as cast, including how damage is divided."},
            "resolves": {"type": "string", "enum": ["auto_permanent"]}, "face_down": {"type": "boolean"},
-           "because": {"type": "string", "description": "Needed only to cast a card from anywhere but your hand or command zone: "
-                       "the effect that allows it (flashback, \"exiled with Prosper: I may play it this turn\")."}}, ("card",)),
+           "because": {"type": "string", "description": "Needed only for a cast the table would not expect: a card from anywhere but "
+                       "your hand or command zone (flashback, \"exiled with Prosper: I may play it this turn\"), or a card that is "
+                       "not an instant and has no flash cast outside your own main phase or with something on the stack."}}, ("card",)),
     _tool("activate", "Activate an ability of a permanent. A mana ability (`mana_ability`: true) does not use the "
           "stack; anything else goes on the stack and you keep priority.",
           {"source": _HANDLE, "ability": {"type": "string", "description": "The ability's text."}, "targets": _TARGETS,

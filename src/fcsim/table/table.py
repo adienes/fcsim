@@ -319,9 +319,18 @@ class Table:
             # another player's exiled card by mistake and had to undo it by hand.
             raise TableError("say_why", f"{name} is in {origin}, not in your hand or your command zone. If an effect lets you cast it "
                                         "from there, call cast again with `because` naming that effect.")
+        info = self.card_lookup(name) if self.card_lookup else None
+        main_phase = game.turn.active == seat and game.turn.step in ("main1", "main2") and not game.stack
+        if info and info.get("types") and not main_phase and not because and not self._replaying and not face_down \
+                and "Instant" not in info["types"] and "Flash" not in info.get("keywords", []):
+            # The table is told a card's types, so this much of the timing rules it can ask about. In
+            # the second pod a creature was cast in the end of combat step.
+            raise TableError("say_why", f"{name} is not an instant and has no flash, and this is not your main phase with an empty stack "
+                                        f"(it is the {game.turn.step} step of {game.seats[game.turn.active].name}'s turn"
+                                        + (", with something on the stack" if game.stack else "") + "). If an effect lets you cast it "
+                                        "now, call cast again with `because` naming that effect.")
         paid = self._pay(game, seat, args.get("payment"))
         lints = []
-        info = self.card_lookup(name) if self.card_lookup else None
         tapped = len((args.get("payment") or {}).get("tap", []))
         if info and tapped and not (args.get("payment") or {}).get("note") and tapped < info.get("mana_value", 0):
             lints.append(f"{name} has mana value {info['mana_value']:g} and {tapped} permanent(s) were tapped for it.")
@@ -342,7 +351,7 @@ class Table:
         turn.acted(game)
         told = ops.Told(public=[f"{self._name(seat)} casts {item.source_name} from {origin}"
                                 f"{self._targets_text(game, item.targets)}" + (f", {paid}" if paid else "")
-                                + (f" (allowed by: {because})" if because and not usual else "")
+                                + (f" (allowed by: {because})" if because else "")
                                 + self._declared(item, hide_text=face_down) + "."])
         return told, lints
 

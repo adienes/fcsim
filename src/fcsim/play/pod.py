@@ -99,7 +99,8 @@ def _lookup(database: CardDatabase):
     """What the card-blind table is handed about a card: numbers and words it carries but never interprets."""
     def lookup(name: str) -> dict | None:
         card = database.find(name)
-        return card and {"mana_value": card.mana_value, "types": sorted(card.types), "type_line": card.front.type_line}
+        return card and {"mana_value": card.mana_value, "types": sorted(card.types), "type_line": card.front.type_line,
+                         "keywords": sorted(card.keywords)}
     return lookup
 
 
@@ -184,6 +185,16 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
     seen = [len(table.events) if earlier is not None else 0] * count
     decisions: dict = {}  # who said they will respond to the stack as it currently stands
     waived: list[set] = [set() for _ in range(count)]  # per seat, the stack items it has said it will let resolve
+    # What the auditor has written for each card so far, relative to its controller, so that another
+    # copy of it, or the same card coming back, has its hooks from the moment it arrives and not from
+    # the audit a turn later. In the second pod Wilhelt died, was recast, and missed his end-step trigger.
+    known_hooks: dict[str, list[dict]] = {}
+    hooked: set[int] = set()
+    for entry in table.game.ledger:  # a resumed game already has a ledger to learn from
+        source = table.game.objects.get(entry.get("source"))
+        if source is not None:
+            hooked.add(source.id)
+            known_hooks.setdefault(source.name, []).append(_relative(entry, source.controller))
     windows: dict = {}  # (table turn, step) -> the seats that said they would act in that empty-stack window
     stamped: list = [None]  # what the battlefield looked like when power and toughness were last worked out
     report: dict = {"directory": str(directory.path), "seed": seed, "seats": names, "stopped": None,
@@ -460,6 +471,13 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
                 table.apply_hooks(verdict["hooks"])
             except ValueError as error:
                 record["hooks_error"] = str(error)
+            fresh: dict[str, list[dict]] = {}
+            for entry in table.game.ledger:
+                source = table.game.objects.get(entry.get("source"))
+                if source is not None:
+                    hooked.add(source.id)
+                    fresh.setdefault(source.name, []).append(_relative(entry, source.controller))
+            known_hooks.update(fresh)
         table.apply_computed(verdict.get("computed") or [])
         stamped[0] = _characteristics_print(table)
         actors = [e["seat"] for e in unit if e["seat"] is not None]
@@ -511,12 +529,27 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
         report["refreshes"].append(record)
         directory.append("audits.jsonl", record)
 
+    def rehook() -> None:
+        """Give a permanent that has just arrived the hooks the auditor wrote for that card before."""
+        game = table.game
+        for obj in [game.objects[i] for i in game.battlefield if i not in hooked]:
+            hooked.add(obj.id)
+            if obj.face_down or obj.name not in known_hooks:
+                continue
+            hooks = [{**{k: (obj.controller if v == "its controller" else v) for k, v in hook.items()},
+                      "handle": table.handles[None].of("c", obj.id)} for hook in known_hooks[obj.name]]
+            try:
+                table.apply_hooks(hooks)
+            except ValueError:
+                pass  # the next audit writes them afresh
+
     def settle(me: int | None = None) -> str:
         """Do everything that needs no full wake: release mid-turn checkpoints, pass for seats with
         nothing to respond to, ask the rest whether they respond. Returns why it stopped: "over",
         "stuck", "audit" (the table waits for one), "wake" (some seat must decide), or "yours" when
         called from inside seat `me`'s wake and the pen has come back to it."""
         while True:
+            rehook()
             game = table.game
             if game.control.kind == "over" or game.seats[game.turn.active].turns_taken > last_round:
                 return "over"
@@ -654,6 +687,13 @@ def _must_lose(table: Table) -> list[tuple[int, str]]:
         if reason:
             lost.append((seat.index, reason))
     return lost
+
+
+def _relative(entry: dict, controller: int) -> dict:
+    """A ledger entry as a hook that can be written again for another copy of the card: whoever
+    controlled the permanent is remembered as "its controller", not as a seat number."""
+    hook = {k: v for k, v in entry.items() if k != "source"}
+    return {k: ("its controller" if k in ("controller", "seat", "whose") and v == controller else v) for k, v in hook.items()}
 
 
 def _correction(detail: dict) -> str:

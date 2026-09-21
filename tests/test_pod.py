@@ -42,10 +42,12 @@ class ScriptedSeat:
 
     def __init__(self, budget: Budget, *, cast_commander: bool = False, with_trigger: bool = False, triage: dict | None = None,
                  attack: int | None = None, contests: bool = False, disputes: str = "", mulligans: int = 0, bottoms: bool = True,
-                 acts: bool = False, holds: bool = False, fidgets: bool = False, asks: str = "", answers: str = ""):
+                 acts: bool = False, holds: bool = False, fidgets: bool = False, asks: str = "", answers: str = "",
+                 blinks: bool = False):
         self.budget, self.prompts, self.cast_commander, self.attack, self.contests = budget, [], cast_commander, attack, contests
         self.disputes, self.mulligans, self.bottoms, self.acts, self.holds = disputes, mulligans, bottoms, acts, holds
         self.asks, self.answers, self.heard = asks, answers, []   # a question for seat 1, once; what this seat says when spoken to
+        self.blinks = blinks    # once, returns its commander to the command zone, to be cast again
         self.fidgets = fidgets  # does something auditable each turn: a basic land alone is not sent to the auditor
         self.with_trigger, self.triage = with_trigger, triage or {}   # a made-up trigger on top of the commander; triage answers
 
@@ -106,6 +108,11 @@ class ScriptedSeat:
                 result = tool("play_land", card=land)
                 if self.fidgets:
                     result = tool("act", because="Tapping and untapping my land, to no purpose.", mutations=[{"op": "life", "seat": me, "delta": 0}])
+            elif self.blinks and waiting_for == "priority" and view["turn"]["active"] == me and view["turn"]["step"] == "main1" and not view["stack"] \
+                    and any(c.get("is_commander") and c["controller"] == me and not c["entered_this_turn"] for c in view["battlefield"]):
+                self.blinks = False
+                mine = next(c["handle"] for c in view["battlefield"] if c.get("is_commander") and c["controller"] == me)
+                result = tool("act", because="A made-up effect returns my commander to the command zone.", mutations=[{"op": "move", "obj": mine, "to": "command"}])
             elif self.cast_commander and waiting_for == "priority" and view["turn"]["active"] == me and not view["stack"] \
                     and view["turn"]["step"] == "main1" and view["seats"][me]["command"] \
                     and len([c for c in view["battlefield"] if c["controller"] == me and not c["tapped"]]) >= 4:
@@ -643,3 +650,26 @@ def test_several_games_of_one_pod_are_child_processes_with_their_own_seeds(comba
     assert tails == [["pod", "a.txt", "b.txt", "--cycles", "8", "--effort", "medium", "--seed", str(seed)] for seed in (10, 11, 12)]
     out = capsys.readouterr().out
     assert "game 3 of 3 (seed 12)" in out and "3 game(s). With so few" in out and "RUBRIC  how many games got each verdict" in out
+
+
+def test_a_card_the_auditor_has_seen_gets_its_hooks_the_moment_it_comes_back(database, tmp_path):
+    class HooksOnce(FakeRunner):
+        def ask(self, system, prompt, *, schema=None, **_):
+            seen = re.search(r"THE TABLE NOW.*Talrand, Sky Summoner \[(c\d+)\]", prompt, re.S)
+            if seen and not getattr(self, "wrote", False):
+                self.wrote = True
+                self.answers.insert(0, {**OK, "hooks": [{"kind": "event_trigger", "handle": seen[1], "source": "Talrand, Sky Summoner", "controller": 0,
+                                                       "text": "Whenever you cast an instant or sorcery spell, create a 2/2 blue Drake with flying.",
+                                                       "on": {"event": "cast", "who": "you", "type": "Instant"}}]})
+            return super().ask(system, prompt, schema=schema)
+
+    budget = Budget(max_calls=500)
+    seats = [ScriptedSeat(budget, cast_commander=True, blinks=True), ScriptedSeat(budget), ScriptedSeat(budget)]
+    report = play_pod(decks(tmp_path), seats, HooksOnce([OK] * 150, budget), database, cycles=6, seed=4, out_root=tmp_path / "games", echo=lambda *_: None)
+    assert report["stopped"] is None and report["standings"][0]["commander_casts"] == {"Talrand, Sky Summoner": 2}
+    events = [json.loads(line) for line in (Path(report["directory"]) / "events.jsonl").read_text().splitlines()]
+    written = [e for e in events if e["tool"] == "hooks" and any("Talrand, Sky Summoner: Whenever you cast" in line for line in e["public"])]
+    recast = [e for e in events if e["tool"] == "cast" and e["seat"] == 0][1]
+    assert len(written) == 2 and written[1]["turn"] == recast["turn"] and written[1]["step"] == "main1"   # at once, not at that turn's audit
+    state = json.loads((Path(report["directory"]) / "state.json").read_text())
+    assert [(entry["kind"], entry["controller"], entry["on"]["who"]) for entry in state["ledger"]] == [("event_trigger", 0, "you")]

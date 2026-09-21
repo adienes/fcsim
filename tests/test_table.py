@@ -701,3 +701,23 @@ def test_casting_from_an_unusual_zone_needs_the_player_to_say_what_allows_it():
     assert "error" not in table.act(0, "cast", {"card": table.view(0)["seats"][0]["exile"][0]["handle"], "because": "Exiled with Prosper: I may play it."})
     assert "(allowed by: Exiled with Prosper: I may play it.)" in table.events[-1]["public"][0]
     assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()
+
+
+def test_a_card_that_is_not_an_instant_needs_a_reason_to_be_cast_off_its_timing():
+    kinds: dict[str, dict] = {}
+    table = Table(seats(), seed=5, first=0, card_lookup=lambda name: kinds.get(name))
+    runner = ScriptedRunner(table)
+    for seat in range(3):
+        runner.step(seat, "keep")
+    creature, instant, flash = [name for name in hand(table, 0) if "spell" in name][:3]
+    kinds.update({creature: {"types": ["Creature"], "keywords": []}, instant: {"types": ["Instant"], "keywords": []},
+                  flash: {"types": ["Creature"], "keywords": ["Flash"]}})
+    pass_until(table, runner, "begin_combat", seat=0)
+
+    def cast(name: str, **more) -> dict:
+        return table.act(0, "cast", {"card": next(c["handle"] for c in table.view(0)["seats"][0]["hand"]["cards"] if c["name"] == name), **more})
+    refused = cast(creature)
+    assert refused["error"]["code"] == "say_why" and "begin_combat step of Ann's turn" in refused["error"]["message"]
+    assert "error" not in cast(instant) and "error" not in cast(flash)             # an instant; a creature with flash, even with a spell on the stack
+    assert "error" not in cast(creature, because="Vedalken Orrery gives my spells flash.")
+    assert "(allowed by: Vedalken Orrery gives my spells flash.)" in table.events[-1]["public"][0]
