@@ -1082,3 +1082,28 @@ def test_a_missed_trigger_written_as_text_alone_unmarks_its_card_so_the_next_aud
                        {"kind": "static", "handle": handle, "text": "Other Wizards get +1/+1."}])
     assert "(hooks written)" in describe(table.view(None), database) and not any(e.get("missed") for e in table.game.ledger)
     assert Table.replay(table.config, table.events, card_lookup=_lookup(database)).game.to_dict() == table.game.to_dict()
+
+
+@pytest.mark.parametrize("held", [False, True])
+def test_the_stretch_that_ended_the_game_is_audited_and_the_report_says_whether_the_ending_stands(database, tmp_path, monkeypatch, held):
+    from fcsim.play import pod
+    budget = Budget(max_calls=200)
+    calls = {"n": 0}
+
+    def two_lose_in_the_second_turn(table):
+        calls["n"] += 1
+        acted = any(e["tool"] == "act" and e["turn"] == 2 for e in table.events)
+        return [(0, "test"), (2, "test")] if acted and table.game.control.kind != "over" and table.game.seats[0].status == "alive" else []
+    monkeypatch.setattr(pod, "_must_lose", two_lose_in_the_second_turn)
+    finding = {"kind": "misresolved", "seat": 1, "summary": "the spell that won was countered", "basis": "test", "fix": "none now", "confidence": "high"}
+    last = {"verdict": "findings", "findings": [finding], "hooks": []} if held else OK
+    auditor = FakeRunner([OK, last] + [OK] * 5, budget)
+    report = play_pod(decks(tmp_path), [ScriptedSeat(budget, fidgets=True) for _ in range(3)], auditor, database, cycles=3, seed=4,
+                      out_root=tmp_path / "games", echo=lambda *_: None)
+    assert report["winner"] == "Pir" and report["stopped"] is None and len(auditor.asked) == 2   # the first turn, and the stretch that ended the game
+    assert report["audits"][-1]["final"] and "Tapping and untapping my land" in auditor.asked[-1]["prompt"]
+    text = (Path(report["directory"]) / "report.md").read_text()
+    if held:
+        assert report["ending"].startswith("contested: the spell that won was countered") and "Nothing can be corrected in a game that is over" in text
+    else:
+        assert report["ending"].startswith("stands") and "**The ending stands" in text

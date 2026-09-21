@@ -702,6 +702,25 @@ class _Pod:
             if self.table.game.control.kind == "correction":
                 self.table.act(seat, "finish_step")
 
+    def last_audit(self, snapshot: tuple) -> None:
+        """The stretch that ended the game, checked like any other. It never was: the loop stopped the moment somebody had
+        won, so the one turn that decided the game went unread. In the second batch that was a 78-action turn that took three
+        players from over thirty life each, with a dispute in it that nobody answered. Nothing can be corrected in a game
+        that is over, so the report says whether the ending stands, and what is held against it."""
+        gone = self.table.undone(self.table.events)
+        unit = [e for e in self.table.events[snapshot[2]:] if e["n"] not in gone]
+        if not any(e["seat"] is not None and e["tool"] not in ("pass_priority", "say", "write_notes", "set_response_policy") for e in unit):
+            return
+        self.echo(f"         auditing the {len(unit)} events that ended the game ...")
+        verdict, reply = self.auditor.audit(self.table, snapshot)
+        record = {"turn": self.table.game.turn.number, "events": [snapshot[2], len(self.table.events)], **verdict, "seconds": round(reply.seconds, 1),
+                  "final": True}
+        self.report["audits"].append(record)
+        self.directory.append("audits.jsonl", record)
+        held = [f for f in verdict.get("findings", []) if f.get("kind") in SERIOUS]
+        self.report["ending"] = ("contested: " + " | ".join(f["summary"] for f in held)) if held else "stands: the stretch that ended the game was audited"
+        self.echo(f"         the ending {self.report['ending'][:200]}")
+
     def flag_missed(self, finding: dict) -> None:
         """A missed trigger of a permanent whose hook for it is text alone: say so on the ledger, so that the next
         audit is asked for a pattern in place of being told the card is done."""
@@ -869,6 +888,8 @@ class _Pod:
                 while True:
                     why = self.settle()
                     if why in ("over", "stuck"):
+                        if self.table.game.control.kind == "over":
+                            self.last_audit(snapshot)
                         break
                     if why == "dispute":
                         self.adjudicate(snapshot[2])
@@ -1193,6 +1214,9 @@ def render(report: dict) -> str:
               f"{sum(len(w['tool_errors']) for w in report['wakes'])} rejected tool call(s); "
               f"{sum(1 for w in report['wakes'] if w['forced'])} wake(s) the driver had to finish."]
     lines += [f"- Turn {turn}, {f['kind']}: {f['summary']}" for turn, f in serious]
+    if report.get("ending"):
+        lines += ["", f"**The ending {report['ending']}**" + (" Nothing can be corrected in a game that is over: read the result with that in mind."
+                                                           if report["ending"].startswith("contested") else "")]
     lines += [f"- Turn {r['turn']}, the judge ({r['decision']}) on {report['seats'][r['seat']]}'s contest: {r['explanation']}" for r in rulings]
     if report.get("rubric"):
         lines += ["", rubric.render_markdown(report["rubric"]).rstrip()]
