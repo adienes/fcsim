@@ -94,12 +94,13 @@ deals_combat_damage, gains_life, loses_life, counters_added, counters_removed. N
 with: `who`, "you" (the permanent's controller did it, or controlled the object), "opponent" or \
 "any"; `whom`, the same for the player who was dealt damage; `type`, a word that must be in the \
 object's type line (Creature, Dragon, Instant), and `not_type`, one that must not; `nontoken`; \
-`nonland`; `min`, the least amount of damage or life; `self`, true if the ability triggers only on \
+`nonland`; `min`, the least amount of damage or life; `nth`, for a cast, which spell of its \
+caster's turn it is ("their second spell each turn" is `nth` 2); `self`, true if the ability triggers only on \
 the permanent itself ("whenever this creature attacks", "when The Wise Mothman enters"), without \
 which the table offers it every time anything does; `other`, true if it says "another"; `once`, \
 true if it says "one or more", so that it triggers once for everything that happened together. \
-Always give `on` when a pattern fits, and leave it out only when none can ("your second spell each \
-turn"): then the text alone stands, and you check it after the fact as now.
+Always give `on` when a pattern fits, and leave it out only when none can ("whenever you \
+become the monarch"): then the text alone stands, and you check it after the fact as now.
 - static: a continuous effect that changes other objects, players or the rules while the \
 permanent stays: "other Zombie creatures you control get +1/+1", "spells cost {1} less", \
 "players can't gain life". Players will read it at the top of their view, so state it exactly.
@@ -207,6 +208,7 @@ VERDICT_SCHEMA = {
                     "who": {"type": "string", "enum": ["you", "opponent", "any"]}, "whom": {"type": "string", "enum": ["you", "opponent", "any"]},
                     "type": {"type": "string"}, "not_type": {"type": "string"}, "kind": {"type": "string"},
                     "sign": {"type": "string", "enum": ["gain", "loss"]}, "combat": {"type": "boolean"}, "min": {"type": "integer"},
+                    "nth": {"type": "integer"},
                     "nontoken": {"type": "boolean"}, "nonland": {"type": "boolean"}, "other": {"type": "boolean"},
                     "self": {"type": "boolean"}, "once": {"type": "boolean"},
                     "any_of": {"type": "array", "description": "Alternative patterns for one ability, each with its own `event` and filters.",

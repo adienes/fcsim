@@ -154,6 +154,7 @@ class Turn:
     attackers: list[dict] = field(default_factory=list)
     blockers: list[dict] = field(default_factory=list)
     damage_steps: int = 0      # combat damage steps dealt this combat: a first-strike step makes two
+    casts: dict = field(default_factory=dict)  # spells cast this turn, by seat: "your second spell each turn"
 
 
 @dataclass

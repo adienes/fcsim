@@ -1168,3 +1168,24 @@ def test_a_lone_blocker_cannot_block_a_creature_with_menace():
     alone = table.act(1, "declare_blockers", {"blocks": [{"blocker": handles[n["B1"]], "attacker": handles[n["A1"]]}]})
     assert alone["error"]["code"] == "say_why" and "menace" in alone["error"]["message"] and table.game.turn.blockers == []
     assert "error" not in table.act(1, "declare_blockers", {"blocks": [{"blocker": handles[n[b]], "attacker": handles[n["A1"]]} for b in ("B1", "B2")]})
+
+
+def test_the_table_counts_each_players_spells_so_second_spell_triggers_can_be_a_pattern():
+    table, runner = started()
+    pass_until(table, runner, "main1")
+    whale, first, second, third = [name for name in hand(table, 0) if "spell" in name][:4]
+    runner.step(0, "act", {"because": "test set-up", "mutations": [{"op": "move", "obj": f"@{whale}", "to": "battlefield"}]})
+    handle = next(o["handle"] for o in table.view(None)["battlefield"] if o["name"] == whale)
+    table.apply_hooks([{"kind": "event_trigger", "handle": handle, "text": "Whenever a player casts their second spell each turn, proliferate.",
+                        "on": {"event": "cast", "who": "any", "nth": 2}}])
+    offered = []
+    for name in (first, second, third):
+        runner.step(0, "cast", {"card": f"@{name}", "resolves": "auto_permanent"})
+        runner.step(0, "pass_priority")
+        offered.append(len(table.view(0)["waiting_triggers"]))
+        if table.expected() == [(0, "triggers")]:
+            runner.step(0, "skip_trigger", {"pending": table.view(0)["waiting_triggers"][0]["handle"], "because": "test"})
+        while table.expected()[0] != (0, "priority") or table.view(0)["stack"]:
+            seat, kind = table.expected()[0]
+            runner.step(seat, "pass_priority")
+    assert offered == [0, 1, 0]                                              # the second, and only the second

@@ -4,12 +4,14 @@ What real games have shown about the harness: its speed, its flow, and the quali
 rulings. Each item says what was seen, the evidence, and where it stands. `fcsim status <game_dir>`
 produces the numbers quoted here.
 
-Games so far: a 3-turn Talrand goldfish, a 5-turn Zuko goldfish, and four four-player pods, all
-with Fire Lord Zuko in seat 0. Pods 1 to 3 (2026-09-20) used the same three EDHREC average lists
-(Lathril, Miirym, Wilhelt): Miirym won in round 6, Lathril in round 9, Miirym in round 10. Pod 4 drew
-its opponents at random from EDHREC's hundred most-built commanders (Ashling, Aragorn, The Wise
-Mothman) and is the first on the table's own rules layer. A running game is stopped and resumed on
-new code whenever a fix lands, so each pod's later turns test more than its early ones did.
+Games so far: a 3-turn Talrand goldfish, a 5-turn Zuko goldfish, and six four-player pods, all
+with Fire Lord Zuko. Pods 1 to 3 used the same three EDHREC average lists (Lathril, Miirym,
+Wilhelt): Miirym won in round 6, Lathril in round 9, Miirym in round 10. From pod 4 the opponents
+are drawn at random from EDHREC's hundred most-built commanders: The Wise Mothman beat Ashling and
+Aragorn in round 7; pod 5 (Gishath, Avatar Aang, Obeka) reached its twelve-round cap with Zuko and
+Gishath alive; and Zuko won pod 6 (Esika, Tidus, Kilo) in round 8, from a seating drawn at random.
+A running game is stopped and resumed on new code whenever a fix lands, so each pod's later turns
+test more than its early ones did.
 
 ## Speed
 
@@ -57,6 +59,7 @@ one to three minutes. Busy turns are still six to fifteen, which is what S3 and 
 | R17 | Trigger conditions were being added to the table one at a time. | After the fourth pod I added `milled` and `deals_combat_damage` as two more named events, each a line of code; the question "we're not hardcoding these, right?" was the right one. Magic has thousands of trigger conditions | **Fixed**: the table can only see a handful of things happen, because it has only a handful of mutations: an object moves between zones, damage, life, counters, tap and untap, attack, block, cast. Every mutation records one such fact, and a hook's `on` is a pattern over them, all data: `{event: moved, from: hand, to: graveyard, who: opponent}` is "whenever an opponent discards". enters, dies, milled, drawn, gains_life and the rest are names for patterns in a table, not code. Filters: who, whom, type, not_type, kind, sign, min, combat, nontoken, nonland, self, other, once. A condition no pattern states ("your second spell each turn") stays text for the auditor to check. A card moving between hidden zones is never named in a trigger's "because" |
 | R18 | Delayed triggers are forgotten, and nothing could carry them. | Fifth pod: Norin the Wary's "return it at the beginning of the next end step" was missed on three turns out of three; it was missed in the first pod too. The ability belongs to no permanent once Norin is in exile, so no hook fits | **Built, not yet run with models**: a `delay {step, text, whose?}` mutation. The player records the delayed trigger as it resolves the effect that sets it up, and the table puts it in front of them when that step next begins, once |
 | R19 | One ability, seven hooks, thirty offers. | Fifth pod, turn 26: ten attackers and Norin the Wary's controller declined some thirty identical triggers, a call and a log line each. Norin had seven hooks on the ledger for one ability: each time it blinked back the auditor described the "new" permanent in slightly different words and the table added the description to the last; the hook library learned every variant from the ledger and re-applied them all; and a pattern could not say "casts a spell or attacks", so that took two hooks to start with | **Fixed**: a permanent's hooks are one set, replaced whenever it is described again; the library learns a card from what the audit wrote for it, and tidies to one hook per ability when loaded; one hook can list alternative patterns under `any_of`; the auditor is shown which permanents already have hooks and told to leave them alone unless wrong; and triggers of one ability that happen together are one waiting item with a count: `add_trigger` uses one, `skip_trigger` declines the rest. Ten attackers now cost Norin's controller two calls. The change is numbered (`mechanics` 2) and a resumed game is upgraded by an event in its own journal, so its earlier turns replay as they were played |
+| R20 | "Their second spell each turn" was the pattern I said could not be written, and it was missed six times in one game. | Sixth pod: Dreamtide Whale's proliferate trigger, found by the auditor on turns 15, 17, 19, 21, 22 and 25 | **Fixed**: it only needed the table to count. A cast fact carries `nth`, which spell of its caster's turn it is, and a pattern can ask for it |
 | R8 | The auditor judged the big turn correctly. | Turn 19: cost reductions and 56 damage accepted; only Miirym's own missed triggers flagged | Good sign; the suite should gain a long-chain scenario |
 
 ## Flow and play

@@ -91,6 +91,8 @@ def _fits(on: dict, fact: dict, hook: dict) -> bool:
         return False
     if "combat" in want and bool(want["combat"]) != bool(fact.get("combat")):
         return False
+    if want.get("nth") and fact.get("nth") is not None and int(want["nth"]) != int(fact["nth"]):
+        return False  # "whenever a player casts their second spell each turn": the table counts, so nobody has to
     if want.get("sign") and (want["sign"] == "gain") != (int(fact.get("delta") or 0) > 0):
         return False
     return not want.get("min") or abs(int(fact.get("amount") or fact.get("delta") or 0)) >= int(want["min"])

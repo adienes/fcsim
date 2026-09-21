@@ -373,7 +373,9 @@ class Table:
             casts[name] = casts.get(name, 0) + 1
         cast_from = obj.zone
         card = mutations.move(game, obj, "stack", controller=seat, face_down=face_down)
+        game.turn.casts[seat] = game.turn.casts.get(seat, 0) + 1
         game.facts.append({"event": "cast", "id": card.id, "old_id": None, "name": name, "type_line": card.type_line, "from": cast_from,
+                           "nth": game.turn.casts[seat],
                            "controller": seat, "was_controller": seat, "token": False})
         item = StackItem(id=game.new_id(), kind="spell", controller=seat,
                          source_name="a face-down spell" if face_down else name, text=str(args.get("text", "")),
