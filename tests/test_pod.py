@@ -949,6 +949,16 @@ def test_a_deck_project_teaches_its_pilot_what_earlier_games_learned(combat_game
     # the same games studied again are not a second witness; a different game is, and the lesson becomes validated
     again = Writes([{"lessons": [lesson]}, {"problems": []}])
     assert learn(project.path, [game], again, database, echo=lambda *_: None)["validated"] == 0
+    # a count that is off by one does not undo a lesson the record bears out: it is put right, and only what falls is dropped
+    counted = {"claim": "This list has about 98 Islands, so keep any hand.", "kind": "opening_hand", "cards": [], "evidence": "The list in numbers."}
+    fixer = Writes([{"lessons": [counted, invented]}, {"problems": [
+        {"lesson": 1, "claim": "about 98 Islands", "record": "THE LIST has 99 Islands.", "stands": True, "corrected": "This list has 99 Islands, so keep any hand."},
+        {"lesson": 2, "claim": "Hold Counterspell", "record": "No Counterspell is in the list.", "stands": False}]}])
+    fixed = learn(project.path, [game], fixer, database, echo=lambda *_: None)
+    assert (fixed["added"], fixed["dropped"]) == (1, 1) and "lessons, numbered" in fixer.asked[1]["system"]
+    assert [k["claim"] for k in project.lessons() if k["kind"] == "opening_hand"] == ["This list has 99 Islands, so keep any hand."]
+    assert "Put right by the fact check: THE LIST has 99 Islands." in project.lessons()[-1]["evidence"][0]
+
     class Rambles(Writes):   # a primer over its limit is asked for once more, with the count
         def ask(self, system, prompt, *, schema=None, **_):
             if schema is None and "THE PRIMER YOU WROTE" not in prompt:
@@ -963,7 +973,7 @@ def test_a_deck_project_teaches_its_pilot_what_earlier_games_learned(combat_game
     reworded = {"claim": "Get the commander down early, as soon as the fourth land is there.", "kind": "commander_timing", "cards": ["Talrand, Sky Summoner"],
                 "evidence": "another game", "same_as": "L001"}
     assert "LESSONS ALREADY RECORDED" in again.asked[0]["prompt"] and "- L001 [tentative" in again.asked[0]["prompt"]
-    assert project.record([reworded], games=["another-game"], database=database) == {"added": 0, "validated": 1, "total": 1}
+    assert project.record([reworded], games=["another-game"], database=database) == {"added": 0, "validated": 1, "total": 2}
     assert project.lessons()[0]["status"] == "validated" and project.lessons()[0]["games"] == [Path(game).name, "another-game"]
 
     # the next game's pilot is told, and the game keeps exactly what it was told

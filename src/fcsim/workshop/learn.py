@@ -16,7 +16,7 @@ from ..cards import CardDatabase, read_decklist, resolve
 from ..play.gamedir import GameDirectory
 from ..play.goldfish import _deck_reference
 from .project import PRIMER_WORDS, DeckProject
-from .review import CHECK_SCHEMA, CHECK_SYSTEM, _game_material, _list_numbers, _seat_of
+from .review import CHECK_SYSTEM, _game_material, _list_numbers, _seat_of
 
 KINDS = ["opening_hand", "sequencing", "commander_timing", "mana", "combat", "threat_assessment", "interaction", "politics", "how_a_card_works"]
 
@@ -76,6 +76,19 @@ LESSONS_SCHEMA = {"type": "object", "additionalProperties": False, "required": [
                        "evidence": {"type": "string", "description": "Which game and round, and what happened."},
                        "same_as": {"type": "string", "description": "The id of the lesson already recorded that this one restates (L004), if it does."}}}}}}
 
+LESSON_CHECK = """
+
+These are lessons, numbered. For each problem give the number of the lesson it is in, and say in \
+`stands` whether the lesson still holds once the fact is put right: a count that is off by one or a \
+wrong round number does not undo advice that the record otherwise bears out, while a lesson built on \
+something that did not happen, or on a card that does not do what it says, falls. Where it stands, \
+give the whole claim again in `corrected` with the fact put right."""
+
+LESSON_CHECK_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["problems"], "properties": {"problems": {"type": "array", "items": {
+    "type": "object", "additionalProperties": False, "required": ["lesson", "claim", "record", "stands"],
+    "properties": {"lesson": {"type": "integer"}, "claim": {"type": "string"}, "record": {"type": "string"}, "stands": {"type": "boolean"},
+                   "corrected": {"type": "string", "description": "The lesson's whole claim with the fact put right, if it stands."}}}}}}
+
 PRIMER_SYSTEM = """\
 You write the primer a pilot reads before every game with one Commander deck. It is short, because \
 it is read at the start of every turn's session: {words} words at most. It is advice to a strong \
@@ -114,12 +127,21 @@ def learn(project_path: str | Path, game_dirs: list[str | Path], runner, databas
     lessons = list((reply.data or {}).get("lessons") or [])
     piloting = [row for row in (reply.data or {}).get("piloting") or [] if isinstance(row, dict)]
     echo(f"checking {len(lessons)} lesson(s) against the record ...")
-    checked = runner.ask(CHECK_SYSTEM, f"{materials}\n\n{'=' * 60}\nTHE REVIEW TO CHECK (a list of piloting lessons; check each one's claim and "
-                                       f"evidence)\n{json.dumps(lessons, indent=1, ensure_ascii=False)}", schema=CHECK_SCHEMA)
+    numbered = [{"number": index + 1, **lesson} for index, lesson in enumerate(lessons)]
+    checked = runner.ask(CHECK_SYSTEM + LESSON_CHECK, f"{materials}\n\n{'=' * 60}\nTHE REVIEW TO CHECK (a list of piloting lessons; check each one's claim and "
+                                                      f"evidence)\n{json.dumps(numbered, indent=1, ensure_ascii=False)}", schema=LESSON_CHECK_SCHEMA)
     problems = list((checked.data or {}).get("problems") or [])
-    wrong = [lesson for lesson in lessons if any(p["claim"][:60].lower() in (lesson["claim"] + " " + lesson["evidence"]).lower()
-                                                 or lesson["claim"][:60].lower() in p["claim"].lower() for p in problems)]
-    kept = [lesson for lesson in lessons if lesson not in wrong]
+    wrong, kept = [], []
+    for index, lesson in enumerate(lessons):
+        mine = [p for p in problems if p.get("lesson") == index + 1 or (p.get("lesson") is None and (
+            p["claim"][:60].lower() in (lesson["claim"] + " " + lesson["evidence"]).lower() or lesson["claim"][:60].lower() in p["claim"].lower()))]
+        if any(not p.get("stands") or not str(p.get("corrected") or "").strip() for p in mine):
+            wrong.append(lesson)
+            continue
+        if mine:  # a count off by one, a wrong round: the lesson stands, said with the fact put right
+            lesson = {**lesson, "claim": str(mine[-1]["corrected"]).strip(),
+                      "evidence": lesson["evidence"] + " (Put right by the fact check: " + "; ".join(p["record"] for p in mine) + ")"}
+        kept.append(lesson)
     counts = project.record(kept, games=[path.name for path, _ in games], database=database)
     standing = project.lessons()
     echo(f"{counts['added']} new, {counts['validated']} borne out again, {len(wrong)} dropped by the fact check; rewriting the primer ...")
@@ -144,7 +166,8 @@ def learn(project_path: str | Path, game_dirs: list[str | Path], runner, databas
                                "## How it was piloted, game by game", "",
                                *([f"- `{row.get('game', '')}` **Keep:** {row.get('keep', '')} **Mana:** {row.get('mana', '')} **Attacks:** {row.get('attacks', '')}"
                                   for row in piloting] or ["- not said"]), "",
-                               "## Dropped by the fact check", "", *([f"- {p['claim']} Record: {p['record']}" for p in problems] or ["- none"])]) + "\n", encoding="utf-8")
+                               "## What the fact check found", "", *([f"- ({'put right' if p.get('stands') and p.get('corrected') else 'dropped'}) {p['claim']} Record: {p['record']}"
+                                                                       for p in problems] or ["- nothing"])]) + "\n", encoding="utf-8")
     project.log(f"studied {len(games)} game(s): {counts['added']} new lesson(s), {counts['validated']} validated, {len(wrong)} dropped by the fact "
                 f"check; primer rewritten ({len(primer.split())} words). See `{note.relative_to(project.path)}`.")
     return {"project": str(project.path), **counts, "dropped": len(wrong), "primer_words": len(primer.split()), "note": str(note)}
