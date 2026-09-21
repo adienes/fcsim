@@ -202,11 +202,19 @@ game records, and what "better" means for these decks.
 uv run fcsim deck init examples/zuko.txt --name zuko       # decks/zuko/: current.txt, primer.md, lessons.jsonl, CHANGELOG.md
 uv run fcsim pod decks/zuko --random-opponents 3           # its pilot is given the primer; the game keeps exactly what it was told
 uv run fcsim deck learn decks/zuko games/<a> games/<b>     # piloting lessons from finished games, fact-checked; the primer rewritten
+uv run fcsim deck learn all games/<a> games/<b>            # the same for every project that sat in them, opponents included
+uv run fcsim pilot games/<a> --seat zuko                   # how a seat was played, from the journal; no model
 ```
 
 A project is a deck's identity across revisions of its list. What its pilots learn accumulates there: a lesson is recorded
 with its evidence, stays tentative until a different game bears it out, and is flagged rather than taught once none of the
 cards it leans on is in the list. Only the primer, 600 words at most, reaches a pilot.
+
+A deck that loses has not shown that it is weak. `fcsim pilot` reads from the journal what each seat kept, the land drops
+it missed, the turns it ended with mana untapped beside a card it could have cast, and the turns its attackers stayed
+home; the lesson learner starts from that, and the deck reviewer is told to tell the pilot from the deck and to propose no
+swap on the evidence of a pilot's loss. `fcsim report` sums it per deck. Opponents drawn at random are projects too
+(`decks/<slug>/`): drawn again, a commander plays the list and the primer it has.
 
 ## Opponents
 
