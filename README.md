@@ -189,6 +189,7 @@ corrected. A three-turn run took about four minutes and seven model calls.
 ```sh
 uv run fcsim pod examples/zuko.txt decks/lathril.txt decks/miirym.txt decks/wilhelt.txt --cycles 10
 uv run fcsim pod --resume games/<game_dir> --cycles 4      # play on, by replaying the journal
+uv run fcsim pod <four decks> --cycles 10 --games 4 --parallel 2   # several games, then one report over them
 uv run fcsim status games/<game_dir>                       # where it stands and where the time went; works mid-game
 ```
 
@@ -242,7 +243,7 @@ better means better games, not more power. Swaps are checked against the card da
 beside the list as checkboxes; `deck apply` makes the ones you tick into a new list.
 
 `FINDINGS.md` logs what real games have shown about the harness, with evidence and status. Not
-built yet: rewinds as a judge's remedy, `ask_judge`, several games at once.
+built yet: rewinds as a judge's remedy, and `ask_judge`.
 
 ## Model backends
 

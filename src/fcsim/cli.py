@@ -4,9 +4,13 @@ import argparse
 import json
 import math
 import os
+import re
+import secrets
 import shutil
 import subprocess
 import sys
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 
 from .agents import BACKENDS, Budget, RunnerError, make_runner
@@ -175,6 +179,8 @@ def main(argv: list[str] | None = None) -> int:
     pod.add_argument("--triage-effort", default="low", help="Reasoning effort for respond-or-pass questions (default: low)")
     pod.add_argument("--cycles", type=int, default=3, help="Turns per seat before the game is stopped")
     pod.add_argument("--seed", type=int)
+    pod.add_argument("--games", type=int, default=1, help="Play this many games of the same pod, with seeds counting up from --seed")
+    pod.add_argument("--parallel", type=int, default=2, help="With --games, how many to play at once (default 2)")
     _model_options(pod, audited=True, cost_default=40.0)
     pod.add_argument("--max-calls", type=int, default=120, help="Hard limit on model calls for this game")
     pod.add_argument("--out", default="games")
@@ -182,6 +188,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command in ("goldfish", "pod", "summarize", "review") or (args.command == "audit" and args.action == "suite"):
         _stay_awake()
+    if args.command == "pod" and args.games > 1 and not args.resume:
+        return _pods(args, list(argv) if argv is not None else sys.argv[1:])
     if args.command in ("cards", "deck", "audit", "goldfish", "pod", "status", "summarize", "rubric", "review", "report"):
         try:
             return {"cards": _cards, "deck": _deck, "audit": _audit, "goldfish": _goldfish, "pod": _pod, "status": _status, "summarize": _summarize, "rubric": _rubric, "review": _review, "report": _report}[args.command](args)
@@ -299,6 +307,35 @@ def _goldfish(args: argparse.Namespace) -> int:
         print("\n" + text.read())
     print(f"Everything is in {report['directory']}")
     return 0 if not report["stopped"] else 1
+
+
+def _pods(args: argparse.Namespace, argv: list[str]) -> int:
+    """Several games of one pod, each its own process with its own seed, log and limits; then the
+    report over all of them. Separate processes keep the games from sharing anything but the disk."""
+    first = args.seed if args.seed is not None else secrets.randbelow(2 ** 31 - args.games)
+    passed_on, skip = [], 0
+    for word in argv:  # everything but --games, --parallel and --seed is the child's business
+        if skip:
+            skip -= 1
+        elif word in ("--games", "--parallel", "--seed"):
+            skip = 1
+        elif not word.startswith(("--games=", "--parallel=", "--seed=")):
+            passed_on.append(word)
+
+    def one(index: int) -> tuple[int, str | None, int]:
+        time.sleep(2 * (index % max(1, args.parallel)))  # game directories are named by the second
+        child = subprocess.run([sys.executable, "-c", "import sys; from fcsim.cli import main; sys.exit(main(sys.argv[1:]))",
+                                *passed_on, "--seed", str(first + index)], capture_output=True, text=True, check=False)
+        where = re.search(r"^Everything is in (.+)$", child.stdout, re.M)
+        print(f"game {index + 1} of {args.games} (seed {first + index}): "
+              + (where[1] if where else "did not finish: " + (child.stderr.strip().splitlines() or ["no output"])[-1]), flush=True)
+        return index, where[1] if where else None, child.returncode
+    with ThreadPoolExecutor(max_workers=max(1, args.parallel)) as pool:
+        results = list(pool.map(one, range(args.games)))
+    finished = [where for _, where, _ in results if where]
+    if finished:
+        print("\n" + render_aggregate(aggregate(finished)))
+    return 0 if len(finished) == args.games and not any(code for _, _, code in results) else 1
 
 
 def _pod(args: argparse.Namespace) -> int:
