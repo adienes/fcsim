@@ -78,7 +78,9 @@ def move(game: Game, obj: Obj, to: str, *, position: str | int = "top", controll
         obj.public = not obj.face_down
         obj.known_by = set(known_by if known_by is not None else [obj.controller]) if obj.face_down else set()
     elif to == "hand":
-        obj.public, obj.known_by = False, {obj.owner}
+        # Everyone who saw the card go there still knows it is there, as with a library: a bounced commander is no
+        # secret. To put one back during a correction, a player had to look through its owner's whole hand to find it.
+        obj.public, obj.known_by = obj.public and came_from in PUBLIC_ZONES, knew | {obj.owner}
     else:  # library: whoever knew the card still knows where it is, until a shuffle
         placed = position in ("top", "bottom") or isinstance(position, int)
         obj.public, obj.known_by = False, (set(known_by) if known_by is not None else knew) if placed else set()

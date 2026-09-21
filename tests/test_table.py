@@ -164,6 +164,13 @@ def test_hidden_cards_have_no_handles_and_handles_die_on_zone_changes():
                                                    "because": "Telepathy"}], "because": "test"})
     assert len(looked["shown"]) == 2 and "Ann look(s) at 2 card(s) in Bob's library (Telepathy)." in looked["log"]
     assert "known" not in table.view(2)["seats"][1]["library"] and "private" not in table.act(2, "get_log")["events"][-1]
+    played = next(o["handle"] for o in table.view(0)["battlefield"] if o["name"] == "Island")
+    runner.step(0, "act", {"mutations": [{"op": "move", "obj": played, "to": "hand"}], "because": "bounced"})
+    for viewer in (1, 2, None):   # everyone saw it go there, the auditor too; what was drawn unseen stays unseen
+        assert [c["name"] for c in table.view(viewer)["seats"][0]["hand"]["known"]] == ["Island"]
+    runner.step(0, "act", {"mutations": [{"op": "draw", "count": 1}], "because": "test"})
+    assert len(table.view(1)["seats"][0]["hand"]["known"]) == 1
+    assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()
 
 
 def test_holds_and_step_triggers_hand_mechanical_steps_to_a_seat():
