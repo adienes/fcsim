@@ -9,6 +9,7 @@ triggers and correction wakes. Narrower watches, triage and disputes come later 
 from __future__ import annotations
 
 import json
+import random
 import re
 import secrets
 from concurrent.futures import ThreadPoolExecutor
@@ -117,7 +118,7 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
              seed: int | None = None, out_root: str | Path = "games", rules: RulesReference | None = None,
              resume: str | Path | None = None, audit_every: str = "turn", triage_runners: list[Runner] | None = None,
              refresh_before_blocks: bool = True, judge_runner: Runner | None = None, hook_library: str | Path | None = None,
-             echo=lambda line: print(line, flush=True)) -> dict:
+             shuffle_seats: bool = False, echo=lambda line: print(line, flush=True)) -> dict:
     """Play up to `cycles` turns per seat. `runners[i]` pilots seat i; share one Budget across all
     runners and the auditor to cap the whole game.
 
@@ -131,7 +132,9 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
     changed since it last did. `judge_runner` rules when a player contests an auditor's finding;
     by default the auditor's runner does, as a separate call with the judge's own brief.
     `hook_library` is a JSON file of what auditors have written for each card in earlier games: a card
-    in it has its triggers and holds from the moment it arrives, and the file learns from this game."""
+    in it has its triggers and holds from the moment it arrives, and the file learns from this game.
+    With `shuffle_seats` the decks are seated in an order drawn from the seed, so that who sits to whose
+    left changes from game to game as well as who goes first; `runners[i]` still pilots `deck_paths[i]`."""
     earlier = GameDirectory.open(resume) if resume else None
     if earlier:
         deck_paths = [earlier.path / "decks" / f"seat-{index}.txt" for index in range(len(earlier.read("config.json")["seats"]))]
@@ -148,6 +151,11 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
                      audit_every=audit_every, triage_runners=triage_runners, refresh_before_blocks=refresh_before_blocks,
                      judge_runner=judge_runner, hook_library=hook_library)
     seed = seed if seed is not None else secrets.randbelow(2 ** 31)
+    if shuffle_seats:
+        order = random.Random(f"seating-{seed}").sample(range(count), count)
+        deck_paths, decks, runners = [deck_paths[i] for i in order], [decks[i] for i in order], [runners[i] for i in order]
+        triage_runners = [triage_runners[i] for i in order] if triage_runners else None
+        names = _names(decks)
     directory = GameDirectory(out_root, "pod_" + "-".join(names), seed)
     table = Table([{"name": name, "commanders": [c.name for c in deck.commanders], "library": [c.name for c in deck.library()]}
                    for name, deck in zip(names, decks, strict=True)], seed=seed,

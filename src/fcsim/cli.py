@@ -190,6 +190,8 @@ def main(argv: list[str] | None = None) -> int:
     pod.add_argument("--random-opponents", type=int, default=0, metavar="N",
                      help="Add N opponents drawn at random from EDHREC's most-built commanders (their average lists); with --games, "
                           "each game draws its own")
+    pod.add_argument("--keep-seating", action="store_true",
+                     help="Seat the decks in the order given. By default the seating is drawn from the seed, like who goes first")
     pod.add_argument("--games", type=int, default=1, help="Play this many games of the same pod, with seeds counting up from --seed")
     pod.add_argument("--parallel", type=int, default=2, help="With --games, how many to play at once (default 2)")
     _model_options(pod, audited=True, cost_default=40.0)
@@ -389,7 +391,7 @@ def _pod(args: argparse.Namespace) -> int:
                       seed=args.seed, out_root=args.out, rules=rules, resume=args.resume, audit_every=args.audit_every,
                       triage_runners=[make_runner(args.backend, model=args.triage_model or args.model, effort=args.triage_effort,
                                                   budget=budget) for _ in args.decks],
-                      hook_library=default_data_dir() / "hooks.json")
+                      hook_library=default_data_dir() / "hooks.json", shuffle_seats=not args.keep_seating)
     with open(f"{report['directory']}/report.md", encoding="utf-8") as text:
         print("\n" + text.read())
     print(f"Everything is in {report['directory']}")

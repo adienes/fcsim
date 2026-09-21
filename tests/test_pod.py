@@ -746,3 +746,18 @@ def test_a_hook_that_plainly_triggers_on_its_own_permanent_is_marked_so():
     assert laelia["on"]["event"] == "attacks" and laelia["on"]["self"]
     anthem = {"kind": "event_trigger", "on": {"event": "enters", "who": "you", "type": "Dragon"}, "text": "Whenever a Dragon you control enters, it deals damage."}
     assert _own_trigger("Lathliss, Dragon Queen", anthem) == anthem and _own_trigger("X", {"kind": "static", "text": "When this enters"}) == {"kind": "static", "text": "When this enters"}
+
+
+def test_the_seating_can_be_drawn_from_the_seed_as_well_as_who_goes_first(database, tmp_path):
+    seatings = set()
+    for seed in (1, 2, 3, 4, 5, 6):
+        budget = Budget(max_calls=60)
+        report = play_pod(decks(tmp_path), [ScriptedSeat(budget) for _ in range(3)], FakeRunner([OK] * 20, budget), database, cycles=1, seed=seed,
+                          out_root=tmp_path / "games", echo=lambda *_: None, shuffle_seats=True)
+        seatings.add(tuple(report["seats"]))
+        config = json.loads((Path(report["directory"]) / "config.json").read_text())
+        assert [Path(d).stem.capitalize() for d in config["decks"]] == report["seats"]          # each deck sits where its name does
+    assert len(seatings) >= 3 and all(sorted(s) == ["Pir", "Talrand", "Thrasios"] for s in seatings)
+    again = play_pod(decks(tmp_path), [ScriptedSeat(Budget(max_calls=60)) for _ in range(3)], FakeRunner([OK] * 20), database, cycles=1, seed=3,
+                     out_root=tmp_path / "games", echo=lambda *_: None, shuffle_seats=True)
+    assert tuple(again["seats"]) in seatings                                                        # a seed repeats its seating
