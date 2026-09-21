@@ -692,3 +692,14 @@ def test_a_card_the_auditor_has_seen_gets_its_hooks_the_moment_it_comes_back(dat
     assert len(written) == 2 and written[1]["turn"] == recast["turn"] and written[1]["step"] == "main1"   # at once, not at that turn's audit
     state = json.loads((Path(report["directory"]) / "state.json").read_text())
     assert [(entry["kind"], entry["controller"], entry["on"]["who"]) for entry in state["ledger"]] == [("event_trigger", 0, "you")]
+    # What one game's auditor wrote is kept, relative to the controller, and the next game has it from the card's first arrival.
+    library = tmp_path / "hooks.json"
+    first = play_pod(decks(tmp_path), [ScriptedSeat(budget, cast_commander=True), ScriptedSeat(budget), ScriptedSeat(budget)],
+                     HooksOnce([OK] * 150, budget), database, cycles=5, seed=4, out_root=tmp_path / "games", echo=lambda *_: None, hook_library=library)
+    kept = json.loads(library.read_text())
+    assert kept["Talrand, Sky Summoner"][0]["controller"] == "its controller" and first["stopped"] is None
+    never = FakeRunner([OK] * 150, budget)   # this game's auditor writes no hooks at all
+    second = play_pod(decks(tmp_path), [ScriptedSeat(budget, cast_commander=True), ScriptedSeat(budget), ScriptedSeat(budget)],
+                      never, database, cycles=5, seed=9, out_root=tmp_path / "games", echo=lambda *_: None, hook_library=library)
+    ledger = json.loads((Path(second["directory"]) / "state.json").read_text())["ledger"]
+    assert [(entry["kind"], entry["on"]["event"]) for entry in ledger] == [("event_trigger", "cast")]

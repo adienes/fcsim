@@ -8,12 +8,13 @@ triggers and correction wakes. Narrower watches, triage and disputes come later 
 
 from __future__ import annotations
 
+import json
 import re
 import secrets
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from ..agents import BudgetExceeded, Runner, RunnerError, cost_summary
-from concurrent.futures import ThreadPoolExecutor
 
 from ..audit import SERIOUS, Auditor, Judge, describe
 from ..audit.auditor import card_reference
@@ -113,7 +114,7 @@ def _names(decks: list) -> list[str]:
 def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner: Runner, database: CardDatabase, *, cycles: int = 3,
              seed: int | None = None, out_root: str | Path = "games", rules: RulesReference | None = None,
              resume: str | Path | None = None, audit_every: str = "turn", triage_runners: list[Runner] | None = None,
-             refresh_before_blocks: bool = True, judge_runner: Runner | None = None,
+             refresh_before_blocks: bool = True, judge_runner: Runner | None = None, hook_library: str | Path | None = None,
              echo=lambda line: print(line, flush=True)) -> dict:
     """Play up to `cycles` turns per seat. `runners[i]` pilots seat i; share one Budget across all
     runners and the auditor to cap the whole game.
@@ -126,7 +127,9 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
     lower-effort runner than the one that plays the seat. With `refresh_before_blocks` the auditor
     works out current power and toughness before blockers are chosen, if the battlefield has
     changed since it last did. `judge_runner` rules when a player contests an auditor's finding;
-    by default the auditor's runner does, as a separate call with the judge's own brief."""
+    by default the auditor's runner does, as a separate call with the judge's own brief.
+    `hook_library` is a JSON file of what auditors have written for each card in earlier games: a card
+    in it has its triggers and holds from the moment it arrives, and the file learns from this game."""
     earlier = GameDirectory.open(resume) if resume else None
     if earlier:
         deck_paths = [earlier.path / "decks" / f"seat-{index}.txt" for index in range(len(earlier.read("config.json")["seats"]))]
@@ -141,7 +144,7 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
                      earlier.read("config.json")["seats"], decks, runners, auditor_runner, database, cycles, rules, echo,
                      earlier=earlier.read("report.json") if (earlier.path / "report.json").is_file() else {"wakes": []},
                      audit_every=audit_every, triage_runners=triage_runners, refresh_before_blocks=refresh_before_blocks,
-                     judge_runner=judge_runner)
+                     judge_runner=judge_runner, hook_library=hook_library)
     seed = seed if seed is not None else secrets.randbelow(2 ** 31)
     directory = GameDirectory(out_root, "pod_" + "-".join(names), seed)
     table = Table([{"name": name, "commanders": [c.name for c in deck.commanders], "library": [c.name for c in deck.library()]}
@@ -159,12 +162,13 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
                                     "deck_issues": [[i.to_dict() for i in validate_deck(d, database)] for d in decks]})
     return _play(directory, table, names, decks, runners, auditor_runner, database, cycles, rules, echo,
                  audit_every=audit_every, triage_runners=triage_runners, refresh_before_blocks=refresh_before_blocks,
-                 judge_runner=judge_runner)
+                 judge_runner=judge_runner, hook_library=hook_library)
 
 
 def _play(directory: GameDirectory, table: Table, names: list[str], decks: list, runners: list, auditor_runner, database: CardDatabase,
           cycles: int, rules: RulesReference | None, echo, *, earlier: dict | None = None, audit_every: str = "turn",
-          triage_runners: list | None = None, refresh_before_blocks: bool = True, judge_runner=None) -> dict:
+          triage_runners: list | None = None, refresh_before_blocks: bool = True, judge_runner=None,
+          hook_library: str | Path | None = None) -> dict:
     """Schedule seats and audits until the game ends or `cycles` more rounds have been played."""
     count, seed = len(names), table.config["seed"]
     table.on_event = directory.journal  # a replayed table was built without its journal
@@ -186,7 +190,8 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
     # What the auditor has written for each card so far, relative to its controller, so that another
     # copy of it, or the same card coming back, has its hooks from the moment it arrives and not from
     # the audit a turn later. In the second pod Wilhelt died, was recast, and missed his end-step trigger.
-    known_hooks: dict[str, list[dict]] = {}
+    library = Path(hook_library) if hook_library else None
+    known_hooks: dict[str, list[dict]] = json.loads(library.read_text(encoding="utf-8")) if library and library.is_file() else {}
     hooked: set[int] = set()
     for entry in table.game.ledger:  # a resumed game already has a ledger to learn from
         source = table.game.objects.get(entry.get("source"))
@@ -476,6 +481,12 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
                     hooked.add(source.id)
                     fresh.setdefault(source.name, []).append(_relative(entry, source.controller))
             known_hooks.update(fresh)
+            if library and fresh:  # other games may be writing too: merge into what is on disk now, and swap the file in whole
+                on_disk = json.loads(library.read_text(encoding="utf-8")) if library.is_file() else {}
+                library.parent.mkdir(parents=True, exist_ok=True)
+                scratch = library.with_suffix(f".{secrets.token_hex(4)}.tmp")
+                scratch.write_text(json.dumps({**on_disk, **fresh}, indent=1, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+                scratch.replace(library)
         table.apply_computed(verdict.get("computed") or [])
         stamped[0] = _characteristics_print(table)
         actors = [e["seat"] for e in unit if e["seat"] is not None]

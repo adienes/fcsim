@@ -92,7 +92,9 @@ fit these words, and describe it in text alone.
 - static: a continuous effect that changes other objects, players or the rules while the \
 permanent stays: "other Zombie creatures you control get +1/+1", "spells cost {1} less", \
 "players can't gain life". Players will read it at the top of their view, so state it exactly.
-Write no hook for a permanent that needs none.
+Write a hook's `text` in the card's own words ("At the beginning of your end step, you may ..."), never with a \
+seat number or a player's name: it is kept and used again for other copies of the card, in other \
+games. Write no hook for a permanent that needs none.
 
 Characteristics. Under `computed`, list every creature on the battlefield whose current power or \
 toughness differs from what is printed on it, with the values after all continuous effects, \

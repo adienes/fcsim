@@ -17,6 +17,7 @@ from .agents import BACKENDS, Budget, RunnerError, make_runner
 from .audit import Auditor, build, load_scenarios, materials, play, run_suite
 from .audit import render as render_report
 from .cards import CardDatabase, CardsError
+from .cards.database import default_data_dir
 from .cards.edhrec import average_deck
 from .play import goldfish, play_pod
 from .play.aggregate import aggregate
@@ -356,7 +357,8 @@ def _pod(args: argparse.Namespace) -> int:
                                   budget=budget), CardDatabase(), cycles=args.cycles,
                       seed=args.seed, out_root=args.out, rules=rules, resume=args.resume, audit_every=args.audit_every,
                       triage_runners=[make_runner(args.backend, model=args.triage_model or args.model, effort=args.triage_effort,
-                                                  budget=budget) for _ in args.decks])
+                                                  budget=budget) for _ in args.decks],
+                      hook_library=default_data_dir() / "hooks.json")
     with open(f"{report['directory']}/report.md", encoding="utf-8") as text:
         print("\n" + text.read())
     print(f"Everything is in {report['directory']}")
