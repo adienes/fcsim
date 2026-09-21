@@ -850,3 +850,26 @@ def test_a_waiting_trigger_is_settled_with_one_question_where_it_can_be(database
     assert ("Thrasios puts a trigger on the stack" in log) == stacked
     asked = [t for t in report["triage"] if t["about"] == "its waiting triggers"]
     assert len(asked) == 1 and asked[0]["seat"] == 2
+
+
+def test_the_driver_is_an_object_whose_pieces_can_be_tried_without_playing_a_game(database, tmp_path):
+    from fcsim.cards import read_decklist, resolve
+    from fcsim.play.gamedir import GameDirectory
+    from fcsim.play.pod import _lookup, _Pod
+    from fcsim.table import Table
+
+    lists = [resolve(read_decklist(path), database) for path in decks(tmp_path)]
+    names = ["Talrand", "Pir", "Thrasios"]
+    directory = GameDirectory(tmp_path / "games", "pod_by-hand", 4)
+    table = Table([{"name": n, "commanders": [c.name for c in d.commanders], "library": [c.name for c in d.library()]} for n, d in zip(names, lists, strict=True)],
+                  seed=4, gated="turn", on_event=directory.journal, card_lookup=_lookup(database))
+    budget = Budget(max_calls=20)
+    pod = _Pod(directory, table, names, lists, [ScriptedSeat(budget) for _ in names], FakeRunner([OK] * 5, budget), database, 1, None, lambda *_: None)
+    for seat in range(3):
+        table.act(seat, "keep")
+    first = table.game.turn.active
+    assert table.game.turn.step == "upkeep" and pod.settle() == "wake"            # the quiet upkeep and draw step were passed through with no model
+    assert table.game.turn.step == "main1" and table.expected() == [(first, "priority")] and pod.holds_pen(first) and budget.calls == 0
+    told = pod.briefing(first)
+    assert "WHAT YOUR UNTAPPED MANA CAN PAY FOR" in told and "YOUR HAND" in told and pod.when().startswith(f"Round 1, {names[first]}'s turn")
+    assert pod.news(first).startswith("Since your last wake:") or pod.news(first).startswith("Nothing has happened")

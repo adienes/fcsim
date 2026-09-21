@@ -185,173 +185,181 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
                  judge_runner=judge_runner, hook_library=hook_library)
 
 
-def _play(directory: GameDirectory, table: Table, names: list[str], decks: list, runners: list, auditor_runner, database: CardDatabase,
-          cycles: int, rules: RulesReference | None, echo, *, earlier: dict | None = None, audit_every: str = "turn",
-          triage_runners: list | None = None, refresh_before_blocks: bool = True, judge_runner=None,
-          hook_library: str | Path | None = None, ask_about_triggers: bool = True) -> dict:
-    """Schedule seats and audits until the game ends or `cycles` more rounds have been played."""
-    count, seed = len(names), table.config["seed"]
-    table.on_event = directory.journal  # a replayed table was built without its journal
-    # A game's length is counted in rounds, each living player's own turns, so that eliminations do
-    # not shorten it. On a resume the turn in progress (or just begun) is the first of the new rounds.
-    game = table.game
-    last_round = (game.seats[game.turn.active].turns_taken - 1 if earlier is not None else 0) + cycles
-    context = f"A {count}-player Commander game. Seats, in turn order: " + ", ".join(f"{name} (seat {i})" for i, name in enumerate(names)) + "."
-    auditor = Auditor(auditor_runner, database, context=context)
-    judge = Judge(judge_runner or auditor_runner, database, rules=rules, context=context)
-    systems = [SYSTEM.format(name=name, count=count) + "\n\nYOUR DECK (count, name, cost, type, text)\n"
-               + _deck_reference(deck, database) for name, deck in zip(names, decks, strict=True)]
-    current: dict = {}
-    # Each seat's place in the log, so a wake can say what happened since its last one. After a
-    # resume the players start from their notes and the board, not from the whole history again.
-    seen = [len(table.events) if earlier is not None else 0] * count
-    decisions: dict = {}  # who said they will respond to the stack as it currently stands
-    waived: list[set] = [set() for _ in range(count)]  # per seat, the stack items it has said it will let resolve
-    # What the auditor has written for each card so far, relative to its controller, so that another
-    # copy of it, or the same card coming back, has its hooks from the moment it arrives and not from
-    # the audit a turn later. In the second pod Wilhelt died, was recast, and missed his end-step trigger.
-    library = Path(hook_library) if hook_library else None
-    known_hooks: dict[str, list[dict]] = json.loads(library.read_text(encoding="utf-8")) if library and library.is_file() else {}
-    hooked: set[int] = set()
-    from_ledger: dict[str, list[dict]] = {}
-    for entry in table.game.ledger:  # a resumed game already has a ledger to learn from, where the library knows nothing better
-        source = table.game.objects.get(entry.get("source"))
-        if source is not None:
-            hooked.add(source.id)
-            from_ledger.setdefault(source.name, []).append(_relative(entry, source.controller))
-    known_hooks = {name: _tidy([_own_trigger(name, hook) for hook in hooks]) for name, hooks in {**from_ledger, **known_hooks}.items()}
-    if earlier is not None and table.game.mechanics < MECHANICS:
-        table.upgrade()  # from here on the game is played under the table's current rules; the journal says so
-    if earlier is not None:
-        # A resumed game may have been hooked from an older description of a card than the library now holds.
-        for obj in [table.game.objects[i] for i in table.game.battlefield]:
-            mine = [_relative(e, obj.controller) for e in table.game.ledger if e.get("source") == obj.id]
-            if obj.name in known_hooks and mine and sorted(map(str, mine)) != sorted(map(str, known_hooks[obj.name])):
-                try:
-                    table.rewrite_hooks(table.handles[None].of("c", obj.id), _absolute(known_hooks[obj.name], obj, database))
-                except ValueError:
-                    pass
-    greeted: set[int] = set()  # permanents whose controller has had its chance to see to them on someone else's turn
-    windows: dict = {}  # (table turn, step) -> the seats that said they would act in that empty-stack window
-    stamped: list = [None]  # what the battlefield looked like when power and toughness were last worked out
-    report: dict = {"directory": str(directory.path), "seed": seed, "seats": names, "stopped": None,
-                    "rulings": list((earlier or {}).get("rulings", [])), "talk": list((earlier or {}).get("talk", [])),
-                    "triage": list((earlier or {}).get("triage", [])), "refreshes": list((earlier or {}).get("refreshes", [])),
-                    "wakes": list((earlier or {}).get("wakes", [])), "audits": list((earlier or {}).get("audits", [])),
-                    "earlier_usage": [*(earlier or {}).get("earlier_usage", []), *([earlier["usage"]] if (earlier or {}).get("usage") else [])]}
+class _Pod:
+    """One game being played: the driver's state, and everything it does between the table and the models.
 
-    def holds_pen(seat: int) -> bool:
-        return not table.awaiting_audit and seat in table.game.control.seats
+    `run` schedules seats and audits until the game ends or `cycles` more rounds have been played."""
 
-    def tools_for(token: str):
-        tools = current.get("tools")
-        if tools is None or token != current.get("token"):
+    def __init__(self, directory: GameDirectory, table: Table, names: list[str], decks: list, runners: list, auditor_runner,
+                 database: CardDatabase, cycles: int, rules: RulesReference | None, echo, *, earlier: dict | None = None,
+                 audit_every: str = "turn", triage_runners: list | None = None, refresh_before_blocks: bool = True, judge_runner=None,
+                 hook_library: str | Path | None = None, ask_about_triggers: bool = True) -> None:
+        self.directory, self.table, self.names, self.decks, self.runners, self.auditor_runner, self.database, self.cycles, self.rules = \
+            directory, table, names, decks, runners, auditor_runner, database, cycles, rules
+        self.echo, self.earlier, self.audit_every, self.triage_runners, self.refresh_before_blocks, self.judge_runner, self.hook_library, self.ask_about_triggers = \
+            echo, earlier, audit_every, triage_runners, refresh_before_blocks, judge_runner, hook_library, ask_about_triggers
+        self.count, self.seed = len(self.names), self.table.config["seed"]
+        self.table.on_event = self.directory.journal  # a replayed table was built without its journal
+        # A game's length is counted in rounds, each living player's own turns, so that eliminations do
+        # not shorten it. On a resume the turn in progress (or just begun) is the first of the new rounds.
+        game = self.table.game
+        self.last_round = (game.seats[game.turn.active].turns_taken - 1 if self.earlier is not None else 0) + self.cycles
+        self.context = f"A {self.count}-player Commander game. Seats, in turn order: " + ", ".join(f"{name} (seat {i})" for i, name in enumerate(self.names)) + "."
+        self.auditor = Auditor(self.auditor_runner, self.database, context=self.context)
+        self.judge = Judge(self.judge_runner or self.auditor_runner, self.database, rules=self.rules, context=self.context)
+        self.systems = [SYSTEM.format(name=name, count=self.count) + "\n\nYOUR DECK (count, name, cost, type, text)\n"
+                        + _deck_reference(deck, self.database) for name, deck in zip(self.names, self.decks, strict=True)]
+        self.current: dict = {}
+        # Each seat's place in the log, so a wake can say what happened since its last one. After a
+        # resume the players start from their notes and the board, not from the whole history again.
+        self.seen = [len(self.table.events) if self.earlier is not None else 0] * self.count
+        self.decisions: dict = {}  # who said they will respond to the stack as it currently stands
+        self.waived: list[set] = [set() for _ in range(self.count)]  # per seat, the stack items it has said it will let resolve
+        # What the auditor has written for each card so far, relative to its controller, so that another
+        # copy of it, or the same card coming back, has its hooks from the moment it arrives and not from
+        # the audit a turn later. In the second pod Wilhelt died, was recast, and missed his end-step trigger.
+        self.library = Path(self.hook_library) if self.hook_library else None
+        self.known_hooks: dict[str, list[dict]] = json.loads(self.library.read_text(encoding="utf-8")) if self.library and self.library.is_file() else {}
+        self.hooked: set[int] = set()
+        from_ledger: dict[str, list[dict]] = {}
+        for entry in self.table.game.ledger:  # a resumed game already has a ledger to learn from, where the library knows nothing better
+            source = self.table.game.objects.get(entry.get("source"))
+            if source is not None:
+                self.hooked.add(source.id)
+                from_ledger.setdefault(source.name, []).append(_relative(entry, source.controller))
+        self.known_hooks = {name: _tidy([_own_trigger(name, hook) for hook in hooks]) for name, hooks in {**from_ledger, **self.known_hooks}.items()}
+        if self.earlier is not None and self.table.game.mechanics < MECHANICS:
+            self.table.upgrade()  # from here on the game is played under the table's current rules; the journal says so
+        if self.earlier is not None:
+            # A resumed game may have been hooked from an older description of a card than the library now holds.
+            for obj in [self.table.game.objects[i] for i in self.table.game.battlefield]:
+                mine = [_relative(e, obj.controller) for e in self.table.game.ledger if e.get("source") == obj.id]
+                if obj.name in self.known_hooks and mine and sorted(map(str, mine)) != sorted(map(str, self.known_hooks[obj.name])):
+                    try:
+                        self.table.rewrite_hooks(self.table.handles[None].of("c", obj.id), _absolute(self.known_hooks[obj.name], obj, self.database))
+                    except ValueError:
+                        pass
+        self.greeted: set[int] = set()  # permanents whose controller has had its chance to see to them on someone else's turn
+        self.windows: dict = {}  # (table turn, step) -> the seats that said they would act in that empty-stack window
+        self.stamped: list = [None]  # what the battlefield looked like when power and toughness were last worked out
+        self.report: dict = {"directory": str(self.directory.path), "seed": self.seed, "seats": self.names, "stopped": None,
+                        "rulings": list((self.earlier or {}).get("rulings", [])), "talk": list((self.earlier or {}).get("talk", [])),
+                        "triage": list((self.earlier or {}).get("triage", [])), "refreshes": list((self.earlier or {}).get("refreshes", [])),
+                        "wakes": list((self.earlier or {}).get("wakes", [])), "audits": list((self.earlier or {}).get("audits", [])),
+                        "earlier_usage": [*(self.earlier or {}).get("earlier_usage", []), *([self.earlier["usage"]] if (self.earlier or {}).get("usage") else [])]}
+
+    def holds_pen(self, seat: int) -> bool:
+        return not self.table.awaiting_audit and seat in self.table.game.control.seats
+
+    def tools_for(self, token: str):
+        tools = self.current.get("tools")
+        if tools is None or token != self.current.get("token"):
             return None
 
         def call(request_id: str, name: str, arguments: dict) -> dict:
             result = tools.call(request_id, name, arguments)
-            me = current["seat"]
-            if name == "say" and result.get("ok") and arguments.get("to") and current["replies"] < _REPLIES_PER_WAKE:
-                current["replies"] += 1
+            me = self.current["seat"]
+            if name == "say" and result.get("ok") and arguments.get("to") and self.current["replies"] < _REPLIES_PER_WAKE:
+                self.current["replies"] += 1
                 try:
-                    result = {**result, "replies": replies(me, str(arguments.get("text", "")), arguments["to"])}
+                    result = {**result, "replies": self.table_talk(me, str(arguments.get("text", "")), arguments["to"])}
                 except RunnerError:
                     pass  # talk is a courtesy: a failed question must not cost the speaker its turn
-            if not holds_pen(me) and not current["ended"]:
+            if not self.holds_pen(me) and not self.current["ended"]:
                 # The pen has left this seat. A new session costs seconds of start-up and a fresh read of
                 # everything, so first do what needs no other player's full attention: if nobody responds
                 # and the pen comes straight back, this wake simply carries on.
                 try:
-                    back = settle(me) == "yours"
+                    back = self.settle(me) == "yours"
                 except RunnerError:
                     back = False  # a failed respond-or-pass question; the main loop will meet it again and report it
                 if back:
-                    control = table.game.control
+                    control = self.table.game.control
                     why = control.detail.get("action", control.kind)
                     result = {**result, "pen": {"kind": why, "seats": control.seats},
-                              "carry_on": f"Nobody else acted and the table is waiting for you again: {_WHY.get(why, why)}{_arithmetic(table, me)} "
-                                          "Here is the table as it now stands.", "news": news(me), "table": briefing(me)}
-                    seen[me] = len(table.events)
+                              "carry_on": f"Nobody else acted and the table is waiting for you again: {_WHY.get(why, why)}{_arithmetic(self.table, me)} "
+                                          "Here is the table as it now stands.", "news": self.news(me), "table": self.briefing(me)}
+                    self.seen[me] = len(self.table.events)
                 else:
-                    table.close_wake(current["wake"])
-                    current["ended"] = True
-            if isinstance(result, dict) and "pen" in result and current["ended"]:
+                    self.table.close_wake(self.current["wake"])
+                    self.current["ended"] = True
+            if isinstance(result, dict) and "pen" in result and self.current["ended"]:
                 result["wake"] = "The table is no longer waiting for you. Stop calling tools and give your summary."
             return result
         return tools.definitions, call
 
-    def when() -> str:
-        game = table.game
-        return (f"Round {game.seats[game.turn.active].turns_taken}, {names[game.turn.active]}'s turn "
+    def when(self) -> str:
+        game = self.table.game
+        return (f"Round {game.seats[game.turn.active].turns_taken}, {self.names[game.turn.active]}'s turn "
                 f"(table turn {game.turn.number}), {game.turn.step} step.")
 
-    def briefing(seat: int) -> str:
+    def briefing(self, seat: int) -> str:
         """Everything a seat would otherwise spend two or three round trips fetching."""
-        view = table.view(seat)
+        view = self.table.view(seat)
         mine = view["seats"][seat]["hand"].get("cards", [])
         in_play = [o.get("name") for o in view["battlefield"]] + [i["source"] for i in view["stack"]] \
             + [o.get("name") for s in view["seats"] for zone in ("command", "graveyard", "exile") for o in s[zone]]
         hand = []
         for card in mine:
-            known = database.find(card["name"])
+            known = self.database.find(card["name"])
             face = known.front if known else None
             stats = f" {face.power}/{face.toughness}" if face and face.power is not None else ""
             hand.append(f"- [{card['handle']}] {card['name']}" + (f" {known.mana_cost} [{face.type_line}{stats}] "
                                                                    f"{' '.join(known.text.split())}" if known else ""))
         waiting = [f"- [{t['handle']}] {t['text']}" for t in view["waiting_triggers"] if t["seat"] == seat]
-        asked = [f"- [{q['handle']}] from {names[q['from']]}: {q['prompt']}" + (f" Options: {q['options']}" if q["options"] else "")
+        asked = [f"- [{q['handle']}] from {self.names[q['from']]}: {q['prompt']}" + (f" Options: {q['options']}" if q["options"] else "")
                  for q in view["questions"] if q["waiting"] and q["waiting"][0] == seat]
         # A wake is a fresh session: without this a player repeats what it did a moment ago, such as
         # putting the same end-step trigger on the stack again each time it gets priority in that step.
-        done = [f"- [{e['step']}] " + " ".join(e["public"]) for e in table.events
-                if e["seat"] == seat and e["turn"] == table.game.turn.number and e["public"]
+        done = [f"- [{e['step']}] " + " ".join(e["public"]) for e in self.table.events
+                if e["seat"] == seat and e["turn"] == self.table.game.turn.number and e["public"]
                 and e["tool"] not in ("pass_priority", "write_notes")][-25:]
         return "\n".join(["WHAT YOU HAVE ALREADY DONE THIS TURN (do not repeat it: each ability triggers once per event)",
                           *(done or ["(nothing yet)"]), "",
                           "THE TABLE (the codes in brackets are your handles; NOW is a creature's current power and toughness as "
                           "the auditor last worked it out: trust it unless the board has changed since)",
-                          describe(view, database), "", "YOUR HAND", *(hand or ["(empty)"]),
+                          describe(view, self.database), "", "YOUR HAND", *(hand or ["(empty)"]),
                           "", "WHAT YOUR UNTAPPED MANA CAN PAY FOR, by the table's count (one at a time; before cost reducers, extra costs, "
                           "Treasures or X), with a payment you can use as it stands:",
                           *([f"- {a['name']}: cast {{\"card\": \"{a['card']}\", \"payment\": {{\"tap\": {json.dumps(a['tap'])}}}}}"
-                             for a in table.affordable(seat)] or ["- nothing"]),
+                             for a in self.table.affordable(seat)] or ["- nothing"]),
                           *(["", "YOUR TRIGGERS WAITING TO GO ON THE STACK", *waiting] if waiting else []),
                           *(["", "QUESTIONS FOR YOU", *asked] if asked else []),
                           *(["", "THE JUDGE'S RULINGS IN THIS GAME (they bind everyone, the auditor included)",
                              *(f"- {r['text']}" for r in view["rulings"])] if view["rulings"] else []),
-                          "", "CARDS IN PLAY", card_reference([n for n in in_play if n], database, rulings_per_card=0) or "(none)",
-                          "", "YOUR NOTES", table.notes[seat] or "(none yet)"])
+                          "", "CARDS IN PLAY", card_reference([n for n in in_play if n], self.database, rulings_per_card=0) or "(none)",
+                          "", "YOUR NOTES", self.table.notes[seat] or "(none yet)"])
 
-    def news(seat: int) -> str:
-        events = table.act(seat, "get_log", {"since": seen[seat]})["events"]
+    def news(self, seat: int) -> str:
+        events = self.table.act(seat, "get_log", {"since": self.seen[seat]})["events"]
         lines = [f"[{e['step']}] " + " ".join(e["text"]) + (" (to you: " + " ".join(e["private"]) + ")" if e.get("private") else "")
                  for e in events if (e["text"] and not e.get("passes") and (e["tool"] != "pass_priority" or len(e["text"]) > 1))
                  or e.get("private")][-40:]  # passes are noise, unless the table did something by itself as one was made
         return "Since your last wake:\n" + "\n".join(lines) if lines else "Nothing has happened since your last wake."
 
-    def ask_all(prompts: dict[int, str], schema: dict, *, quick: bool = False) -> list:
+    def ask_all(self, prompts: dict[int, str], schema: dict, *, quick: bool = False) -> list:
         """One question, no tools, to several seats at the same time: (seat, reply) for each. Every such
         question in a game comes through here. The caller builds the prompts, in this thread: the card
         database is not for several threads at once. `quick` uses the lower-effort runners, if there are any."""
         if not prompts:
             return []
-        asked = (triage_runners or runners) if quick else runners
+        asked = (self.triage_runners or self.runners) if quick else self.runners
         with ThreadPoolExecutor(max_workers=len(prompts)) as pool:
-            return list(pool.map(lambda seat: (seat, asked[seat].ask(systems[seat], prompts[seat], schema=schema)), prompts))
+            return list(pool.map(lambda seat: (seat, asked[seat].ask(self.systems[seat], prompts[seat], schema=schema)), prompts))
 
-    def triage(seats: list[int]) -> dict[int, bool]:
+    def triage(self, seats: list[int]) -> dict[int, bool]:
         """Ask several seats at once, each with one question and no tools, whether they want to
         respond to what is on the stack. Most answers are no, and a no costs seconds, not a wake.
         One answer can cover the whole stack, and the rest of the turn, so that a chain of
         triggers is one question and not one per trigger."""
-        game = table.game
+        game = self.table.game
         top = game.stack[-1]
 
         def question(seat: int) -> str:
-            items = [f"  {n}. {names[item.controller]}'s {item.source_name}" + (f": {item.text}" if item.text else "")
-                     + ("" if item.id in waived[seat] else "  (new since you were last asked)")
+            items = [f"  {n}. {self.names[item.controller]}'s {item.source_name}" + (f": {item.text}" if item.text else "")
+                     + ("" if item.id in self.waived[seat] else "  (new since you were last asked)")
                      for n, item in enumerate(reversed(game.stack), 1)]
-            return (f"{names[top.controller]}'s {top.source_name} is on top of the stack and you have priority. The stack, top first:\n"
+            return (f"{self.names[top.controller]}'s {top.source_name} is on top of the stack and you have priority. The stack, top first:\n"
                     + "\n".join(items) + "\nDo you want to respond now, before the top item resolves, by casting a spell or "
                     "activating an ability? Answer respond=false to pass; answer respond=true only if you would actually act "
                     "now, and you will then be woken to do it. If you pass, `ask_again` says what happens as this stack "
@@ -360,93 +368,93 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
                     "If you would respond to nothing at all before your next turn (you are tapped out, or hold nothing you "
                     "could use), also set `policy` to \"pass_always\", or to \"pass_unless_targeted\" to be asked only "
                     "about things that target you or what you control.")
-        prompts = {seat: f"{when()} {question(seat)}\n\n"
-                         f"{news(seat)}\n\n{briefing(seat)}" for seat in seats}
+        prompts = {seat: f"{self.when()} {question(seat)}\n\n"
+                         f"{self.news(seat)}\n\n{self.briefing(seat)}" for seat in seats}
 
-        replies = ask_all(prompts, _TRIAGE, quick=True)
+        replies = self.ask_all(prompts, _TRIAGE, quick=True)
         answers = {}
         for seat, reply in replies:
             data = reply.data or {}
             answers[seat] = bool(data.get("respond"))
             if not answers[seat]:  # asked again by default: a player who says nothing about the rest has only passed once
-                waived[seat] = {top.id} if data.get("ask_again", True) else {item.id for item in game.stack}
+                self.waived[seat] = {top.id} if data.get("ask_again", True) else {item.id for item in game.stack}
                 if data.get("policy") in ("ask_everything", "pass_unless_targeted", "pass_always"):
-                    table.act(seat, "set_response_policy", {"policy": data["policy"]})
+                    self.table.act(seat, "set_response_policy", {"policy": data["policy"]})
             record = {"turn": game.turn.number, "seat": seat, "respond": answers[seat], "why": data.get("why", ""),
                       "about": top.source_name, "stack": len(game.stack), "ask_again": bool(data.get("ask_again", True)),
                       "policy": data.get("policy"), "seconds": round(reply.seconds, 1)}
-            report["triage"].append(record)
-            directory.append(f"transcript-seat-{seat}.jsonl", {"kind": "triage", **record})
-        echo(f"turn {game.turn.number} {game.turn.step}: response to {top.source_name}: "
-             + ", ".join(f"{names[s]} {'RESPONDS' if a else 'passes'}" for s, a in answers.items()))
+            self.report["triage"].append(record)
+            self.directory.append(f"transcript-seat-{seat}.jsonl", {"kind": "triage", **record})
+        self.echo(f"turn {game.turn.number} {game.turn.step}: response to {top.source_name}: "
+             + ", ".join(f"{self.names[s]} {'RESPONDS' if a else 'passes'}" for s, a in answers.items()))
         return answers
 
-    def opening_hands(server: McpServer) -> None:
+    def opening_hands(self, server: McpServer) -> None:
         """Every seat decides on its opening hand at the same time, with one question and no tools:
         the decisions are independent, and four sessions one after another took minutes before turn 1.
         A seat whose answer the table refuses gets an ordinary wake instead."""
-        while table.game.control.kind == "setup":
-            deciding = list(table.game.control.seats)
+        while self.table.game.control.kind == "setup":
+            deciding = list(self.table.game.control.seats)
 
             def question(seat: int) -> str:
-                taken = table.game.seats[seat].mulligans
-                return (f"The game is about to begin. You are number {table.game.turn_order_from(table.game.turn.active).index(seat) + 1} of "
-                        f"{count} in turn order. This is your opening hand, after {taken} mulligan(s). Keep it (keep=true) or mulligan "
+                taken = self.table.game.seats[seat].mulligans
+                return (f"The game is about to begin. You are number {self.table.game.turn_order_from(self.table.game.turn.active).index(seat) + 1} of "
+                        f"{self.count} in turn order. This is your opening hand, after {taken} mulligan(s). Keep it (keep=true) or mulligan "
                         "(keep=false): a mulligan shuffles it away and draws seven new cards. The first mulligan is free; for each one "
                         f"after that you put a card on the bottom when you keep. If you keep this hand you owe {max(0, taken - 1)}: list "
-                        f"exactly that many handles in `bottom`.\n\n{briefing(seat)}")
+                        f"exactly that many handles in `bottom`.\n\n{self.briefing(seat)}")
             prompts = {seat: question(seat) for seat in deciding}  # built here: the card database is not for several threads at once
 
-            replies = ask_all(prompts, _OPENING)
+            replies = self.ask_all(prompts, _OPENING)
             for seat, reply in replies:
-                data, started = reply.data or {}, len(table.events)
-                result = table.act(seat, "mulligan") if data.get("keep") is False else table.act(seat, "keep", {"bottom": data.get("bottom") or []})
-                echo(f"turn 0 setup: {names[seat]} {'mulligans' if data.get('keep') is False else 'keeps'}: {data.get('why', '')}")
-                entry = {"seat": seat, "turn": 0, "kind": "mulligan", "summary": data.get("why", ""), "events": [started, len(table.events)],
+                data, started = reply.data or {}, len(self.table.events)
+                result = self.table.act(seat, "mulligan") if data.get("keep") is False else self.table.act(seat, "keep", {"bottom": data.get("bottom") or []})
+                self.echo(f"turn 0 setup: {self.names[seat]} {'mulligans' if data.get('keep') is False else 'keeps'}: {data.get('why', '')}")
+                entry = {"seat": seat, "turn": 0, "kind": "mulligan", "summary": data.get("why", ""), "events": [started, len(self.table.events)],
                          "tool_calls": 0, "tool_errors": [], "forced": None, "seconds": round(reply.seconds, 1),
                          "estimated_cost_usd": reply.estimated_cost_usd}
-                report["wakes"].append(entry)
-                directory.append(f"transcript-seat-{seat}.jsonl", {**entry, "calls": []})
+                self.report["wakes"].append(entry)
+                self.directory.append(f"transcript-seat-{seat}.jsonl", {**entry, "calls": []})
                 if "error" in result:
-                    wake(server, seat, "mulligan")
-                    if seat in table.game.control.seats and len(table.events) == started:
+                    self.wake(server, seat, "mulligan")
+                    if seat in self.table.game.control.seats and len(self.table.events) == started:
                         # Still undecided, and nothing it tried was accepted: keep for it, so that a game always starts.
-                        hand = table.view(seat)["seats"][seat]["hand"]["cards"]
-                        table.act(seat, "keep", {"bottom": [c["handle"] for c in hand[:max(0, table.game.seats[seat].mulligans - 1)]]})
-                        report["wakes"][-1]["forced"] = "the driver kept the hand and chose what went on the bottom"
-                seen[seat] = len(table.events)
+                        hand = self.table.view(seat)["seats"][seat]["hand"]["cards"]
+                        self.table.act(seat, "keep", {"bottom": [c["handle"] for c in hand[:max(0, self.table.game.seats[seat].mulligans - 1)]]})
+                        self.report["wakes"][-1]["forced"] = "the driver kept the hand and chose what went on the bottom"
+                self.seen[seat] = len(self.table.events)
 
-    def replies(speaker: int, text: str, to: list) -> list[dict]:
+    def table_talk(self, speaker: int, text: str, to: list) -> list[dict]:
         """A player has spoken to others by name. Each is asked at once, with no tools, what it says
         back, so that a deal can be struck before the speaker acts and not a round later."""
-        game = table.game
-        asked = [s for s in dict.fromkeys(to) if isinstance(s, int) and 0 <= s < count and s != speaker and game.seats[s].status == "alive"]
-        prompts = {seat: (f"{when()} {names[speaker]} has just said to you, at the table: \"{text}\" You are not acting now, only "
+        game = self.table.game
+        asked = [s for s in dict.fromkeys(to) if isinstance(s, int) and 0 <= s < self.count and s != speaker and game.seats[s].status == "alive"]
+        prompts = {seat: (f"{self.when()} {self.names[speaker]} has just said to you, at the table: \"{text}\" You are not acting now, only "
                           "talking. Say what serves you: agree, refuse, bargain, bluff, point at the real threat. Deals are not "
-                          f"binding. Leave `reply` empty to stay silent.\n\n{news(seat)}\n\n{briefing(seat)}") for seat in asked}
+                          f"binding. Leave `reply` empty to stay silent.\n\n{self.news(seat)}\n\n{self.briefing(seat)}") for seat in asked}
 
-        answers = ask_all(prompts, _REPLY)
+        answers = self.ask_all(prompts, _REPLY)
         said = []
         for seat, reply in answers:
             words = str((reply.data or {}).get("reply", "")).strip()
             record = {"turn": game.turn.number, "seat": seat, "to": speaker, "asked": text, "reply": words, "seconds": round(reply.seconds, 1)}
-            report["talk"].append(record)
-            directory.append(f"transcript-seat-{seat}.jsonl", {"kind": "reply", **record})
-            if words and "error" not in table.act(seat, "say", {"text": words, "to": [speaker]}):
-                said.append({"from": names[seat], "seat": seat, "text": words})
-        echo(f"turn {game.turn.number} {game.turn.step}: {names[speaker]} spoke to {', '.join(names[s] for s in asked)}; "
+            self.report["talk"].append(record)
+            self.directory.append(f"transcript-seat-{seat}.jsonl", {"kind": "reply", **record})
+            if words and "error" not in self.table.act(seat, "say", {"text": words, "to": [speaker]}):
+                said.append({"from": self.names[seat], "seat": seat, "text": words})
+        self.echo(f"turn {game.turn.number} {game.turn.step}: {self.names[speaker]} spoke to {', '.join(self.names[s] for s in asked)}; "
              f"{len(said)} answered")
         return said
 
-    def waiting_triggers(seat: int) -> bool:
+    def waiting_triggers(self, seat: int) -> bool:
         """The table is waiting for this seat's triggers and the seat has no session open. Most triggers need no
         session: they do not apply, or what they do can be said in the few operations the table carries out
         itself. One question, no tools: decline it, give its effect as a script, or ask to be woken. Returns
         False when a wake is needed after all (a target, a choice, an answer the table refused)."""
-        view = table.view(seat)
+        view = self.table.view(seat)
         mine = [t for t in view["waiting_triggers"] if t["seat"] == seat]
         listed = "\n".join(f"- [{t['handle']}] {t['text']}" for t in mine)
-        question = (f"{when()} The table is waiting for your triggered abilities:\n{listed}\nFor each, answer with its handle in `pending` and "
+        question = (f"{self.when()} The table is waiting for your triggered abilities:\n{listed}\nFor each, answer with its handle in `pending` and "
                     "one `action`. \"decline\": it does not really apply, or it is a \"may\" you do not want (say why in `because`). "
                     "\"script\": it applies, it has no target and leaves nothing to choose, and these operations say ALL it does; give them in "
                     "`script` and the table puts it on the stack and resolves it for you: counters {on, kind, delta}; life {who, delta}; "
@@ -456,85 +464,85 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
                     "\"each_opponent\" or \"each_player\"; `to` is battlefield, graveyard, exile, hand or command. \"wake\": anything else "
                     "(a target, a choice, a card to look at, an effect these operations cannot say): you are woken to do it by hand. If "
                     "in doubt, \"wake\". For a trigger that says it triggered several times, `times` says how many go on the stack.")
-        (_, reply), = ask_all({seat: f"{question}\n\n{news(seat)}\n\n{briefing(seat)}"}, _TRIGGERS, quick=True)
+        (_, reply), = self.ask_all({seat: f"{question}\n\n{self.news(seat)}\n\n{self.briefing(seat)}"}, _TRIGGERS, quick=True)
         answers = {a.get("pending"): a for a in (reply.data or {}).get("triggers", []) if isinstance(a, dict)}
-        record = {"turn": table.game.turn.number, "seat": seat, "respond": False, "about": "its waiting triggers", "stack": len(table.game.stack),
+        record = {"turn": self.table.game.turn.number, "seat": seat, "respond": False, "about": "its waiting triggers", "stack": len(self.table.game.stack),
                   "why": "; ".join(f"{a.get('action')}: {a.get('because', '')}" for a in answers.values())[:300], "seconds": round(reply.seconds, 1)}
-        report["triage"].append(record)
-        directory.append(f"transcript-seat-{seat}.jsonl", {"kind": "triage", **record, "answers": list(answers.values())})
-        echo(f"turn {table.game.turn.number} {table.game.turn.step}: {names[seat]}'s triggers: "
+        self.report["triage"].append(record)
+        self.directory.append(f"transcript-seat-{seat}.jsonl", {"kind": "triage", **record, "answers": list(answers.values())})
+        self.echo(f"turn {self.table.game.turn.number} {self.table.game.turn.step}: {self.names[seat]}'s triggers: "
              + (", ".join(str(a.get("action")) for a in answers.values()) or "no answer"))
         for trigger in mine:
             answer = answers.get(trigger["handle"], {})
             if answer.get("action") == "decline":
-                result = table.act(seat, "skip_trigger", {"pending": trigger["handle"], "because": answer.get("because") or "declined"})
+                result = self.table.act(seat, "skip_trigger", {"pending": trigger["handle"], "because": answer.get("because") or "declined"})
             elif answer.get("action") == "script" and answer.get("script"):
                 result = {}
                 for _ in range(max(1, min(int(answer.get("times") or 1), trigger.get("count", 1)))):
-                    result = table.act(seat, "add_trigger", {"pending": trigger["handle"], "script": answer["script"]})
+                    result = self.table.act(seat, "add_trigger", {"pending": trigger["handle"], "script": answer["script"]})
                     if "error" in result:
                         break
-                still = next((t for t in table.view(seat)["waiting_triggers"] if t["handle"] == trigger["handle"]), None)
-                if "error" not in result and still is not None and table.game.control.kind == "triggers":
-                    result = table.act(seat, "skip_trigger", {"pending": trigger["handle"], "because": "the rest of them do nothing more"})
+                still = next((t for t in self.table.view(seat)["waiting_triggers"] if t["handle"] == trigger["handle"]), None)
+                if "error" not in result and still is not None and self.table.game.control.kind == "triggers":
+                    result = self.table.act(seat, "skip_trigger", {"pending": trigger["handle"], "because": "the rest of them do nothing more"})
             else:
                 return False
             if "error" in result:
                 return False
-        seen[seat] = len(table.events)
+        self.seen[seat] = len(self.table.events)
         return True
 
-    def window(seats: list[int], situation: str) -> set[int]:
+    def window(self, seats: list[int], situation: str) -> set[int]:
         """Ask several seats at once whether they would act now, with the stack empty on another player's
         turn. Without this nobody could ever kill an attacker, play a combat trick after blocks, or
         flash something in at the end of turn: the driver passes for everyone when nothing is on the stack."""
-        game = table.game
-        question = (f"It is {names[game.turn.active]}'s {game.turn.step} step, the stack is empty, and you have priority. {situation} Do you "
+        game = self.table.game
+        question = (f"It is {self.names[game.turn.active]}'s {game.turn.step} step, the stack is empty, and you have priority. {situation} Do you "
                     "want to act now, at instant speed: cast an instant or a card with flash, or activate an ability? Answer "
                     "act=false to pass. Answer act=true only if you would actually do it now; you will then be woken to do it.")
-        prompts = {seat: f"{when()} {question}\n\n{news(seat)}\n\n{briefing(seat)}" for seat in seats}
+        prompts = {seat: f"{self.when()} {question}\n\n{self.news(seat)}\n\n{self.briefing(seat)}" for seat in seats}
 
-        replies = ask_all(prompts, _WINDOW, quick=True)
+        replies = self.ask_all(prompts, _WINDOW, quick=True)
         acting = set()
         for seat, reply in replies:
             data = reply.data or {}
             acting |= {seat} if data.get("act") else set()
             record = {"turn": game.turn.number, "seat": seat, "respond": bool(data.get("act")), "why": data.get("why", ""),
                       "about": f"{game.turn.step} window", "stack": 0, "seconds": round(reply.seconds, 1)}
-            report["triage"].append(record)
-            directory.append(f"transcript-seat-{seat}.jsonl", {"kind": "triage", **record})
-        echo(f"turn {game.turn.number} {game.turn.step}: a chance to act: "
-             + ", ".join(f"{names[s]} {'ACTS' if s in acting else 'passes'}" for s, _ in replies))
+            self.report["triage"].append(record)
+            self.directory.append(f"transcript-seat-{seat}.jsonl", {"kind": "triage", **record})
+        self.echo(f"turn {game.turn.number} {game.turn.step}: a chance to act: "
+             + ", ".join(f"{self.names[s]} {'ACTS' if s in acting else 'passes'}" for s, _ in replies))
         return acting
 
-    def wake(server: McpServer, seat: int, kind: str, extra: str = "") -> None:
-        token, handle = secrets.token_hex(16), table.open_wake(seat, kind)
-        current.update(tools=SeatTools(table, seat, handle, database=database, rules=rules), token=token, wake=handle,
+    def wake(self, server: McpServer, seat: int, kind: str, extra: str = "") -> None:
+        token, handle = secrets.token_hex(16), self.table.open_wake(seat, kind)
+        self.current.update(tools=SeatTools(self.table, seat, handle, database=self.database, rules=self.rules), token=token, wake=handle,
                        seat=seat, ended=False, replies=0)
-        game = table.game
-        windows.get((game.turn.number, game.turn.step), set()).discard(seat)
+        game = self.table.game
+        self.windows.get((game.turn.number, game.turn.step), set()).discard(seat)
         if kind == "correction" and not extra:
             extra = _correction(game.control.detail)
-        prompt = f"{when()} {extra or _WHY.get(kind, 'The table is waiting for you.')}{_arithmetic(table, seat)}\n\n{news(seat)}\n\n{briefing(seat)}"
-        echo(f"turn {game.turn.number} {game.turn.step}: {names[seat]} ({kind}) ...")
-        started = len(table.events)
-        reply = runners[seat].ask(systems[seat], prompt, tools=server.connection(
-            token, tuple(t["name"] for t in current["tools"].definitions)))
-        table.close_wake(handle)
+        prompt = f"{self.when()} {extra or _WHY.get(kind, 'The table is waiting for you.')}{_arithmetic(self.table, seat)}\n\n{self.news(seat)}\n\n{self.briefing(seat)}"
+        self.echo(f"turn {game.turn.number} {game.turn.step}: {self.names[seat]} ({kind}) ...")
+        started = len(self.table.events)
+        reply = self.runners[seat].ask(self.systems[seat], prompt, tools=server.connection(
+            token, tuple(t["name"] for t in self.current["tools"].definitions)))
+        self.table.close_wake(handle)
         forced = None
-        if holds_pen(seat) and table.game.control.kind != "setup" or (kind == "mulligan" and holds_pen(seat)):
-            forced = _default_action(table, seat)  # it stopped while the table still waited for it
-        seen[seat] = len(table.events)
-        entry = {"seat": seat, "turn": game.turn.number, "kind": kind, "summary": reply.text, "events": [started, len(table.events)],
-                 "tool_calls": len(current["tools"].calls), "tool_errors": [c for c in current["tools"].calls if c["error"]],
+        if self.holds_pen(seat) and self.table.game.control.kind != "setup" or (kind == "mulligan" and self.holds_pen(seat)):
+            forced = _default_action(self.table, seat)  # it stopped while the table still waited for it
+        self.seen[seat] = len(self.table.events)
+        entry = {"seat": seat, "turn": game.turn.number, "kind": kind, "summary": reply.text, "events": [started, len(self.table.events)],
+                 "tool_calls": len(self.current["tools"].calls), "tool_errors": [c for c in self.current["tools"].calls if c["error"]],
                  "forced": forced, "seconds": round(reply.seconds, 1), "estimated_cost_usd": reply.estimated_cost_usd}
-        report["wakes"].append(entry)
-        directory.append(f"transcript-seat-{seat}.jsonl", {**entry, "calls": current["tools"].calls})
-        directory.write(f"notes-seat-{seat}.md", table.notes[seat])
-        current.update(tools=None, token=None, wake=None)
+        self.report["wakes"].append(entry)
+        self.directory.append(f"transcript-seat-{seat}.jsonl", {**entry, "calls": self.current["tools"].calls})
+        self.directory.write(f"notes-seat-{seat}.md", self.table.notes[seat])
+        self.current.update(tools=None, token=None, wake=None)
 
-    def audit(server: McpServer, snapshot: tuple) -> None:
-        unit = table.events[snapshot[2]:]
+    def audit(self, server: McpServer, snapshot: tuple) -> None:
+        unit = self.table.events[snapshot[2]:]
 
         def needs_no_audit(event: dict) -> bool:
             """Nothing here for a rules check to find: talk and passing; and what the table itself has
@@ -554,170 +562,170 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
                 return bool(args.get("as_proposed")) and not args.get("then")
             named = re.search(r" plays (.+) from .+'s hand(?: \(|\.)", event["public"][0]) if tool == "play_land" else \
                 re.search(r" casts (.+?) from .+'s (?:hand|command)(?: targeting|,|\.| \[)", event["public"][0]) if tool == "cast" else None
-            card = database.find(named[1]) if named else None
+            card = self.database.find(named[1]) if named else None
             if card is None or (tool == "cast" and (args.get("resolves") != "auto_permanent" or args.get("targets") or args.get("x") is not None
                                                     or (args.get("payment") or {}).get("note"))):
                 return False
-            return _needs_nothing_written(card, known_hooks)
+            return _needs_nothing_written(card, self.known_hooks)
         if all(needs_no_audit(e) for e in unit):
             return
         actions = sum(1 for e in unit if e["seat"] is not None and e["tool"] not in ("pass_priority", "say", "write_notes", "set_response_policy"))
-        echo(f"         auditing {actions} actions ...")
-        verdict, reply = auditor.audit(table, snapshot)
-        record = {"turn": table.game.turn.number, "events": [snapshot[2], len(table.events)], **verdict, "seconds": round(reply.seconds, 1)}
-        report["audits"].append(record)
-        directory.append("audits.jsonl", record)
+        self.echo(f"         auditing {actions} actions ...")
+        verdict, reply = self.auditor.audit(self.table, snapshot)
+        record = {"turn": self.table.game.turn.number, "events": [snapshot[2], len(self.table.events)], **verdict, "seconds": round(reply.seconds, 1)}
+        self.report["audits"].append(record)
+        self.directory.append("audits.jsonl", record)
         if verdict.get("hooks"):
             counts: dict[tuple, int] = {}
             for hook in verdict["hooks"]:
                 hook.pop("scripted", None)  # trust is the driver's to give, never the auditor's to claim
-                source = table.game.objects.get(table.handles[None].resolve("c", hook.get("handle")) or -1)
+                source = self.table.game.objects.get(self.table.handles[None].resolve("c", hook.get("handle")) or -1)
                 if source is None or not hook.get("script"):
                     continue
-                known = next((h for h in known_hooks.get(source.name, []) if _hook_key(h) == _hook_key(hook)), {})
-                seen = (known.get("script_seen", 0) if known.get("script") == hook["script"] else 0) + 1
-                counts[(source.name, _hook_key(hook))] = seen
-                hook["scripted"] = _script_trusted(database.find(source.name), {**hook, "script_seen": seen, "script_revoked": known.get("script_revoked")})
+                known = next((h for h in self.known_hooks.get(source.name, []) if _hook_key(h) == _hook_key(hook)), {})
+                times = (known.get("script_seen", 0) if known.get("script") == hook["script"] else 0) + 1
+                counts[(source.name, _hook_key(hook))] = times
+                hook["scripted"] = _script_trusted(self.database.find(source.name), {**hook, "script_seen": times, "script_revoked": known.get("script_revoked")})
             try:
-                table.apply_hooks(verdict["hooks"])
+                self.table.apply_hooks(verdict["hooks"])
             except ValueError as error:
                 record["hooks_error"] = str(error)
             fresh: dict[str, list[dict]] = {}
-            described = {table.handles[None].resolve("c", h.get("handle")) for h in verdict["hooks"]}
-            for entry in table.game.ledger:  # the cards this audit described, as the ledger now holds them: one set each
-                source = table.game.objects.get(entry.get("source"))
+            described = {self.table.handles[None].resolve("c", h.get("handle")) for h in verdict["hooks"]}
+            for entry in self.table.game.ledger:  # the cards this audit described, as the ledger now holds them: one set each
+                source = self.table.game.objects.get(entry.get("source"))
                 if source is not None and source.id in described:
-                    hooked.add(source.id)
+                    self.hooked.add(source.id)
                     learned = _own_trigger(source.name, _relative(entry, source.controller))
                     learned.pop("scripted", None)
                     if learned.get("script"):
-                        before = next((h for h in known_hooks.get(source.name, []) if _hook_key(h) == _hook_key(learned)), {})
+                        before = next((h for h in self.known_hooks.get(source.name, []) if _hook_key(h) == _hook_key(learned)), {})
                         learned |= {"script_seen": counts.get((source.name, _hook_key(learned)), 1), "script_revoked": bool(before.get("script_revoked"))}
                     if learned not in fresh.setdefault(source.name, []):
                         fresh[source.name].append(learned)
-            known_hooks.update(fresh)
-            if library and fresh:  # other games may be writing too: merge into what is on disk now, and swap the file in whole
-                on_disk = json.loads(library.read_text(encoding="utf-8")) if library.is_file() else {}
-                library.parent.mkdir(parents=True, exist_ok=True)
-                scratch = library.with_suffix(f".{secrets.token_hex(4)}.tmp")
+            self.known_hooks.update(fresh)
+            if self.library and fresh:  # other games may be writing too: merge into what is on disk now, and swap the file in whole
+                on_disk = json.loads(self.library.read_text(encoding="utf-8")) if self.library.is_file() else {}
+                self.library.parent.mkdir(parents=True, exist_ok=True)
+                scratch = self.library.with_suffix(f".{secrets.token_hex(4)}.tmp")
                 scratch.write_text(json.dumps({**on_disk, **fresh}, indent=1, ensure_ascii=False, sort_keys=True), encoding="utf-8")
-                scratch.replace(library)
+                scratch.replace(self.library)
         for finding in verdict.get("findings", []):
             # One finding against a scripted resolution and the script is never trusted again, in this game or a later one.
-            told = table.events[finding["event"]]["public"] if isinstance(finding.get("event"), int) and 0 <= finding["event"] < len(table.events) else []
+            told = self.table.events[finding["event"]]["public"] if isinstance(finding.get("event"), int) and 0 <= finding["event"] < len(self.table.events) else []
             for line in told:
                 if " resolves by script" in line and finding.get("kind") in SERIOUS:
                     blamed = line.split(" (")[0]
-                    for hook in known_hooks.get(blamed, []):
+                    for hook in self.known_hooks.get(blamed, []):
                         hook["script_revoked"] = True
-                    echo(f"         the script for {blamed} is revoked: {finding['summary'][:120]}")
-                    for obj in [o for o in table.game.objects.values() if o.zone == "battlefield" and o.name == blamed]:
-                        table.rewrite_hooks(table.handles[None].of("c", obj.id), _absolute(known_hooks[blamed], obj, database))
-                    if library:
-                        on_disk = json.loads(library.read_text(encoding="utf-8")) if library.is_file() else {}
-                        library.write_text(json.dumps({**on_disk, blamed: known_hooks[blamed]}, indent=1, ensure_ascii=False, sort_keys=True), encoding="utf-8")
-        table.apply_computed(verdict.get("computed") or [])
-        stamped[0] = _characteristics_print(table)
+                    self.echo(f"         the script for {blamed} is revoked: {finding['summary'][:120]}")
+                    for obj in [o for o in self.table.game.objects.values() if o.zone == "battlefield" and o.name == blamed]:
+                        self.table.rewrite_hooks(self.table.handles[None].of("c", obj.id), _absolute(self.known_hooks[blamed], obj, self.database))
+                    if self.library:
+                        on_disk = json.loads(self.library.read_text(encoding="utf-8")) if self.library.is_file() else {}
+                        self.library.write_text(json.dumps({**on_disk, blamed: self.known_hooks[blamed]}, indent=1, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+        self.table.apply_computed(verdict.get("computed") or [])
+        self.stamped[0] = _characteristics_print(self.table)
         actors = [e["seat"] for e in unit if e["seat"] is not None]
         at_fault: dict[int, list[str]] = {}
         for finding in verdict.get("findings", []):
             seat = finding.get("seat")
-            seat = seat if isinstance(seat, int) and 0 <= seat < count and table.game.seats[seat].status == "alive" else None
+            seat = seat if isinstance(seat, int) and 0 <= seat < self.count and self.table.game.seats[seat].status == "alive" else None
             if finding["kind"] == "trigger" and seat is not None:
-                table.queue_trigger(seat, finding["summary"])
+                self.table.queue_trigger(seat, finding["summary"])
             elif finding["kind"] in SERIOUS and finding["kind"] != "trigger":
                 seat = seat if seat is not None else (actors[-1] if actors else None)
                 if seat is not None:
                     at_fault.setdefault(seat, []).append(f"{finding['summary']} Basis: {finding['basis']} What should happen: {finding['fix']}")
         for answer in verdict.get("disputes") or []:
-            raised = table.events[answer["event"]] if 0 <= answer.get("event", -1) < len(table.events) else None
+            raised = self.table.events[answer["event"]] if 0 <= answer.get("event", -1) < len(self.table.events) else None
             if raised is not None and raised["tool"] == "dispute":
-                table.answer_dispute(raised["seat"], answer["upheld"], answer["answer"])
+                self.table.answer_dispute(raised["seat"], answer["upheld"], answer["answer"])
         for seat, problems in at_fault.items():
-            table.open_correction(seat, " | ".join(problems))
-            wake(server, seat, "correction")
-            if table.game.control.kind == "dispute":
-                adjudicate(snapshot[2])
-                if table.game.control.kind == "correction":
-                    wake(server, seat, "correction")  # the judge agreed there was a problem: no appeal this time
-            if table.game.control.kind == "correction":
-                table.act(seat, "finish_step")
+            self.table.open_correction(seat, " | ".join(problems))
+            self.wake(server, seat, "correction")
+            if self.table.game.control.kind == "dispute":
+                self.adjudicate(snapshot[2])
+                if self.table.game.control.kind == "correction":
+                    self.wake(server, seat, "correction")  # the judge agreed there was a problem: no appeal this time
+            if self.table.game.control.kind == "correction":
+                self.table.act(seat, "finish_step")
 
-    def adjudicate(since: int) -> None:
+    def adjudicate(self, since: int) -> None:
         """A player has contested a finding. In the first real game nobody could, and two players gave
         up a card each to a false alarm about the free mulligan."""
-        detail = dict(table.game.control.detail)
-        echo(f"         {names[detail['seat']]} contests the finding; the judge is ruling ...")
-        decision, reply = judge.rule(table, since)
-        table.rule(decision["decision"], decision["explanation"], ruling=decision.get("ruling", ""), fix=decision.get("fix", ""))
-        record = {"kind": "ruling", "turn": table.game.turn.number, "seat": detail["seat"], "finding": detail["finding"],
+        detail = dict(self.table.game.control.detail)
+        self.echo(f"         {self.names[detail['seat']]} contests the finding; the judge is ruling ...")
+        decision, reply = self.judge.rule(self.table, since)
+        self.table.rule(decision["decision"], decision["explanation"], ruling=decision.get("ruling", ""), fix=decision.get("fix", ""))
+        record = {"kind": "ruling", "turn": self.table.game.turn.number, "seat": detail["seat"], "finding": detail["finding"],
                   "objection": detail["objection"], **decision, "seconds": round(reply.seconds, 1)}
-        report["rulings"].append(record)
-        directory.append("audits.jsonl", record)
-        echo(f"         the judge: {decision['decision']}. {decision['explanation']}")
+        self.report["rulings"].append(record)
+        self.directory.append("audits.jsonl", record)
+        self.echo(f"         the judge: {decision['decision']}. {decision['explanation']}")
 
-    def refresh() -> None:
+    def refresh(self) -> None:
         """Work the creatures' power and toughness out again. Audits are a turn apart, and blocks are
         chosen on these numbers: in the first real game a 4/4 was blocked and dealt damage as a 3/3."""
-        echo("         working out power and toughness before blocks ...")
-        computed, reply = auditor.characteristics(table)
-        table.apply_computed(computed)
-        stamped[0] = _characteristics_print(table)
-        record = {"turn": table.game.turn.number, "kind": "characteristics", "computed": computed, "seconds": round(reply.seconds, 1)}
-        report["refreshes"].append(record)
-        directory.append("audits.jsonl", record)
+        self.echo("         working out power and toughness before blocks ...")
+        computed, reply = self.auditor.characteristics(self.table)
+        self.table.apply_computed(computed)
+        self.stamped[0] = _characteristics_print(self.table)
+        record = {"turn": self.table.game.turn.number, "kind": "characteristics", "computed": computed, "seconds": round(reply.seconds, 1)}
+        self.report["refreshes"].append(record)
+        self.directory.append("audits.jsonl", record)
 
-    def rehook() -> None:
+    def rehook(self) -> None:
         """Give a permanent that has just arrived the hooks the auditor wrote for that card before."""
-        game = table.game
-        for obj in [game.objects[i] for i in game.battlefield if i not in hooked]:
-            hooked.add(obj.id)
-            if obj.face_down or obj.name not in known_hooks:
+        game = self.table.game
+        for obj in [game.objects[i] for i in game.battlefield if i not in self.hooked]:
+            self.hooked.add(obj.id)
+            if obj.face_down or obj.name not in self.known_hooks:
                 continue
-            hooks = [{**hook, "handle": table.handles[None].of("c", obj.id)} for hook in _absolute(known_hooks[obj.name], obj, database)]
+            hooks = [{**hook, "handle": self.table.handles[None].of("c", obj.id)} for hook in _absolute(self.known_hooks[obj.name], obj, self.database)]
             try:
-                table.apply_hooks(hooks)
+                self.table.apply_hooks(hooks)
             except ValueError:
                 continue  # the next audit writes them afresh
             # It has already entered, and the table matched that event before these hooks existed: its own
             # "when this enters" is put in front of its controller now, unless the player has seen to it.
-            seen_to = any(e["tool"] == "add_trigger" and e["args"].get("source") == obj.id for e in table.events[-40:])
+            seen_to = any(e["tool"] == "add_trigger" and e["args"].get("source") == obj.id for e in self.table.events[-40:])
             for hook in hooks:
                 on = hook.get("on") or {}
                 if hook.get("kind") == "event_trigger" and on.get("event") == "enters" and on.get("self") and not seen_to \
                         and obj.entered_turn == game.turn.number:
-                    table.queue_trigger(obj.controller, f"{hook.get('text', '')} (because {obj.name} entered)")
+                    self.table.queue_trigger(obj.controller, f"{hook.get('text', '')} (because {obj.name} entered)")
 
-    def settle(me: int | None = None) -> str:
+    def settle(self, me: int | None = None) -> str:
         """Do everything that needs no full wake: release mid-turn checkpoints, pass for seats with
         nothing to respond to, ask the rest whether they respond. Returns why it stopped: "over",
         "stuck", "audit" (the table waits for one), "wake" (some seat must decide), or "yours" when
         called from inside seat `me`'s wake and the pen has come back to it."""
         while True:
-            rehook()
-            game = table.game
-            if game.control.kind == "over" or game.seats[game.turn.active].turns_taken > last_round:
+            self.rehook()
+            game = self.table.game
+            if game.control.kind == "over" or game.seats[game.turn.active].turns_taken > self.last_round:
                 return "over"
-            lost = _must_lose(table)
+            lost = _must_lose(self.table)
             if lost and me is not None:
                 return "wake"  # end this wake first: correcting the table kills open wakes
             if lost:
                 # Losing the game is a state-based action the table can see for itself, and nobody
                 # should receive priority first (rule 704.3). In the first real game two players sat
                 # at -1 life while priority went round.
-                table.patch([{"op": "eliminate", "seat": seat, "reason": reason} for seat, reason in lost],
-                            "state-based action: " + "; ".join(f"{names[seat]} loses ({reason})" for seat, reason in lost))
+                self.table.patch([{"op": "eliminate", "seat": seat, "reason": reason} for seat, reason in lost],
+                            "state-based action: " + "; ".join(f"{self.names[seat]} loses ({reason})" for seat, reason in lost))
                 continue
-            if table.awaiting_audit:
+            if self.table.awaiting_audit:
                 # By default a turn is audited whole, before the next one begins: that is when its
                 # hooks must exist. Checkpoints inside the turn are released at once.
-                if audit_every == "checkpoint" or game.control.detail["resume"]["do"] == "next_turn":
+                if self.audit_every == "checkpoint" or game.control.detail["resume"]["do"] == "next_turn":
                     return "audit"
-                table.release()
+                self.table.release()
                 continue
             if game.control.kind == "dispute":
                 return "dispute"  # only after a resume: a ruling normally follows the contest at once
-            expected = table.expected()
+            expected = self.table.expected()
             if not expected:
                 return "stuck"
             seat, kind = expected[0]
@@ -726,26 +734,26 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
                 # An empty stack on someone else's turn. Usually there is nothing to do and the driver
                 # passes; at the moments that matter the seats that could act are asked first, together.
                 key = (game.turn.number, game.turn.step)
-                if key not in windows:
+                if key not in self.windows:
                     waiting = [s for s in game.turn_order_from(seat) if s not in game.turn.passed]
-                    situation = {s: _window(table, s) for s in waiting}
+                    situation = {s: _window(self.table, s) for s in waiting}
                     asked = [s for s in waiting if situation[s] and s != me]
-                    windows.clear()
-                    windows[key] = (window(asked, next(situation[s] for s in asked)) if asked else set()) | ({me} if situation.get(me) else set())
-                if seat in windows[key]:
+                    self.windows.clear()
+                    self.windows[key] = (self.window(asked, next(situation[s] for s in asked)) if asked else set()) | ({me} if situation.get(me) else set())
+                if seat in self.windows[key]:
                     if seat != me:
                         return "wake"  # its wake takes it off the list: if it passes after all, the window is over for it
-                    windows[key].discard(seat)
+                    self.windows[key].discard(seat)
                     return "yours"
             if kind == "priority" and not game.stack and seat != game.turn.active:
                 # A permanent of theirs has arrived on somebody else's turn (a flash creature, a token maker): the driver
                 # is about to pass for them, and its "when this enters" would wait for the audit. In the fifth pod
                 # Aang, Swift Savior came in during an attack and its controller never got to stack the trigger.
-                arrived = [o for o in (game.objects[i] for i in game.battlefield) if o.controller == seat and o.id not in greeted
+                arrived = [o for o in (game.objects[i] for i in game.battlefield) if o.controller == seat and o.id not in self.greeted
                            and o.entered_turn == game.turn.number and o.token is None
                            and not any(e.get("source") == o.id for e in game.ledger)
-                           and not ((card := database.find(o.name)) is not None and _needs_nothing_written(card, known_hooks))]
-                greeted.update(o.id for o in game.objects.values() if o.controller == seat and o.zone == "battlefield")
+                           and not ((card := self.database.find(o.name)) is not None and _needs_nothing_written(card, self.known_hooks))]
+                self.greeted.update(o.id for o in game.objects.values() if o.controller == seat and o.zone == "battlefield")
                 if arrived:
                     if seat != me:
                         return "wake"
@@ -755,93 +763,101 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
                 # upkeep or draw step, or the table would be asking for a trigger, not priority. That
                 # holds for the seat whose wake this is too: in the second real game the last player
                 # to keep was told it had priority, in its upkeep, and played a land there.
-                table.act(seat, "pass_priority")
+                self.table.act(seat, "pass_priority")
                 continue
             if seat == me:
                 return "yours"
-            if kind in ("priority", "declare_blockers") and _cannot_act(table, seat, kind):
-                table.act(seat, _DEFAULTS[kind])  # an empty hand and nothing untapped; or nothing that could block
+            if kind in ("priority", "declare_blockers") and _cannot_act(self.table, seat, kind):
+                self.table.act(seat, _DEFAULTS[kind])  # an empty hand and nothing untapped; or nothing that could block
                 continue
-            if kind == "triggers" and seat != me and ask_about_triggers and waiting_triggers(seat):
+            if kind == "triggers" and seat != me and self.ask_about_triggers and self.waiting_triggers(seat):
                 continue
-            if kind == "combat_damage" and seat != me and _plain_combat(table):
+            if kind == "combat_damage" and seat != me and _plain_combat(self.table):
                 # Nothing has happened since the attack that could change how damage is dealt, and the sums
                 # are the table's: no session is opened for the attacker to say yes to them.
-                if "error" not in table.act(seat, "combat_damage", {"as_proposed": True}):
+                if "error" not in self.table.act(seat, "combat_damage", {"as_proposed": True}):
                     continue
-            if kind == "declare_blockers" and refresh_before_blocks and stamped[0] != _characteristics_print(table):
+            if kind == "declare_blockers" and self.refresh_before_blocks and self.stamped[0] != _characteristics_print(self.table):
                 if me is not None:
                     return "wake"  # the attacker's wake is over either way: somebody has to choose blocks
-                refresh()
+                self.refresh()
                 continue
             if kind == "priority" and game.stack:
                 # A chance to respond. Ask everyone still to act at once, except those who have
                 # already said they will let the top item resolve, or have a standing "pass for me".
                 signature, top = tuple(item.id for item in game.stack), game.stack[-1].id
-                if decisions.get("stack") != signature:
-                    decisions.clear()
-                    decisions.update(stack=signature, respond=set())
+                if self.decisions.get("stack") != signature:
+                    self.decisions.clear()
+                    self.decisions.update(stack=signature, respond=set())
                 waiting = [s for s in game.turn_order_from(seat) if s not in game.turn.passed and s != me]
-                asked = [s for s in waiting if s not in decisions["respond"] and top not in waived[s] and _wants_asking(table, s)]
+                asked = [s for s in waiting if s not in self.decisions["respond"] and top not in self.waived[s] and _wants_asking(self.table, s)]
                 if asked:
-                    decisions["respond"] |= {s for s, responds in triage(asked).items() if responds}
-                if seat not in decisions["respond"]:
-                    table.act(seat, "pass_priority")
-                    seen[seat] = len(table.events)
+                    self.decisions["respond"] |= {s for s, responds in self.triage(asked).items() if responds}
+                if seat not in self.decisions["respond"]:
+                    self.table.act(seat, "pass_priority")
+                    self.seen[seat] = len(self.table.events)
                     continue
             return "wake"
 
-    with McpServer(tools_for) as server:
-        try:
-            opening_hands(server)
-            snapshot = auditor.snapshot(table)
-            while True:
-                why = settle()
-                if why in ("over", "stuck"):
-                    break
-                if why == "dispute":
-                    adjudicate(snapshot[2])
-                    continue
-                if why == "audit":
-                    audit(server, snapshot)
-                    table.release()
-                    snapshot = auditor.snapshot(table)
-                    directory.write("state.json", table.game.to_dict())
-                    continue
-                seat, kind = table.expected()[0]
-                before = len(table.events)
-                wake(server, seat, kind)
-                if len(table.events) == before and table.expected() and table.expected()[0] == (seat, kind):
-                    report["stopped"] = f"{names[seat]} could not act ({kind})"  # never spin
-                    break
-        except BudgetExceeded as stop:
-            report["stopped"] = str(stop)
-        except RunnerError as error:
-            report["stopped"] = f"model error: {error}"
-    game = table.game
-    directory.flush_log()
-    report["standings"] = [{"seat": s.index, "name": s.name, "status": s.status, "life": s.life, "hand": len(s.hand),
-                            "permanents": sum(1 for i in game.battlefield if game.objects[i].controller == s.index),
-                            "commander_damage": s.commander_damage, "commander_casts": s.commander_casts} for s in game.seats]
-    report["winner"] = names[game.winner] if game.winner is not None else None
-    report["turns_played"] = game.turn.number
-    report["rounds"] = max(s.turns_taken for s in game.seats)
-    report["usage"] = auditor_runner.budget.to_dict()
-    try:  # the journal is the game: say at once if it no longer rebuilds what was played, not when a later tool trips on it
-        rebuilt = Table.replay(table.config, directory.events(), card_lookup=table.card_lookup)
-        report["journal"] = "replays to the same game" if rebuilt.game.to_dict() == game.to_dict() else "REPLAYS TO A DIFFERENT GAME"
-    except Exception as error:  # noqa: BLE001 - whatever stops a replay is the finding
-        report["journal"] = f"DOES NOT REPLAY: {error}"
-    directory.write("state.json", game.to_dict())
-    directory.write("usage.json", report["usage"])
-    directory.write("report.json", report)
-    directory.write("report.md", render(report))
-    if count > 1:  # after the report is safe on disk: the scores need a replay of the whole journal
-        report["rubric"] = rubric.measure(directory.path)
-        directory.write("rubric.json", report["rubric"])
-        directory.write("report.json", report)
-        directory.write("report.md", render(report))
-    return report
+    def run(self) -> dict:
+        with McpServer(self.tools_for) as server:
+            try:
+                self.opening_hands(server)
+                snapshot = self.auditor.snapshot(self.table)
+                while True:
+                    why = self.settle()
+                    if why in ("over", "stuck"):
+                        break
+                    if why == "dispute":
+                        self.adjudicate(snapshot[2])
+                        continue
+                    if why == "audit":
+                        self.audit(server, snapshot)
+                        self.table.release()
+                        snapshot = self.auditor.snapshot(self.table)
+                        self.directory.write("state.json", self.table.game.to_dict())
+                        continue
+                    seat, kind = self.table.expected()[0]
+                    before = len(self.table.events)
+                    self.wake(server, seat, kind)
+                    if len(self.table.events) == before and self.table.expected() and self.table.expected()[0] == (seat, kind):
+                        self.report["stopped"] = f"{self.names[seat]} could not act ({kind})"  # never spin
+                        break
+            except BudgetExceeded as stop:
+                self.report["stopped"] = str(stop)
+            except RunnerError as error:
+                self.report["stopped"] = f"model error: {error}"
+        game = self.table.game
+        self.directory.flush_log()
+        self.report["standings"] = [{"seat": s.index, "name": s.name, "status": s.status, "life": s.life, "hand": len(s.hand),
+                                "permanents": sum(1 for i in game.battlefield if game.objects[i].controller == s.index),
+                                "commander_damage": s.commander_damage, "commander_casts": s.commander_casts} for s in game.seats]
+        self.report["winner"] = self.names[game.winner] if game.winner is not None else None
+        self.report["turns_played"] = game.turn.number
+        self.report["rounds"] = max(s.turns_taken for s in game.seats)
+        self.report["usage"] = self.auditor_runner.budget.to_dict()
+        try:  # the journal is the game: say at once if it no longer rebuilds what was played, not when a later tool trips on it
+            rebuilt = Table.replay(self.table.config, self.directory.events(), card_lookup=self.table.card_lookup)
+            self.report["journal"] = "replays to the same game" if rebuilt.game.to_dict() == game.to_dict() else "REPLAYS TO A DIFFERENT GAME"
+        except Exception as error:  # noqa: BLE001 - whatever stops a replay is the finding
+            self.report["journal"] = f"DOES NOT REPLAY: {error}"
+        self.directory.write("state.json", game.to_dict())
+        self.directory.write("usage.json", self.report["usage"])
+        self.directory.write("report.json", self.report)
+        self.directory.write("report.md", render(self.report))
+        if self.count > 1:  # after the report is safe on disk: the scores need a replay of the whole journal
+            self.report["rubric"] = rubric.measure(self.directory.path)
+            self.directory.write("rubric.json", self.report["rubric"])
+            self.directory.write("report.json", self.report)
+            self.directory.write("report.md", render(self.report))
+        return self.report
+
+
+
+
+def _play(*args, **kwargs) -> dict:
+    """Schedule seats and audits until the game ends or `cycles` more rounds have been played."""
+    return _Pod(*args, **kwargs).run()
 
 
 def _must_lose(table: Table) -> list[tuple[int, str]]:
