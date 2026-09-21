@@ -3,6 +3,9 @@
 import argparse
 import json
 import math
+import os
+import shutil
+import subprocess
 import sys
 from datetime import date
 
@@ -170,6 +173,8 @@ def main(argv: list[str] | None = None) -> int:
     pod.add_argument("--out", default="games")
 
     args = parser.parse_args(argv)
+    if args.command in ("goldfish", "pod", "summarize", "review") or (args.command == "audit" and args.action == "suite"):
+        _stay_awake()
     if args.command in ("cards", "deck", "audit", "goldfish", "pod", "status", "summarize", "rubric", "review"):
         try:
             return {"cards": _cards, "deck": _deck, "audit": _audit, "goldfish": _goldfish, "pod": _pod, "status": _status, "summarize": _summarize, "rubric": _rubric, "review": _review}[args.command](args)
@@ -311,6 +316,14 @@ def _pod(args: argparse.Namespace) -> int:
         print("\n" + text.read())
     print(f"Everything is in {report['directory']}")
     return 0 if not report["stopped"] else 1
+
+
+def _stay_awake() -> None:
+    """On macOS, keep the machine from idle sleep for as long as this process lives. A laptop on
+    battery sleeps within minutes of its owner leaving, and the second pod lost ninety minutes to it:
+    model calls simply stop, and the monotonic clock that times them stops too, so nothing shows."""
+    if sys.platform == "darwin" and shutil.which("caffeinate") and not os.environ.get("FCSIM_ALLOW_SLEEP"):
+        subprocess.Popen(["caffeinate", "-i", "-w", str(os.getpid())], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def _status(args: argparse.Namespace) -> int:
