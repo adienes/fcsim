@@ -551,11 +551,11 @@ class Table:
                                             "`because` naming that effect; nothing has been declared.")
             game.turn.blockers.append({"blocker": blocker.id, "attacker": block["attacker"]})
             game.facts.append(triggers.fact("blocks", name=blocker.name, controller=seat, obj=blocker))
+            names.append(f"{ops._named(blocker)} blocks {ops._named(mutations.get(game, block['attacker']))}")
         problem = mechanics.menace_problem(game, args.get("blocks", []), self.card_lookup) if self.card_lookup else None
         if problem and not args.get("because") and not self._replaying:
             raise TableError("say_why", f"{problem} Declare your blocks again with two blockers on it or none; or with `because`, if an "
                                         "effect allows this block. Nothing has been declared.")
-            names.append(f"{ops._named(blocker)} blocks {ops._named(mutations.get(game, block['attacker']))}")
         turn.turn_action_done(game)
         return ops.Told(public=[f"{self._name(seat)}: {', '.join(names) or 'no blocks'}."])
 

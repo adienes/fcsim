@@ -1166,6 +1166,9 @@ def test_a_lone_blocker_cannot_block_a_creature_with_menace():
     alone = table.act(1, "declare_blockers", {"blocks": [{"blocker": handles[n["B1"]], "attacker": handles[n["A1"]]}]})
     assert alone["error"]["code"] == "say_why" and "menace" in alone["error"]["message"] and table.game.turn.blockers == []
     assert "error" not in table.act(1, "declare_blockers", {"blocks": [{"blocker": handles[n[b]], "attacker": handles[n["A1"]]} for b in ("B1", "B2")]})
+    # What everyone is told must be what happened: for a whole batch of games every block was announced as "no blocks",
+    # and the auditor, who reads the announcement, had correct combat "corrected".
+    assert table.events[-1]["public"] == [f"Bob: {n['B1']} blocks {n['A1']}, {n['B2']} blocks {n['A1']}."]
 
 
 def test_the_table_counts_each_players_spells_so_second_spell_triggers_can_be_a_pattern():
