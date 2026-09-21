@@ -51,7 +51,7 @@ def begin_turn(game: Game, seat: int) -> None:
     game.seats[seat].response_policy = "ask"  # a standing "pass for me" lasts until one's own next turn
     game.seats[seat].holds_for_end_step = False
     turn.active, turn.remaining, turn.passed = seat, list(STEPS), []
-    turn.land_plays, turn.attackers, turn.blockers = 0, [], []
+    turn.land_plays, turn.attackers, turn.blockers, turn.damage_steps = 0, [], [], 0
     advance(game)
 
 
@@ -159,6 +159,10 @@ def _perform(game: Game, step: str) -> bool:
             grant_priority(game, active)
             return True
         return False
+    if step == "begin_combat":
+        # Every combat starts clean, an additional one too. The count of damage steps was never reset, so in
+        # the fourth pod the table's arithmetic served the first combat of the game and refused all the rest.
+        turn.attackers, turn.blockers, turn.damage_steps = [], [], 0
     if step == "untap":
         for obj_id in game.battlefield:
             obj = game.objects[obj_id]

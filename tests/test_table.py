@@ -804,6 +804,22 @@ def test_first_strike_makes_two_steps_only_when_someone_is_left_to_strike_second
     assert table.proposed_damage(0)["lines"] == [f"{n['A2']} deals 3 to Bob"]
     runner.step(0, "combat_damage", {"as_proposed": True})
     assert table.view(0)["seats"][1]["life"] == 37 and n["A1"] in [c["name"] for c in table.view(0)["battlefield"]]
+    # The next combat starts clean: on Ann's next turn the table works the damage out again.
+    for _ in range(80):
+        seat, kind = table.expected()[0]
+        if table.game.turn.active == 0 and table.game.turn.step == "begin_combat" and table.game.turn.number > 1:
+            break
+        runner.step(seat, {"priority": "pass_priority", "discard": "finish_step", "declare_attackers": "declare_attackers"}.get(kind, kind))
+    assert table.game.turn.damage_steps == 0 and table.game.turn.attackers == []
+    for seat in (0, 1, 2):
+        runner.step(seat, "pass_priority")
+    runner.step(0, "declare_attackers", {"attacks": [{"attacker": f"@{n['A2']}", "target": {"seat": 2}}]})
+    for seat in (0, 1, 2):
+        runner.step(seat, "pass_priority")
+    while table.expected() and table.expected()[0][1] != "combat_damage":
+        seat, kind = table.expected()[0]
+        runner.step(seat, {"priority": "pass_priority"}.get(kind, kind))
+    assert table.proposed_damage(0)["lines"] == [f"{n['A2']} deals 3 to Cat"]
 
 
 def test_the_auditors_stamp_a_commander_and_what_the_table_refuses():
@@ -926,3 +942,15 @@ def test_the_rad_counter_trigger_is_the_tables_and_an_older_journal_replays_with
     assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()
     old = Table(seats(), seed=5, first=0, mechanics=0)     # as a journal from before this rule was the table's would be rebuilt
     assert old.config["mechanics"] == 0 and table.config["mechanics"] >= 1
+
+
+def test_a_mutation_named_by_a_key_is_understood():
+    table, runner = started()
+    pass_until(table, runner, "main1")
+    before = table.view(0)["seats"][0]["library"]["count"]
+    for shape in ({"mill": {}, "seat": 0, "count": 1}, {"mill": {"seat": 0, "count": 1}}, {"op": "mill", "seat": 0, "count": 1}):
+        assert "error" not in table.act(0, "act", {"because": "test", "mutations": [shape]})
+    assert table.view(0)["seats"][0]["library"]["count"] == before - 3
+    assert "error" not in table.act(0, "act", {"because": "test", "mutations": [{"move": True, "from": {"seat": 0, "zone": "library", "position": "top", "count": 2}, "to": "exile"}]})
+    assert "error" not in table.act(0, "act", {"because": "test", "mutations": [{"life": {"seat": 0}, "delta": -1}]}) and table.view(0)["seats"][0]["life"] == 39
+    assert table.act(0, "act", {"because": "test", "mutations": [{"tap": {}, "untap": {}}]})["error"]["code"] == "unknown_op"   # two names: no single meaning

@@ -441,8 +441,8 @@ def test_a_game_is_scored_against_the_rubric_from_its_log(combat_game, database,
     pinned = GameDirectory.open(directory).card_lookup()
     assert pinned("Talrand, Sky Summoner") == pod._lookup(database)("Talrand, Sky Summoner") and pinned("A card nobody played") is None
     talrand, pir, thrasios = scored["seats"]
-    # One attack was dealt by the scripted seat (2); the other by the table itself, from the auditor's 4/4 stamp.
-    assert (talrand["attackers"], talrand["damage_to_players"], talrand["spells"], talrand["idle_turns"]) == (2, 6, 1, 1)
+    # Both attacks were dealt by the table itself, from the auditor's 4/4 stamp: every combat, not only the game's first.
+    assert (talrand["attackers"], talrand["damage_to_players"], talrand["spells"], talrand["idle_turns"]) == (2, 8, 1, 1)
     assert pir["attacked_by_others"] == 2 and pir["blockers"] == 0 and thrasios["spells"] == 0
     assert (thrasios["turns"], thrasios["turns_from_third"], thrasios["idle_turns"]) == (6, 4, 4)   # lands and passes, all game
     verdicts = {s["measure"]: s["verdict"] for s in scored["scores"]}
@@ -653,7 +653,7 @@ def test_several_games_are_reported_side_by_side_with_their_sample_size(combat_g
     report = aggregate([directory, directory])
     assert len(report["games"]) == 2 and report["verdicts"]["length"] == {"unfinished": 2} and report["verdicts"]["participation"] == {"bad": 2}
     talrand = report["decks"]["Talrand"]
-    assert (talrand["games"], talrand["wins"], talrand["damage_to_players"], talrand["spells"]) == (2, 0, 12, 2)
+    assert (talrand["games"], talrand["wins"], talrand["damage_to_players"], talrand["spells"]) == (2, 0, 16, 2)
     assert report["cards"]["Talrand"]["Talrand, Sky Summoner"] == {"seen": 2, "played": 2, "rounds_held": 0, "stuck_at_end": 0}
     assert main(["report", directory, "--deck", "thras"]) == 0
     out = capsys.readouterr().out
