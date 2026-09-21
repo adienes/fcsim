@@ -78,6 +78,17 @@ Three rounds (12 table turns) of the same four decks, every player at medium eff
 The session-continuity change (S3) did what it was for: a turn is one session. It also caused the
 one rules error of the three rounds (R9), now fixed.
 
+The whole game: 9 rounds, 34 table turns, 2,100 events, won by Lathril. 65 wakes took 50 minutes of
+model time (46 s each; the longest, a 31-call Elf turn, 4 minutes), 33 audits took 23 minutes, 5
+power-and-toughness checks before blocks 98 s, and 13 respond-or-pass questions 46 s: about 75
+minutes of model time in all, against most of a day for the first pod's six rounds. No wake only
+looked and passed, and the driver never had to finish one. The auditor raised five findings, all of
+them right (R9, R12, R13 and a missed dies-trigger among them), and nobody needed the judge. The game
+ran on the driver as it stood when it was resumed, so the combat windows (F9), the replies to table
+talk (F5), opening hands decided together (S10) and the hook memory (R12) have still run with
+scripted seats only. Next time, stop a running game at a turn boundary and resume it on new code:
+`--resume` exists for exactly that.
+
 ## What the pod says about the decks
 
 EDHREC's average Miirym list killed two players from 27 and 37 life in one main phase on its fifth
@@ -87,3 +98,13 @@ turns, every player gets to shine, interaction) this pod scores badly: two seats
 (Lathril sat on two lands all game), nobody held interaction for the engine everyone had named, and
 the game was decided by one untouched turn. An average list is a seed, not a tuned opponent; this is
 what the workshop is for.
+
+The second pod, same lists, went the other way round: Lathril, idle on three of four turns in the
+first game, won in round 9 with 38 attackers and 112 damage, killing Miirym from 28 and Wilhelt
+from 22 in one damage step after Kindred Dominance had cleared the other boards. Participation was
+good for every seat this time. Over both games (`fcsim report`): length good twice, turn weight
+and ending bad twice (a 50-action and a 46-action turn; every loser went out in one turn from
+half its life or more), interaction mixed twice, and not one play at instant speed on another
+player's turn in either game, which is what F9 was written to fix. `fcsim review` on the Zuko
+list over both games is in the second game's directory: it blames the pod and the draws first,
+then a top-heavy hand and a suite of combat tricks that are blank on an empty board.
