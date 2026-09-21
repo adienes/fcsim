@@ -722,3 +722,15 @@ def test_a_card_the_auditor_has_seen_gets_its_hooks_the_moment_it_comes_back(dat
     log = (Path(third["directory"]) / "log.md").read_text()
     assert log.count("A trigger is waiting for Talrand: When Talrand enters, scry 1. (because Talrand, Sky Summoner entered)") == 1
     assert log.count("Talrand puts a trigger on the stack") == 1 and "Pir plays Forest" in log and "does not put a trigger" not in log
+
+
+def test_a_hook_that_plainly_triggers_on_its_own_permanent_is_marked_so():
+    from fcsim.play.pod import _own_trigger
+    moth = _own_trigger("The Wise Mothman", {"kind": "event_trigger", "on": {"event": "enters"}, "text": "Whenever The Wise Mothman enters or attacks, each player gets a rad counter."})
+    assert moth["on"] == {"event": "enters", "who": "you", "self": True}
+    bog = _own_trigger("Bojuka Bog", {"kind": "event_trigger", "text": "When this land enters, exile target player's graveyard."})
+    assert bog["on"] == {"event": "enters", "who": "you", "self": True}
+    laelia = _own_trigger("Laelia, the Blade Reforged", {"kind": "event_trigger", "text": "Whenever Laelia attacks, exile the top card of your library."})
+    assert laelia["on"]["event"] == "attacks" and laelia["on"]["self"]
+    anthem = {"kind": "event_trigger", "on": {"event": "enters", "who": "you", "type": "Dragon"}, "text": "Whenever a Dragon you control enters, it deals damage."}
+    assert _own_trigger("Lathliss, Dragon Queen", anthem) == anthem and _own_trigger("X", {"kind": "static", "text": "When this enters"}) == {"kind": "static", "text": "When this enters"}

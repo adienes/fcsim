@@ -200,7 +200,7 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
         if source is not None:
             hooked.add(source.id)
             from_ledger.setdefault(source.name, []).append(_relative(entry, source.controller))
-    known_hooks = {**from_ledger, **known_hooks}
+    known_hooks = {name: [_own_trigger(name, hook) for hook in hooks] for name, hooks in {**from_ledger, **known_hooks}.items()}
     if earlier is not None:
         # A resumed game may have been hooked from an older description of a card than the library now holds.
         for obj in [table.game.objects[i] for i in table.game.battlefield]:
@@ -495,7 +495,7 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
                 source = table.game.objects.get(entry.get("source"))
                 if source is not None:
                     hooked.add(source.id)
-                    fresh.setdefault(source.name, []).append(_relative(entry, source.controller))
+                    fresh.setdefault(source.name, []).append(_own_trigger(source.name, _relative(entry, source.controller)))
             known_hooks.update(fresh)
             if library and fresh:  # other games may be writing too: merge into what is on disk now, and swap the file in whole
                 on_disk = json.loads(library.read_text(encoding="utf-8")) if library.is_file() else {}
@@ -756,6 +756,22 @@ def _plain_combat(table: Table) -> bool:
         return False
     return not any(re.search(r"damage|prevent|protection|can't be blocked|assign", str(e.get("text", "")), re.I)
                    for e in game.ledger if e.get("kind") == "static")
+
+
+def _own_trigger(name: str, hook: dict) -> dict:
+    """A backstop for a hook whose text plainly says it triggers on its own permanent ("Whenever The
+    Wise Mothman enters or attacks", "When this land enters") but whose `on` does not: without
+    `self` the table would offer it whenever anything entered or attacked."""
+    if hook.get("kind") != "event_trigger":
+        return hook
+    short = re.escape(name.split(",")[0])
+    found = re.search(rf"\bwhen(?:ever)? (?:this \w+|{re.escape(name)}|{short}) (enters|attacks|dies|leaves)", str(hook.get("text", "")), re.I)
+    if not found:
+        return hook
+    on = dict(hook.get("on") or {})
+    on.setdefault("event", found[1].lower())
+    on.setdefault("who", "you")
+    return {**hook, "on": {**on, "self": True}}
 
 
 def _relative(entry: dict, controller: int) -> dict:
