@@ -34,6 +34,9 @@ roll {sides, count} · flip_coin {count} · designate {key: "monarch" and the li
 commander_damage {seat, commander: handle, amount | set} - only for damage the table did not count itself, or \
 with `set` to correct a wrong total · eliminate {seat, reason}
 extra_turn {seat?} · extra_combat · end_turn · skip_step {step} · remove_from_stack {item: handle}
+delay {step, text, whose?: "mine" | seat} - a delayed trigger ("return it at the beginning of the next end step", "at the \
+beginning of your next upkeep, sacrifice it"): the table puts it in front of you when that step next begins, on anyone's turn unless \
+`whose` says otherwise, so that you need not remember it. Steps: upkeep, draw, main1, begin_combat, end_combat, main2, end.
 request_choice {seats, prompt, options?} - asks other players something an effect makes them choose. It must be \
 last in its list; your wake then ends and you are woken again with the answers.
 Use annotate for effects that live on no card ("gets +3/+3 until end of turn", expires "eot"). You carry out \

@@ -1018,3 +1018,23 @@ def test_a_trigger_is_a_pattern_over_what_the_table_sees_so_new_conditions_need_
     assert "(because a card was drawn)" in waiting[4] and "was discarded)" in waiting[0] and "(because Cat lost 4 life)" in waiting[2]   # a hidden card is not named
     assert triggers.pattern({"event": "dies", "type": "Zombie", "nonland": True}) == {"event": "moved", "from": "battlefield", "to": "graveyard",
                                                                                       "type": ["Creature", "Zombie"], "not_type": ["Land"], "nonland": True}
+
+
+def test_a_delayed_trigger_comes_back_at_its_step_once():
+    table, runner = started()
+    pass_until(table, runner, "main1")
+    norin = spell_in_hand(table, 0)
+    runner.step(0, "act", {"because": "Norin the Wary's trigger resolves", "mutations": [
+        {"op": "move", "obj": f"@{norin}", "to": "exile"},
+        {"op": "delay", "step": "end", "text": f"Return {norin} to the battlefield under its owner's control."}]})
+    assert "will have a trigger at the beginning of the next end step" in table.events[-1]["public"][-1]
+    assert table.act(0, "act", {"because": "x", "mutations": [{"op": "delay", "step": "sometime", "text": "x"}]})["error"]["code"] == "bad_delay"
+    for _ in range(40):
+        seat, kind = table.expected()[0]
+        if kind == "triggers":
+            break
+        runner.step(seat, {"priority": "pass_priority", "declare_attackers": "declare_attackers"}.get(kind, kind))
+    assert table.expected() == [(0, "triggers")] and table.game.turn.step == "end"
+    assert table.view(0)["waiting_triggers"][0]["text"].startswith(f"Return {norin} to the battlefield")
+    assert not [e for e in table.game.ledger if e.get("kind") == "delayed"]                     # used up
+    assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()

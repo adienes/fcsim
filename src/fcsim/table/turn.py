@@ -222,6 +222,11 @@ def _queue_step_triggers(game: Game, step: str) -> None:
         game.pending_triggers.append({"id": game.new_id(), "seat": active.index, "source": None,
                                       "text": f"Rad counters (rule 728.1): mill {rad} card(s), one for each of your rad counters; for each nonland "
                                               "card milled this way, lose 1 life and remove one rad counter."})
+    due = [e for e in game.ledger if e.get("kind") == "delayed" and e.get("step") == step and e.get("whose", "any") in ("any", game.turn.active)]
+    for entry in due:  # once: a delayed trigger is used up by the step it waited for
+        game.ledger.remove(entry)
+        if game.seats[entry["controller"]].status == "alive":
+            game.pending_triggers.append({"id": game.new_id(), "seat": entry["controller"], "text": entry.get("text", ""), "source": None})
     for entry in game.ledger:
         if entry.get("kind") == "step_trigger" and entry.get("step") == step \
                 and entry.get("whose", "each") in ("each", game.turn.active):

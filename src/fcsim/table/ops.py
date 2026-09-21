@@ -131,6 +131,17 @@ def apply_op(game: Game, dice: Dice, actor: int, op: dict, told: Told) -> None:
             obj.attached_to = host.id if host else None
             told.public.append(f"{me} attaches {_named(obj)} to {_named(host)}." if host
                                else f"{me} unattaches {_named(obj)}.")
+        case "delay":
+            # A delayed triggered ability belongs to no permanent ("return it at the beginning of the next end
+            # step", after the card that said so has left), so no hook can carry it. In the fifth pod Norin the
+            # Wary's return was forgotten on three turns out of three.
+            step, text = str(op.get("step", "")), str(op.get("text", "")).strip()
+            if step not in ("upkeep", "draw", "main1", "begin_combat", "end_combat", "main2", "end") or not text:
+                raise TableError("bad_delay", "A delayed trigger needs `text` and a `step`: upkeep, draw, main1, begin_combat, end_combat, main2 or end.")
+            whose = actor if op.get("whose") == "mine" else _seat(game, op["whose"]) if isinstance(op.get("whose"), int) else "any"
+            game.ledger.append({"kind": "delayed", "step": step, "whose": whose, "controller": actor, "text": text, "source": None})
+            told.public.append(f"{me} will have a trigger at the beginning of the next {step} step"
+                               + ("" if whose == "any" else f" of {_who(game, whose)}'s turn") + f": {text}")
         case "annotate":
             obj = _selected(game, dice, actor, op)[0]
             obj.annotations.append({"text": str(op.get("text", "")), "expires": op.get("expires")})
@@ -255,7 +266,7 @@ def apply_op(game: Game, dice: Dice, actor: int, op: dict, told: Told) -> None:
             raise TableError("unknown_op", f"Unknown mutation {kind!r}. See the tool description for the list.")
 
 
-_OPS = frozenset({"annotate", "attach", "clear_annotations", "commander_damage", "counters", "create_token", "damage", "designate",
+_OPS = frozenset({"annotate", "attach", "clear_annotations", "commander_damage", "counters", "create_token", "damage", "delay", "designate",
                   "discard_random", "draw", "eliminate", "end_turn", "extra_combat", "extra_turn", "face", "flip_coin", "life", "look",
                   "mill", "move", "phase", "remove_from_stack", "request_choice", "reveal", "roll", "set_controller", "shuffle",
                   "skip_step", "tap", "untap"})
