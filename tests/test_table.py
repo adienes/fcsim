@@ -335,7 +335,7 @@ def test_auditor_hooks_hold_a_step_until_their_source_leaves():
 def test_passing_until_a_step_skips_the_steps_between_and_stops_when_something_happens():
     table, runner = started()
     assert table.game.turn.step == "upkeep"
-    runner.step(0, "pass_priority", {"until": "upkeep"}, error="bad_step")
+    runner.step(0, "pass_priority", {"until": "sometime"}, error="bad_step")
     count = len(table.events)
     runner.step(0, "pass_priority", {"until": "main1"})
     runner.step(1, "pass_priority"), runner.step(2, "pass_priority")     # upkeep ends; Ann's draw step passes by itself
@@ -1254,3 +1254,18 @@ def test_combat_damage_to_a_planeswalker_takes_its_loyalty_and_the_arithmetic_co
     assert table.proposed_damage(0)["lines"] == [f"{n['A1']} deals 3 to {n['B1']}"]          # this raised, and took a real game down with it
     done = runner.step(0, "combat_damage", {"as_proposed": True})
     assert f"{n['A1']} deals 3 to {n['B1']}, which has 1 loyalty left." in done["log"] and oko.id in table.game.objects
+
+
+def test_a_script_written_with_its_operation_as_a_key_is_understood():
+    from fcsim.table import scripts
+    wizard = {"name": "Wizard", "types": "Creature — Wizard", "power": 0, "toughness": 1, "text": "Black."}
+    written = [{"life": {"who": "each_opponent", "delta": -2}}, {"counters": {"on": "each_creature_you_control", "kind": "+1/+1", "delta": 1}},
+               {"create_token": {"token": wizard, "count": 1}}, {"create_token": wizard}, {"draw": {"who": "you", "count": 1}}, {"untap": {"what": "self"}}]
+    meant = scripts.shaped(written)
+    assert scripts.problem(written) is not None and scripts.problem(meant) is None
+    assert meant[0] == {"op": "life", "who": "each_opponent", "delta": -2} and meant[3] == {"op": "create_token", "token": wizard}
+    assert scripts.shaped([{"op": "delay", "step": "end", "text": "x", "script": [{"move": {"what": "self", "to": "battlefield"}}]}])[0]["script"] == \
+        [{"op": "move", "what": "self", "to": "battlefield"}]
+    table, runner = started()
+    pass_until(table, runner, "main2")
+    assert "error" not in table.act(0, "pass_priority", {"until": "main2"})       # already there: a pass, not an error

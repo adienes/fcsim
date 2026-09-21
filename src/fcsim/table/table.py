@@ -314,14 +314,15 @@ class Table:
 
     def _do_pass_priority(self, game: Game, seat: int, args: dict):
         until = args.get("until")
-        if until is not None:
-            if until not in STEPS or STEPS.index(until) <= STEPS.index(game.turn.step):
-                raise TableError("bad_step", f"`until` must be a later step of this turn: one of "
-                                             f"{', '.join(STEPS[STEPS.index(game.turn.step) + 1:])}.")
+        if until is not None and until not in STEPS:
+            raise TableError("bad_step", f"`until` names a step: one of {', '.join(STEPS[STEPS.index(game.turn.step) + 1:])}.")
+        ahead = until is not None and STEPS.index(until) > STEPS.index(game.turn.step)
+        if ahead:
             game.seats[seat].yield_to = {"turn": game.turn.number, "step": until}
+        # `until` the step the game is already in, or one behind it, can only mean "pass": it is taken as one, not refused.
         turn.pass_priority(game, seat)
         return ops.Told(public=[f"{self._name(seat)} passes priority" + (f", and will keep passing until the {until} step "
-                                "unless something happens." if until else ".")])
+                                "unless something happens." if ahead else ".")])
 
     def _do_play_land(self, game: Game, seat: int, args: dict):
         obj = mutations.get(game, args["card"])
@@ -446,7 +447,7 @@ class Table:
             if source is None and waiting and waiting.get("source") in game.objects:
                 source = game.objects[waiting["source"]]  # the table knows what triggered: no need to say it again
         text = str(args.get("text") or (waiting or {}).get("text", ""))
-        script = args.get("script")
+        script = args["script"] = scripts.shaped(args.get("script"))
         if script is not None:
             # The player says what the ability does, in the few operations the table carries out itself, and nobody
             # has to be woken to resolve it. Anything else it needs is resolved by hand, as ever.
@@ -858,6 +859,7 @@ class Table:
                      "controller": hook.get("controller", source.controller)}
             if hook["kind"] == "event_trigger" and isinstance(hook.get("on"), dict):
                 entry["on"] = {k: v for k, v in hook["on"].items() if isinstance(v, (str, int, bool, list))}  # a pattern over facts: see `triggers`
+            hook["script"] = scripts.shaped(hook.get("script"))
             if hook.get("script") and hook["kind"] in ("event_trigger", "step_trigger") and scripts.problem(hook["script"]) is None:
                 # `scripted` is the driver's word that this script has earned its trust; without it the script is only kept.
                 entry |= {"script": hook["script"], "scripted": bool(hook.get("scripted"))}

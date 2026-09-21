@@ -32,6 +32,27 @@ _SHAPES = {  # operation -> the fields it must have, each with what it may hold
 }
 
 
+def shaped(script):
+    """A script with each operation's name under `op`. Players and auditors write {"life": {"who": ..., "delta": -2}}
+    as readily as {"op": "life", ...}: 38 of the first batch's 42 refused scripts were only that."""
+    if not isinstance(script, list):
+        return script
+    out = []
+    for step in script:
+        named = [k for k in step if k in _SHAPES] if isinstance(step, dict) and "op" not in step else []
+        if len(named) == 1:
+            inner = step[named[0]] if isinstance(step[named[0]], dict) and named[0] != "create_token" or \
+                (named[0] == "create_token" and isinstance(step[named[0]], dict) and "token" in step[named[0]]) else {}
+            rest = {k: v for k, v in step.items() if k != named[0]}
+            if named[0] == "create_token" and not inner and isinstance(step[named[0]], dict) and step[named[0]] and "token" not in rest:
+                rest["token"] = step[named[0]]  # {"create_token": {name, types, ...}}: the definition itself
+            step = {"op": named[0], **inner, **rest}
+        if isinstance(step, dict) and step.get("op") == "delay" and isinstance(step.get("script"), list):
+            step = {**step, "script": shaped(step["script"])}
+        out.append(step)
+    return out
+
+
 def problem(script) -> str | None:
     """Why this is not a script the table will run, or None if it is one."""
     if not isinstance(script, list) or not 1 <= len(script) <= 6:
