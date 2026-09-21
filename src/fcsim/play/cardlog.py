@@ -27,23 +27,26 @@ def card_record(game_dir: str | Path) -> dict:
         this_round = game.seats[game.turn.active].turns_taken
         opening, opened[0] = not opened[0], True  # the first look after the keeps: what is in hand is the opening hand
         for obj in game.objects.values():
-            if obj.token is not None or (obj.zone == "library" and obj.uid not in cards):
-                continue
+            if obj.token is not None or (obj.zone in ("library", "graveyard") and obj.uid not in cards):
+                continue  # still unseen, or milled: says nothing about the card
             before = where.get(obj.uid, "command" if obj.is_commander else "library")
             row = cards.setdefault(obj.uid, {"seat": obj.owner, "name": obj.name, "commander": obj.is_commander, "seen_round": None,
-                                             "played_round": None, "played_as": None, "times_cast": 0, "rounds_in_hand": 0, "_since": None})
+                                             "played_round": None, "played_as": None, "times_cast": 0, "rounds_in_hand": 0, "_since": None,
+                                             "seen_in": None})
             if obj.zone != before:
-                if obj.zone == "hand" and row["seen_round"] is None:
-                    row["seen_round"] = 0 if opening else this_round
+                if obj.zone in ("hand", "exile") and row["seen_round"] is None and (obj.zone == "hand" or before == "library"):
+                    # Exiled face up from the library is how an "exile the top card, you may play it" deck sees cards.
+                    row["seen_round"], row["seen_in"] = (0 if opening else this_round), obj.zone
                 if obj.zone == "hand":
                     row["_since"] = this_round
                 if before == "hand" and row["_since"] is not None:
                     row["rounds_in_hand"] += this_round - row["_since"]
                     row["_since"] = None
-                if obj.zone in ("stack", "battlefield") and before in ("hand", "command"):
+                if obj.zone in ("stack", "battlefield") and before in ("hand", "command", "exile"):
                     row["times_cast"] += obj.zone == "stack"
                     if row["played_round"] is None:
                         row["played_round"], row["played_as"] = this_round, "spell" if obj.zone == "stack" else "land or put into play"
+                        row["played_from"] = before
                 where[obj.uid] = obj.zone
             row["ended_in"] = obj.zone
 
@@ -55,7 +58,7 @@ def card_record(game_dir: str | Path) -> dict:
         if row["_since"] is not None:  # still in hand when the game stopped
             row["rounds_in_hand"] += (table.game.seats[row["seat"]].turns_taken or last_round) - row["_since"]
         if row["seen_round"] is None and not row["commander"]:
-            continue  # milled or exiled from the library unseen: says nothing about the card
+            continue
         seats[row["seat"]]["cards"].append({k: v for k, v in row.items() if not k.startswith("_") and k != "seat"})
     for seat in seats:
         seat["cards"].sort(key=lambda r: (r["seen_round"] is None, r["seen_round"] or 0, r["name"]))
@@ -67,6 +70,8 @@ def render(record: dict, seat: int) -> str:
     lines = [f"{record['seats'][seat]['name']}: cards seen in {record['rounds']} rounds (round 0 is the opening hand)",
              "  seen  played  held  ended in     card"]
     lines += [f"  {'-' if r['seen_round'] is None else r['seen_round']:>4}  {'-' if r['played_round'] is None else r['played_round']:>6}"
-              f"  {r['rounds_in_hand']:>4}  {r['ended_in']:<11}  {r['name']}" + (" (commander" + (f", cast {r['times_cast']}x)" if r["times_cast"] else ", never cast)")
+              f"  {r['rounds_in_hand']:>4}  {r['ended_in']:<11}  {r['name']}"
+              + (" (exiled from the library" + (", played from exile)" if r.get("played_from") == "exile" else ", never played)") if r["seen_in"] == "exile" else "")
+              + (" (commander" + (f", cast {r['times_cast']}x)" if r["times_cast"] else ", never cast)")
                                                                                if r["commander"] else "") for r in rows]
     return "\n".join(lines)

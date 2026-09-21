@@ -67,7 +67,9 @@ PLAYER_TOOLS = [
           "your turn including your end step.",
           {"until": {"type": "string", "enum": ["draw", "main1", "begin_combat", "declare_attackers", "declare_blockers",
                                                 "combat_damage", "end_combat", "main2", "end", "cleanup"]}}),
-    _tool("play_land", "Play a land from your hand.", {"card": _HANDLE, "enters": _ENTERS}, ("card",)),
+    _tool("play_land", "Play a land: from your hand, or from anywhere else an effect lets you play it (a card exiled with \"you may "
+          "play it\", the top of your library), in which case name that effect in `because`. It uses your land play for the turn.",
+          {"card": _HANDLE, "enters": _ENTERS, "because": {"type": "string"}}, ("card",)),
     _tool("cast", "Cast a spell: it goes on the stack and you keep priority. Set `resolves` to \"auto_permanent\" "
           "only for a permanent that enters with nothing to decide (no enters-tapped, counters, choices or copy); "
           "it then enters by itself when it resolves. Otherwise you will be woken to resolve it.",

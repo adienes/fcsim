@@ -300,11 +300,15 @@ class Table:
             raise TableError("not_now", "A land can be played only in your own main phase while the stack is empty (rule 305.1). "
                              + (f"It is your {game.turn.step} step: pass priority until \"main1\"." if game.turn.active == seat and not game.stack
                                 else "If an effect is putting this land onto the battlefield, move it there as part of resolving that effect."))
-        origin = ops._where(game, obj)
+        origin, because = ops._where(game, obj), str(args.get("because", "")).strip()
+        if not (obj.owner == seat and obj.zone == "hand") and not because and not self._replaying:
+            raise TableError("say_why", f"{obj.name} is in {origin}, not in your hand. If an effect lets you play it from there, "
+                                        "call play_land again with `because` naming that effect.")
         land = mutations.move(game, obj, "battlefield", controller=seat, enters=args.get("enters"))
         game.turn.land_plays += 1
         turn.acted(game)
-        told = ops.Told(public=[f"{self._name(seat)} plays {land.name} from {origin}."], show=[land.id])
+        told = ops.Told(public=[f"{self._name(seat)} plays {land.name} from {origin}" + (f" (allowed by: {because})" if because else "") + "."],
+                        show=[land.id])
         return told, lints
 
     def _do_cast(self, game: Game, seat: int, args: dict):

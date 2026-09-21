@@ -721,3 +721,14 @@ def test_a_card_that_is_not_an_instant_needs_a_reason_to_be_cast_off_its_timing(
     assert "error" not in cast(instant) and "error" not in cast(flash)             # an instant; a creature with flash, even with a spell on the stack
     assert "error" not in cast(creature, because="Vedalken Orrery gives my spells flash.")
     assert "(allowed by: Vedalken Orrery gives my spells flash.)" in table.events[-1]["public"][0]
+
+
+def test_a_land_can_be_played_from_exile_when_the_player_names_what_allows_it():
+    table, runner = started()
+    pass_until(table, runner, "main1")
+    runner.step(0, "act", {"because": "test: exile the top card, you may play it", "mutations": [{"op": "move", "obj": "@Island", "to": "exile"}]})
+    exiled = table.view(0)["seats"][0]["exile"][0]["handle"]
+    assert table.act(0, "play_land", {"card": exiled})["error"]["code"] == "say_why"
+    assert "error" not in table.act(0, "play_land", {"card": exiled, "because": "Exiled with Prosper: I may play it this turn."})
+    assert table.events[-1]["public"][0] == "Ann plays Island from Ann's exile (allowed by: Exiled with Prosper: I may play it this turn.)."
+    assert table.view(0)["turn"]["land_plays"] == 1
