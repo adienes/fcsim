@@ -9,3 +9,4 @@
 - 2026-09-21: studied 4 game(s): 6 new lesson(s), 0 validated, 1 dropped by the fact check; primer rewritten (740 words). See `reviews/2026-09-21-lessons-6.md`.
 - 2026-09-21: studied 3 game(s): 3 new lesson(s), 2 validated, 1 dropped by the fact check; primer rewritten (764 words). See `reviews/2026-09-21-lessons-7.md`.
 - 2026-09-21: studied 2 game(s): 1 new lesson(s), 1 validated, 1 dropped by the fact check; primer rewritten (657 words). See `reviews/2026-09-21-lessons-8.md`.
+- 2026-09-21: studied 2 game(s): 3 new lesson(s), 0 validated, 0 dropped by the fact check; primer rewritten (622 words). See `reviews/2026-09-21-lessons-9.md`.
