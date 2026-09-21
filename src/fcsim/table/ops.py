@@ -68,6 +68,10 @@ def apply_op(game: Game, dice: Dice, actor: int, op: dict, told: Told) -> None:
     match kind:
         case "move":
             for obj in _selected(game, dice, actor, op):
+                if op.get("to") == "stack" and obj.zone != "stack" and game.mechanics >= 6:
+                    raise TableError("cast_it", f"{_named(obj)} gets onto the stack by being cast, not moved: call `cast`, which works during a "
+                                                "resolution too (name the effect in `because`; say in the payment's `note` if its mana cost is not "
+                                                "paid). A card moved there has no spell to go with it and is in no zone anyone can see.")
                 before, origin, knew = _named(obj), _where(game, obj), {obj.owner} | obj.known_by
                 hidden_trip = obj.zone in HIDDEN_ZONES and op.get("to") in HIDDEN_ZONES and not op.get("reveal")
                 if op.get("reveal"):

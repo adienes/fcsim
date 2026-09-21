@@ -82,14 +82,18 @@ PLAYER_TOOLS = [
           {"card": _HANDLE, "enters": _ENTERS, "because": {"type": "string"}}, ("card",)),
     _tool("cast", "Cast a spell: it goes on the stack and you keep priority. Set `resolves` to \"auto_permanent\" "
           "only for a permanent that enters with nothing to decide (no enters-tapped, counters, choices or copy); "
-          "it then enters by itself when it resolves. Otherwise you will be woken to resolve it.",
+          "it then enters by itself when it resolves. Otherwise you will be woken to resolve it. An effect that has you cast a spell "
+          "while it resolves (cascade, \"you may cast it without paying its mana cost\") is a cast too: call this during the "
+          "resolution, with `because` naming the effect and the payment's `note` saying what is or is not paid; the spell waits on the "
+          "stack until you finish the resolution. Never move a card to the stack yourself.",
           {"card": _HANDLE, "targets": _TARGETS, "payment": _PAYMENT, "x": {"type": "integer"},
            "modes": {"type": "array", "items": {"type": "string"}},
            "text": {"type": "string", "description": "What the spell will do as cast, including how damage is divided."},
            "resolves": {"type": "string", "enum": ["auto_permanent"]}, "face_down": {"type": "boolean"},
            "because": {"type": "string", "description": "Needed only for a cast the table would not expect: a card from anywhere but "
                        "your hand or command zone (flashback, \"exiled with Prosper: I may play it this turn\"), or a card that is "
-                       "not an instant and has no flash cast outside your own main phase or with something on the stack."}}, ("card",)),
+                       "not an instant and has no flash cast outside your own main phase or with something on the stack, or any "
+                       "spell cast while something else is resolving."}}, ("card",)),
     _tool("activate", "Activate an ability of a permanent. A mana ability (`mana_ability`: true) does not use the "
           "stack; anything else goes on the stack and you keep priority.",
           {"source": _HANDLE, "ability": {"type": "string", "description": "The ability's text."}, "targets": _TARGETS,

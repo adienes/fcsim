@@ -18,6 +18,7 @@ SEAT_ZONES = ("library", "hand", "graveyard", "exile", "command")
 # and resolves by itself. 4: a creature with lethal damage, or no toughness left, dies before anyone gets priority. 5: where a
 # hook lists alternatives, they alone decide: the `event` beside them is not one more pattern that matches everything.
 # 6: a script a player gave for one trigger that does nothing when it resolves is no resolution; they resolve it by hand.
+# And a card is not moved to the stack by hand: it is cast, which the table now allows during a resolution.
 MECHANICS = 6
 
 

@@ -1384,3 +1384,26 @@ def test_a_script_its_player_gave_that_does_nothing_is_theirs_to_resolve_by_hand
     assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()
     old = Table(seats(), seed=5, first=0, mechanics=5)     # a journal from before this was the rule replays as it was played
     assert old.config["mechanics"] == 5
+
+
+def test_a_spell_cast_while_another_resolves_waits_on_the_stack_and_no_card_is_moved_there_by_hand():
+    """Goliath Daydreamer had Fire Lord Zuko's pilot cast Hex Magic from exile during its trigger. The table allowed no
+    cast then, so the card was moved to the stack by hand, with no spell to go with it, and was in no zone at all."""
+    table, runner = started()
+    pass_until(table, runner, "main1")
+    first, second = [name for name in hand(table, 0) if "spell" in name][:2]
+    runner.step(0, "cast", {"card": f"@{first}"})
+    for seat in (0, 1, 2):
+        runner.step(seat, "pass_priority")
+    assert table.expected() == [(0, "resolution")]
+    runner.step(0, "resolve", {"because": "test", "mutations": [{"op": "move", "obj": f"@{second}", "to": "stack"}]}, error="cast_it")
+    runner.step(0, "cast", {"card": f"@{second}"}, error="say_why")
+    runner.step(0, "cast", {"card": f"@{second}", "because": f"{first}: cast a spell from your hand without paying its mana cost",
+                            "payment": {"note": "without paying its mana cost"}})
+    assert table.expected() == [(0, "resolution")] and [i.source_name for i in table.game.stack] == [second]   # still resolving the first
+    runner.step(0, "finish_resolution")
+    assert table.expected() == [(0, "priority")] and [i.source_name for i in table.game.stack] == [second]
+    for seat in (0, 1, 2):
+        runner.step(seat, "pass_priority")
+    assert table.expected() == [(0, "resolution")] and table.game.resolution["item"].source_name == second
+    assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()

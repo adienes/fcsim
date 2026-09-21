@@ -21,7 +21,7 @@ _RENAMED = {"object": "obj", "stack_item": "item"}
 # Which kinds of control let a seat call which tools. Tools not listed need no pen.
 _ALLOWED = {
     "mulligan": ("setup",), "keep": ("setup",),
-    "pass_priority": ("priority",), "play_land": ("priority",), "cast": ("priority",),
+    "pass_priority": ("priority",), "play_land": ("priority",), "cast": ("priority", "resolution"),
     "activate": ("priority", "resolution", "held_step"), "act": ("priority", "held_step", "turn_action", "correction"),
     "add_trigger": ("priority", "triggers"), "skip_trigger": ("triggers",),
     "resolve": ("resolution",), "finish_resolution": ("resolution",),
@@ -365,6 +365,11 @@ class Table:
             # another player's exiled card by mistake and had to undo it by hand.
             raise TableError("say_why", f"{name} is in {origin}, not in your hand or your command zone. If an effect lets you cast it "
                                         "from there, call cast again with `because` naming that effect.")
+        if game.control.kind == "resolution" and not because:
+            # Cascade, Etali, Goliath Daydreamer: a spell cast while something resolves (rule 608.2g). The table had no way to
+            # say so, and a player moved the card to the stack by hand, where with no spell to go with it, it was in no zone at all.
+            raise TableError("say_why", f"You are resolving {game.resolution['item'].source_name}. If that is what has you cast {name} now, "
+                                        "call cast again with `because` naming it, and say in the payment's `note` what is or is not paid.")
         info = self.card_lookup(name) if self.card_lookup else None
         main_phase = game.turn.active == seat and game.turn.step in ("main1", "main2") and not game.stack
         if info and info.get("types") and not main_phase and not because and not self._replaying and not face_down \
