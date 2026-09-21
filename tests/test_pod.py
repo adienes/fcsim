@@ -1196,3 +1196,31 @@ def test_the_mulligan_question_counts_the_hand_for_the_pilot(database, tmp_path)
     hand = asked.split("YOUR HAND")[1].split("\n\n")[0]
     lands = sum(1 for line in hand.splitlines() if line.startswith("- [") and ("] Island" in line or "] Forest" in line))
     assert f"Counted for you: {lands} land(s)" in asked and "the free mulligan is there to be used" in asked
+
+
+def test_an_opponent_drawn_at_random_is_a_deck_project_and_every_project_that_played_can_be_taught(database, tmp_path, monkeypatch, capsys):
+    """The opponents' pilots met their decks as strangers every game, and a playtest is only as good as the table it is played at."""
+    from fcsim import cli
+    monkeypatch.chdir(tmp_path)
+    mine = decks(tmp_path)[0]
+    fetched, played, taught = [], [], []
+    monkeypatch.setattr(cli, "random_commanders", lambda count, seed=None, exclude=(): [{"name": "Pir, Imaginative Rascal", "slug": "pir-imaginative-rascal"}])
+    monkeypatch.setattr(cli, "average_deck", lambda name, page_slug=None: fetched.append(name) or "99 Forest\n\n1 Pir, Imaginative Rascal\n")
+    monkeypatch.setattr(cli, "play_pod", lambda given, *a, **k: played.append(list(given)) or {"directory": str(tmp_path), "stopped": "stubbed", "seats": []})
+    monkeypatch.setattr(cli, "CardDatabase", lambda: database)
+    monkeypatch.setattr(cli, "_stay_awake", lambda: None)
+    (tmp_path / "report.md").write_text("stub", encoding="utf-8")
+    for _ in range(2):
+        cli.main(["pod", str(mine), "--random-opponents", "1", "--seed", "3"])
+    project = tmp_path / "decks" / "pir-imaginative-rascal"
+    assert (project / "current.txt").is_file() and (project / "primer.md").is_file() and fetched == ["Pir, Imaginative Rascal"]   # drawn again, it plays what it has
+    assert [given[1] for given in played] == [str(Path("decks") / "pir-imaginative-rascal")] * 2
+    games = []
+    for index, sat in enumerate(([{"deck_id": "pir-imaginative-rascal"}, None], [None, {"deck_id": "pir-imaginative-rascal"}, {"deck_id": "nobody-kept-this"}])):
+        games.append(tmp_path / f"game-{index}")
+        games[-1].mkdir()
+        (games[-1] / "config.json").write_text(json.dumps({"projects": sat}), encoding="utf-8")
+    monkeypatch.setattr(cli, "learn_lessons", lambda project, game_dirs, runner, db: taught.append((project, list(game_dirs))) or {"added": 1})
+    monkeypatch.setattr(cli, "make_runner", lambda *a, **k: None)
+    assert cli.main(["deck", "learn", "all", *map(str, games)]) == 0
+    assert taught == [(str(Path("decks") / "pir-imaginative-rascal"), [str(g) for g in games])]      # from the games it sat in; a project that is gone teaches nobody

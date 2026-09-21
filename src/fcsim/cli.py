@@ -138,9 +138,11 @@ def main(argv: list[str] | None = None) -> int:
     begun.add_argument("--name", help="The project's name (default: the commander's)")
     begun.add_argument("--root", default="decks")
     taught = deck_actions.add_parser("learn", help="Study finished games for piloting lessons and rewrite the project's primer (uses the model)")
-    taught.add_argument("project", help="A deck project directory")
+    taught.add_argument("project", help="A deck project directory, or `all` for every deck project that played in these games: each learns "
+                                        "from its own games, three model calls a project")
     taught.add_argument("game_dirs", nargs="+")
-    taught.add_argument("--max-calls", type=int, default=6)
+    taught.add_argument("--root", default="decks", help="With `all`: where the projects are")
+    taught.add_argument("--max-calls", type=int, default=6, help="For each project")
     _model_options(taught, audited=False, cost_default=5.0)
     sampled = deck_actions.add_parser("random", help="Write EDHREC average decks for commanders drawn at random from its hundred most built")
     sampled.add_argument("--count", type=int, default=3)
@@ -301,6 +303,21 @@ def _deck(args: argparse.Namespace) -> int:
         print(f"Made {project.path}: current.txt, primer.md (empty until `fcsim deck learn`), lessons.jsonl, CHANGELOG.md.\n"
               f"Play it with `fcsim pod {project.path} ...`; its pilot is given the primer.")
         return 0
+    if args.action == "learn" and args.project == "all":
+        # The opponents' pilots meet their decks as strangers too, and a playtest is only as good as the table it is played
+        # at. Every project that sat in these games learns from the ones it sat in.
+        played: dict[str, list[str]] = {}
+        for game_dir in args.game_dirs:
+            with open(os.path.join(game_dir, "config.json"), encoding="utf-8") as config:
+                for project in json.load(config).get("projects") or []:
+                    if project and os.path.isfile(os.path.join(args.root, project["deck_id"], "deck.toml")):
+                        played.setdefault(os.path.join(args.root, project["deck_id"]), []).append(game_dir)
+        if not played:
+            raise ValueError(f"No deck project under {args.root} played in these games.")
+        for project, games in played.items():
+            runner = make_runner(args.backend, model=args.model, effort=args.effort, budget=_budget(args))
+            print(json.dumps(learn_lessons(project, games, runner, CardDatabase()), indent=2), flush=True)
+        return 0
     if args.action == "learn":
         runner = make_runner(args.backend, model=args.model, effort=args.effort, budget=_budget(args))
         result = learn_lessons(args.project, args.game_dirs, runner, CardDatabase())
@@ -444,13 +461,22 @@ def _pod(args: argparse.Namespace) -> int:
     elif args.random_opponents:
         from .workshop.project import deck_argument  # a deck given may be a project directory
         mine = tuple(entry.name for path in args.decks for entry in read_decklist(deck_argument(path)[0]).commanders)
+        from .workshop.project import DeckProject
         for pick in random_commanders(args.random_opponents, seed=args.seed, exclude=mine):
+            # An opponent is a deck project like any other, so that the next pilot of the same commander is given what the
+            # last ones learned. Drawn again, it plays the list and the primer it has.
             os.makedirs("decks", exist_ok=True)
-            target = os.path.join("decks", f"{pick['slug']}.txt")
-            with open(target, "w", encoding="utf-8") as out:
-                out.write(average_deck(pick["name"], page_slug=pick["slug"]))
-            print(f"opponent: {pick['name']} ({target})", flush=True)
-            args.decks.append(target)
+            target, project = os.path.join("decks", f"{pick['slug']}.txt"), os.path.join("decks", pick["slug"])
+            if not os.path.isfile(os.path.join(project, "current.txt")):
+                if not os.path.isfile(target):
+                    with open(target, "w", encoding="utf-8") as out:
+                        out.write(average_deck(pick["name"], page_slug=pick["slug"]))
+                try:
+                    DeckProject.init(target, CardDatabase(), root="decks", name=pick["slug"])
+                except ValueError:
+                    project = target  # a list the card data does not know in full is played as it is, and teaches nobody
+            print(f"opponent: {pick['name']} ({project})", flush=True)
+            args.decks.append(project)
     if not args.resume and not 2 <= len(args.decks) <= 4:
         raise ValueError("A pod is two to four decks.")
     budget = _budget(args)
