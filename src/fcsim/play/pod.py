@@ -8,6 +8,7 @@ triggers and correction wakes. Narrower watches, triage and disputes come later 
 
 from __future__ import annotations
 
+import difflib
 import json
 import random
 import re
@@ -22,7 +23,8 @@ from ..audit.auditor import card_reference
 from ..cards import CardDatabase, read_decklist, resolve, validate_deck
 from ..mcp import McpServer
 from ..rules import RulesReference
-from ..table import Table
+from ..table import Table, triggers
+from ..table.model import MECHANICS
 from ..table.ops import _named as ops_named
 from ..tools import SeatTools
 from . import rubric
@@ -210,7 +212,9 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
         if source is not None:
             hooked.add(source.id)
             from_ledger.setdefault(source.name, []).append(_relative(entry, source.controller))
-    known_hooks = {name: [_own_trigger(name, hook) for hook in hooks] for name, hooks in {**from_ledger, **known_hooks}.items()}
+    known_hooks = {name: _tidy([_own_trigger(name, hook) for hook in hooks]) for name, hooks in {**from_ledger, **known_hooks}.items()}
+    if earlier is not None and table.game.mechanics < MECHANICS:
+        table.upgrade()  # from here on the game is played under the table's current rules; the journal says so
     if earlier is not None:
         # A resumed game may have been hooked from an older description of a card than the library now holds.
         for obj in [table.game.objects[i] for i in table.game.battlefield]:
@@ -515,11 +519,14 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
             except ValueError as error:
                 record["hooks_error"] = str(error)
             fresh: dict[str, list[dict]] = {}
-            for entry in table.game.ledger:
+            described = {table.handles[None].resolve("c", h.get("handle")) for h in verdict["hooks"]}
+            for entry in table.game.ledger:  # the cards this audit described, as the ledger now holds them: one set each
                 source = table.game.objects.get(entry.get("source"))
-                if source is not None:
+                if source is not None and source.id in described:
                     hooked.add(source.id)
-                    fresh.setdefault(source.name, []).append(_own_trigger(source.name, _relative(entry, source.controller)))
+                    learned = _own_trigger(source.name, _relative(entry, source.controller))
+                    if learned not in fresh.setdefault(source.name, []):
+                        fresh[source.name].append(learned)
             known_hooks.update(fresh)
             if library and fresh:  # other games may be writing too: merge into what is on disk now, and swap the file in whole
                 on_disk = json.loads(library.read_text(encoding="utf-8")) if library.is_file() else {}
@@ -800,6 +807,25 @@ def _needs_nothing_written(card, known_hooks: dict) -> bool:
         if not all(part.strip().lower() in keywords for part in re.split(r"[,;]", line)):
             return False
     return True
+
+
+def _tidy(hooks: list[dict]) -> list[dict]:
+    """One hook for one ability. Descriptions of the same card written at different times differ in
+    wording and in detail; of those that would fire on the same thing, the first stands. A hook that is
+    text alone is dropped when a patterned one says much the same."""
+    kept: list[dict] = []
+    for hook in hooks:
+        on = hook.get("on") or {}
+        key = (hook.get("kind"), hook.get("step"), str(hook.get("whose", hook.get("seat"))),
+               *(str(triggers.pattern(on).get(k)) for k in ("event", "from", "to", "who", "self", "other", "kind", "sign")),
+               len(on.get("any_of") or [])) if on or hook.get("kind") != "event_trigger" else None
+        if key is not None and hook.get("kind") == "static":
+            key = (*key, hook.get("text"))
+        if key is None or not any(key == k for k, _ in kept):
+            kept.append((key, hook))
+    patterned = [h for k, h in kept if k is not None and h.get("kind") == "event_trigger"]
+    return [h for k, h in kept if k is not None or not any(
+        difflib.SequenceMatcher(None, str(h.get("text", "")).lower(), str(p.get("text", "")).lower()).ratio() > 0.5 for p in patterned)]
 
 
 def _own_trigger(name: str, hook: dict) -> dict:

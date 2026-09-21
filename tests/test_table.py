@@ -1038,3 +1038,45 @@ def test_a_delayed_trigger_comes_back_at_its_step_once():
     assert table.view(0)["waiting_triggers"][0]["text"].startswith(f"Return {norin} to the battlefield")
     assert not [e for e in table.game.ledger if e.get("kind") == "delayed"]                     # used up
     assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()
+
+
+def test_one_ability_is_one_hook_and_triggers_that_happen_together_are_one_item():
+    table, runner = started()
+    pass_until(table, runner, "main1")
+    norin, *attackers = [name for name in hand(table, 0) if "spell" in name][:4]
+    runner.step(0, "act", {"because": "test set-up", "mutations": [{"op": "move", "obj": f"@{name}", "to": "battlefield"} for name in (norin, *attackers)]})
+    handle = next(o["handle"] for o in table.view(None)["battlefield"] if o["name"] == norin)
+    table.apply_hooks([{"kind": "event_trigger", "handle": handle, "text": "When a creature attacks, exile Norin.", "on": {"event": "attacks", "who": "any"}}])
+    table.apply_hooks([{"kind": "event_trigger", "handle": handle, "text": "Whenever a player casts a spell or a creature attacks, exile Norin.",
+                        "on": {"who": "any", "any_of": [{"event": "cast"}, {"event": "attacks"}]}}])
+    assert [e["text"] for e in table.game.ledger] == ["Whenever a player casts a spell or a creature attacks, exile Norin."]   # described again: replaced
+    pass_until(table, runner, "begin_combat")
+    for seat in (0, 1, 2):
+        runner.step(seat, "pass_priority")
+    runner.step(0, "declare_attackers", {"attacks": [{"attacker": f"@{name}", "target": {"seat": 1}} for name in attackers]})
+    waiting = table.view(0)["waiting_triggers"]
+    assert len(waiting) == 1 and waiting[0]["count"] == 3 and waiting[0]["text"].endswith("[triggered 3 times]")      # three attackers, one item
+    runner.step(0, "add_trigger", {"pending": waiting[0]["handle"]})                                                   # one of them goes on the stack
+    assert table.view(0)["waiting_triggers"][0]["count"] == 2 and table.expected() == [(0, "triggers")]
+    runner.step(0, "skip_trigger", {"pending": table.view(0)["waiting_triggers"][0]["handle"], "because": "the first exiles Norin; the rest do nothing"})
+    assert table.view(0)["waiting_triggers"] == [] and len(table.view(0)["stack"]) == 1                                # two calls, not six
+    assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()
+
+
+def test_a_game_recorded_under_older_table_rules_is_upgraded_at_a_point_the_journal_records():
+    old = Table(seats(), seed=5, first=0, mechanics=1)
+    runner = ScriptedRunner(old)
+    for seat in range(3):
+        runner.step(seat, "keep")
+    pass_until(old, runner, "main1")
+    creature = spell_in_hand(old, 0)
+    runner.step(0, "act", {"because": "test", "mutations": [{"op": "move", "obj": f"@{creature}", "to": "battlefield"}]})
+    handle = next(o["handle"] for o in old.view(None)["battlefield"] if o["name"] == creature)
+    for _ in range(2):   # under the old rules a second description of the same permanent piled up beside the first
+        old.apply_hooks([{"kind": "event_trigger", "handle": handle, "text": f"A description written at audit {_}.", "on": {"event": "cast", "who": "any", "once": bool(_)}}])
+    assert len(old.game.ledger) == 2
+    old.upgrade()
+    old.apply_hooks([{"kind": "event_trigger", "handle": handle, "text": "The one description.", "on": {"event": "cast", "who": "any"}}])
+    assert [e["text"] for e in old.game.ledger] == ["The one description."] and old.game.mechanics >= 2
+    rebuilt = Table.replay(old.config, old.events)
+    assert rebuilt.game.to_dict() == old.game.to_dict() and old.config["mechanics"] == 1      # the journal, not the config, carries the change

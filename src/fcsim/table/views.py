@@ -139,7 +139,7 @@ def view(game: Game, viewer: int | None, handles: Handles, rev: int) -> dict:
         "questions": [{"handle": handles.of("q", r["id"]), "from": r["from"], "prompt": r["prompt"],
                        "options": r["options"], "answers": r["answers"], "waiting": r["waiting"]}
                       for r in game.requests],
-        "waiting_triggers": [{"handle": handles.of("t", t["id"]), "seat": t["seat"], "text": t["text"]}
+        "waiting_triggers": [{"handle": handles.of("t", t["id"]), "seat": t["seat"], "text": t["text"], **({"count": t["count"]} if t.get("count", 1) > 1 else {})}
                              for t in game.pending_triggers],
         "ledger": _ledger_view(game, handles), "rulings": game.rulings, "designations": game.designations,
         "winner": game.winner,

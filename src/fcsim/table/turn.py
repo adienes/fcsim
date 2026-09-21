@@ -240,18 +240,36 @@ def collect_triggers(game: Game) -> None:
     fits the pattern the auditor wrote down for Ganax (see `triggers`). A loose match is fine: the
     controller declines a trigger that does not really apply, and the auditor checks."""
     facts, game.facts = game.facts, []
-    fired: set[int] = set()  # hooks that say "one or more": once for everything that happened together
+    fired: set[int] = set()  # hooks that have triggered in this batch
+    grouped: dict[int, dict] = {}
     for fact in facts:
         for hook in game.ledger:
             on = hook.get("on") or {}
-            if hook.get("kind") != "event_trigger" or not on.get("event") or not triggers.matches(on, fact, hook):
+            if hook.get("kind") != "event_trigger" or not triggers.matches(on, fact, hook):
                 continue
-            if on.get("once"):
+            if not (on.get("event") or on.get("any_of")):
+                continue
+            cause = triggers.because(game, fact)
+            if on.get("once") or game.mechanics >= 2:
                 if id(hook) in fired:
+                    # The same ability triggering again for something that happened together: one waiting item with a
+                    # count, not an item each. Ten attackers made Norin the Wary's controller decline thirty offers.
+                    if not on.get("once"):
+                        grouped[id(hook)]["count"] += 1
+                        grouped[id(hook)]["causes"].append(cause)
+                        _describe(grouped[id(hook)], hook)
                     continue
                 fired.add(id(hook))
-            game.pending_triggers.append({"id": game.new_id(), "seat": hook["controller"], "source": hook.get("source"),
-                                          "text": f"{hook.get('text', '')} (because {triggers.because(game, fact)})"})
+            waiting = {"id": game.new_id(), "seat": hook["controller"], "source": hook.get("source"), "count": 1, "causes": [cause]}
+            _describe(waiting, hook)
+            grouped[id(hook)] = waiting
+            game.pending_triggers.append(waiting)
+
+
+def _describe(waiting: dict, hook: dict) -> None:
+    causes, count = waiting["causes"], waiting["count"]
+    shown = "; ".join(causes[:3]) + (f"; and {count - 3} more" if count > 3 else "")
+    waiting["text"] = f"{hook.get('text', '')} (because {shown})" + (f" [triggered {count} times]" if count > 1 else "")
 
 
 def grant_priority(game: Game, seat: int) -> None:
@@ -291,9 +309,16 @@ def _give_priority(game: Game, seat: int) -> None:
         pass_priority(game, seat)
 
 
-def trigger_handled(game: Game, pending_id: int) -> dict:
+def trigger_handled(game: Game, pending_id: int, *, one_of_them: bool = False) -> dict:
+    """A waiting trigger has been put on the stack or declined. With `one_of_them`, only one of a
+    group that triggered several times is used up; the rest go on waiting."""
     for index, trigger in enumerate(game.pending_triggers):
         if trigger["id"] == pending_id and trigger["seat"] in game.control.seats:
+            if one_of_them and trigger.get("count", 1) > 1:
+                trigger["count"] -= 1
+                trigger["causes"] = trigger["causes"][1:]
+                trigger["text"] = trigger["text"].split(" [triggered ")[0] + (f" [triggered {trigger['count']} more times]" if trigger["count"] > 1 else " [once more]")
+                return trigger
             del game.pending_triggers[index]
             if not any(t["seat"] == trigger["seat"] for t in game.pending_triggers):
                 grant_priority(game, game.control.detail["then"])

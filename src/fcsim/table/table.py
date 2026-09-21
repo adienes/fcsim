@@ -425,7 +425,7 @@ class Table:
         game.stack.append(item)
         if game.control.kind == "triggers":
             game.turn.passed = []  # something new is on the stack: everyone gets priority again, whoever passed before
-            turn.trigger_handled(game, args["pending"])
+            turn.trigger_handled(game, args["pending"], one_of_them=True)
         else:
             # Put on the stack by hand before the table asked: the matching queued trigger is this one.
             turn.collect_triggers(game)
@@ -673,6 +673,15 @@ class Table:
         """Let the game go on from an audit checkpoint."""
         return self._execute(None, "release", {})
 
+    def upgrade(self) -> dict:
+        """Bring a game recorded under older table rules up to the current ones, from this point on. The
+        change is an event in the journal, so a replay makes it at the same moment."""
+        return self._execute(None, "mechanics", {"to": MECHANICS})
+
+    def _do_mechanics(self, game: Game, seat: None, args: dict):
+        game.mechanics = int(args["to"])
+        return ops.Told(public=[f"The table's own rules are now version {args['to']}."])
+
     def _do_release(self, game: Game, seat: None, args: dict):
         turn.release(game)
 
@@ -785,6 +794,11 @@ class Table:
         told = ops.Told()
         if args.get("replace") is not None:
             game.ledger[:] = [e for e in game.ledger if e.get("source") != args["replace"]]
+        elif game.mechanics >= 2:
+            # A permanent is described as a whole: what is written for it now replaces what it had. Norin the Wary,
+            # described afresh each time it came back, had seven hooks for one ability.
+            described = {hook.get("source_id") for hook in args["hooks"]}
+            game.ledger[:] = [e for e in game.ledger if e.get("source") not in described]
         for hook in args["hooks"]:
             source = game.objects.get(hook.get("source_id"))
             if hook.get("kind") not in ("hold", "step_trigger", "event_trigger", "static") or source is None:

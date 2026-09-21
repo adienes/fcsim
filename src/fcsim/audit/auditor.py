@@ -103,7 +103,11 @@ turn"): then the text alone stands, and you check it after the fact as now.
 - static: a continuous effect that changes other objects, players or the rules while the \
 permanent stays: "other Zombie creatures you control get +1/+1", "spells cost {1} less", \
 "players can't gain life". Players will read it at the top of their view, so state it exactly.
-Write a hook's `text` in the card's own words ("At the beginning of your end step, you may ..."), never with a \
+One hook for one ability. An ability with two triggers ("whenever a player casts a spell or a \
+creature attacks") is one hook whose `on` lists the alternatives under `any_of`, each a pattern of \
+its own. What you write for a permanent replaces everything the ledger held for it, so give all of \
+its hooks together; a permanent marked "(hooks written)" needs none from you unless what it has is \
+wrong. Write a hook's `text` in the card's own words ("At the beginning of your end step, you may ..."), never with a \
 seat number or a player's name: it is kept and used again for other copies of the card, in other \
 games. Write no hook for a permanent that needs none.
 
@@ -185,7 +189,9 @@ VERDICT_SCHEMA = {
                     "type": {"type": "string"}, "not_type": {"type": "string"}, "kind": {"type": "string"},
                     "sign": {"type": "string", "enum": ["gain", "loss"]}, "combat": {"type": "boolean"}, "min": {"type": "integer"},
                     "nontoken": {"type": "boolean"}, "nonland": {"type": "boolean"}, "other": {"type": "boolean"},
-                    "self": {"type": "boolean"}, "once": {"type": "boolean"}}}}}},
+                    "self": {"type": "boolean"}, "once": {"type": "boolean"},
+                    "any_of": {"type": "array", "description": "Alternative patterns for one ability, each with its own `event` and filters.",
+                               "items": {"type": "object"}}}}}}},
         "disputes": {"type": "array", "items": {
             "type": "object", "additionalProperties": False, "required": ["event", "upheld", "answer"],
             "properties": {"event": {"type": "integer", "description": "The number of the event in which the player raised the dispute."},
@@ -277,7 +283,8 @@ def describe(view: dict, database: CardDatabase | None = None) -> str:
                 lines.append(f"  revealed in {zone}: " + ", ".join(o.get("name", "?") for o in seat[zone]["known"]))
         mine = [obj for obj in view["battlefield"] if obj.get("controller") == index]
         lines.append("  controls, in order of arrival:" if mine else "  controls nothing.")
-        lines += [f"    - {_object_line(obj, names, combat, database)}" for obj in mine]
+        described = {e.get("source") for e in view["ledger"] if e.get("kind") != "delayed"}
+        lines += [f"    - {_object_line(obj, names, combat, database)}" + (" (hooks written)" if obj["handle"] in described else "") for obj in mine]
     effects = [e for e in view["ledger"] if e.get("kind") == "static"]
     if effects:
         lines = ["CONTINUOUS EFFECTS IN PLAY (they change what is printed on other cards)",

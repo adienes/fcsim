@@ -89,7 +89,9 @@ PLAYER_TOOLS = [
           {"source": _HANDLE, "ability": {"type": "string", "description": "The ability's text."}, "targets": _TARGETS,
            "payment": _PAYMENT, "x": {"type": "integer"}, "mana_ability": {"type": "boolean"}}, ("source", "ability")),
     _tool("add_trigger", "Put a triggered ability on the stack. If the table is waiting for your triggers, name "
-          "which one with `pending` (a handle from `waiting_triggers`).",
+          "which one with `pending` (a handle from `waiting_triggers`). A waiting trigger that says it triggered several "
+          "times stands for that many: add_trigger puts one of them on the stack and the rest go on waiting, and "
+          "skip_trigger declines all that remain (say why: \"the first one exiles it; the rest do nothing\").",
           {"source": _HANDLE, "text": {"type": "string"}, "targets": _TARGETS, "pending": {"type": "string"}}),
     _tool("skip_trigger", "Decline a waiting trigger: a \"may\" you do not want, or one whose condition is false.",
           {"pending": {"type": "string"}, "because": {"type": "string"}}, ("pending", "because")),

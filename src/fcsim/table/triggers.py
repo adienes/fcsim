@@ -56,6 +56,17 @@ def pattern(on: dict) -> dict:
 
 
 def matches(on: dict, fact: dict, hook: dict) -> bool:
+    """Whether the fact fits the hook's pattern, or any of the alternatives it lists under `any_of`
+    ("whenever a player casts a spell or a creature attacks" is one ability, so one hook)."""
+    alternatives = [a for a in on.get("any_of") or [] if isinstance(a, dict)]
+    if alternatives:
+        shared = {k: v for k, v in on.items() if k != "any_of"}
+        return (bool(shared.get("event")) and _fits(shared, fact, hook)) or any(_fits({**{k: v for k, v in shared.items() if k != "event"}, **a}, fact, hook)
+                                                                             for a in alternatives)
+    return _fits(on, fact, hook)
+
+
+def _fits(on: dict, fact: dict, hook: dict) -> bool:
     want = pattern(on)
     if not want.get("event") or want["event"] != fact.get("event"):
         return False

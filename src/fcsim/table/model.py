@@ -13,7 +13,9 @@ HIDDEN_ZONES = ("library", "hand")
 SEAT_ZONES = ("library", "hand", "graveyard", "exile", "command")
 
 
-MECHANICS = 1  # 1: the rad counter trigger (rule 728.1) is the table's
+# 1: the rad counter trigger (rule 728.1) is the table's. 2: a permanent's hooks are one set, replaced when it is described
+# again, and identical triggers queued together are one item with a count.
+MECHANICS = 2
 
 
 class TableError(ValueError):
