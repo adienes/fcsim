@@ -949,6 +949,16 @@ def test_a_deck_project_teaches_its_pilot_what_earlier_games_learned(combat_game
     # the same games studied again are not a second witness; a different game is, and the lesson becomes validated
     again = Writes([{"lessons": [lesson]}, {"problems": []}])
     assert learn(project.path, [game], again, database, echo=lambda *_: None)["validated"] == 0
+    class Rambles(Writes):   # a primer over its limit is asked for once more, with the count
+        def ask(self, system, prompt, *, schema=None, **_):
+            if schema is None and "THE PRIMER YOU WROTE" not in prompt:
+                self.asked.append({"system": system, "prompt": prompt, "schema": None})
+                return Reply(data=None, text="## Gameplan\n" + "word " * 700, cost_usd=0.01, seconds=0.1, model="fake")
+            return super().ask(system, prompt, schema=schema)
+    long = Rambles([{"lessons": [lesson]}, {"problems": []}])
+    assert learn(project.path, [game], long, database, echo=lambda *_: None)["primer_words"] < 20 and "It is 702 words and may be 600" in long.asked[-1]["prompt"]
+    assert "Cast Talrand on four lands" in project.primer()
+
     # learned from another game it comes back in other words: whoever wrote it was shown the record and says which lesson it restates
     reworded = {"claim": "Get the commander down early, as soon as the fourth land is there.", "kind": "commander_timing", "cards": ["Talrand, Sky Summoner"],
                 "evidence": "another game", "same_as": "L001"}

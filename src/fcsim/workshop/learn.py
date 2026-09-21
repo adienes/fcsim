@@ -128,6 +128,13 @@ def learn(project_path: str | Path, game_dirs: list[str | Path], runner, databas
         "LESSONS RECORDED\n" + "\n".join(f"- [{'stale' if k.get('stale') else k['status']}, {len(k['games'])} game(s), {k['kind']}] {k['claim']} "
                                          f"(cards: {', '.join(k['cards']) or '-'})" for k in standing),
         "Write the primer."])).text.strip()
+    if len(primer.split()) > PRIMER_WORDS * 1.1:
+        # It is read at the start of every session of every game, so the limit is a cost and not a manner of speaking. Zuko's came
+        # back at 764 words against 600. Asked once more, with the count; what comes back is used whatever its length.
+        echo(f"the primer came back at {len(primer.split())} words; asking for {PRIMER_WORDS} ...")
+        primer = runner.ask(PRIMER_SYSTEM.format(words=PRIMER_WORDS), f"THE PRIMER YOU WROTE\n{primer}\n\nIt is {len(primer.split())} words and may be "
+                            f"{PRIMER_WORDS}. Cut it to that: keep opening hands and every lesson that is not marked as seen once, in full; shorten "
+                            "or drop what was seen once, and say nothing twice. Write the primer.").text.strip() or primer
     (project.path / "primer.md").write_text(primer + "\n", encoding="utf-8")
     note = project.path / "reviews" / f"{date.today()}-lessons-{len(list((project.path / 'reviews').glob('*-lessons-*'))) + 1}.md"
     note.parent.mkdir(exist_ok=True)
