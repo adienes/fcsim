@@ -9,8 +9,9 @@ from ..table import Table
 _HANDLE = {"type": "string", "description": "A handle from get_view, such as \"c12\"."}
 _TARGETS = {"type": "array", "description": "Each target is {\"object\": handle}, {\"seat\": number} or {\"stack_item\": handle}.",
             "items": {"type": "object"}}
-_PAYMENT = {"type": "object", "description": "How the cost is paid. `tap` lists permanents you control to tap for it; "
-            "`note` covers anything else (life paid, cards discarded, mana from a treasure).",
+_PAYMENT = {"type": "object", "description": "How the cost is paid. `tap` lists permanents you control to tap for it: the table "
+            "checks that they can make the cost, colors included, and refuses if not. `note` covers anything else (life paid, "
+            "cards discarded, a Treasure sacrificed, a cost reducer); with a note the table leaves the sums to the auditor.",
             "properties": {"tap": {"type": "array", "items": _HANDLE}, "note": {"type": "string"}}}
 _ENTERS = {"type": "object", "description": "How a permanent enters: {\"tapped\": true, \"counters\": {\"+1/+1\": 2}, "
            "\"attached_to\": handle}."}

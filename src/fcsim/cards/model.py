@@ -78,8 +78,11 @@ class Card:
     def table_facts(self) -> dict:
         """What the table is handed about a card: numbers and words it carries and does sums with,
         and never the text of what the card does."""
+        adds = [len(re.findall(r"\{", found)) for found in re.findall(r"Add ((?:\{[^}]+\})+)", self.text)]
+        words = [{"two": 2, "three": 3, "four": 4, "five": 5}[w.lower()] for w in re.findall(r"Add (two|three|four|five) mana", self.text, re.I)]
         return {"mana_value": self.mana_value, "types": sorted(self.types), "type_line": self.front.type_line,
-                "keywords": sorted(self.keywords), "power": self.front.power, "toughness": self.front.toughness}
+                "keywords": sorted(self.keywords), "power": self.front.power, "toughness": self.front.toughness,
+                "mana_cost": self.front.mana_cost, "produces": sorted(self.produced_mana), "mana_amount": max([1, *adds, *words])}
 
     @property
     def text(self) -> str:

@@ -277,6 +277,8 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
                           "THE TABLE (the codes in brackets are your handles; NOW is a creature's current power and toughness as "
                           "the auditor last worked it out: trust it unless the board has changed since)",
                           describe(view, database), "", "YOUR HAND", *(hand or ["(empty)"]),
+                          "", "BY THE TABLE'S COUNT your untapped mana sources can pay for: " + (", ".join(table.affordable(seat)) or "nothing")
+                          + " (one at a time; before any cost reducers, extra costs, Treasures or X).",
                           *(["", "YOUR TRIGGERS WAITING TO GO ON THE STACK", *waiting] if waiting else []),
                           *(["", "QUESTIONS FOR YOU", *asked] if asked else []),
                           *(["", "THE JUDGE'S RULINGS IN THIS GAME (they bind everyone, the auditor included)",

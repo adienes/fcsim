@@ -832,3 +832,28 @@ def test_the_auditors_stamp_a_commander_and_what_the_table_refuses():
     # A creature the table has no numbers for (a printed "*") in combat: no proposal, and the player deals damage by hand.
     table.game.turn.blockers.append({"blocker": next(o.id for o in table.game.objects.values() if o.name == n["B2"]), "attacker": table.game.turn.attackers[1]["attacker"]})
     assert table.proposed_damage(0) is None and table.act(0, "combat_damage", {"as_proposed": True})["error"]["code"] == "no_proposal"
+
+
+def test_the_table_checks_that_what_was_tapped_can_pay_the_cost():
+    told: dict[str, dict] = {"Island": {"types": ["Land"], "produces": ["U"], "mana_amount": 1, "mana_cost": ""}}
+    table = Table(seats(), seed=5, first=0, card_lookup=lambda name: told.get(name))
+    runner = ScriptedRunner(table)
+    for seat in range(3):
+        runner.step(seat, "keep")
+    pass_until(table, runner, "main1")
+    green, blue = [name for name in hand(table, 0) if "spell" in name][:2]
+    told[green] = {"types": ["Creature"], "keywords": [], "mana_cost": "{1}{G}", "produces": [], "mana_amount": 1}
+    told[blue] = {"types": ["Creature"], "keywords": [], "mana_cost": "{U}{U}", "produces": [], "mana_amount": 1}
+    for _ in range(2):
+        runner.step(0, "play_land", {"card": "@Island"})
+    assert table.affordable(0) == [blue]                                              # what the briefing will say
+    refused = table.act(0, "cast", {"card": next(c["handle"] for c in table.view(0)["seats"][0]["hand"]["cards"] if c["name"] == green),
+                                    "payment": {"tap": [c["handle"] for c in table.view(0)["battlefield"]]}})
+    assert refused["error"]["code"] == "cannot_pay" and "{1}{G} cannot be paid with what you tapped (U, U)" in refused["error"]["message"]
+    assert not any(c["tapped"] for c in table.view(0)["battlefield"])                 # a refused call changes nothing
+    runner.step(0, "cast", {"card": f"@{green}", "payment": {"tap": ["@Island", "@Island#2"], "note": "Chromatic Lantern makes my lands any color"}})
+    table2_mana = __import__("fcsim.table.mana", fromlist=["x"])
+    assert table2_mana.pays(table2_mana.parse_cost("{2}{G}{G}"), [{"colors": {"G"}, "amount": 1}, {"colors": {"B", "G"}, "amount": 1}, {"colors": {"C"}, "amount": 2}])
+    assert not table2_mana.pays(table2_mana.parse_cost("{2}{G}{G}"), [{"colors": {"B"}, "amount": 1}] * 2 + [{"colors": {"C"}, "amount": 1}, {"colors": {"G"}, "amount": 1}])
+    assert table2_mana.pays(table2_mana.parse_cost("{R/W}{X}", x=2), [{"colors": {"W"}, "amount": 1}, {"colors": {"C"}, "amount": 2}])
+    assert table2_mana.parse_cost("{Q}") is None

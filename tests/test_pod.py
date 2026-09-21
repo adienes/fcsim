@@ -115,8 +115,8 @@ class ScriptedSeat:
                 result = tool("act", because="A made-up effect returns my commander to the command zone.", mutations=[{"op": "move", "obj": mine, "to": "command"}])
             elif self.cast_commander and waiting_for == "priority" and view["turn"]["active"] == me and not view["stack"] \
                     and view["turn"]["step"] == "main1" and view["seats"][me]["command"] \
-                    and len([c for c in view["battlefield"] if c["controller"] == me and not c["tapped"]]) >= 4:
-                lands = [c["handle"] for c in view["battlefield"] if c["controller"] == me and not c["tapped"]][:4]
+                    and len([c for c in view["battlefield"] if c["controller"] == me and not c["tapped"]]) >= 4 + 2 * sum(view["seats"][me]["commander_casts"].values()):
+                lands = [c["handle"] for c in view["battlefield"] if c["controller"] == me and not c["tapped"]][:4 + 2 * sum(view["seats"][me]["commander_casts"].values())]
                 result = tool("cast", card=view["seats"][me]["command"][0]["handle"], payment={"tap": lands}, resolves="auto_permanent")
             elif self.with_trigger and waiting_for == "priority" and [i["kind"] for i in view["stack"]] == ["spell"]:
                 self.with_trigger = False
@@ -684,8 +684,8 @@ def test_a_card_the_auditor_has_seen_gets_its_hooks_the_moment_it_comes_back(dat
 
     budget = Budget(max_calls=500)
     seats = [ScriptedSeat(budget, cast_commander=True, blinks=True), ScriptedSeat(budget), ScriptedSeat(budget)]
-    report = play_pod(decks(tmp_path), seats, HooksOnce([OK] * 150, budget), database, cycles=6, seed=4, out_root=tmp_path / "games", echo=lambda *_: None)
-    assert report["stopped"] is None and report["standings"][0]["commander_casts"] == {"Talrand, Sky Summoner": 2}
+    report = play_pod(decks(tmp_path), seats, HooksOnce([OK] * 150, budget), database, cycles=7, seed=4, out_root=tmp_path / "games", echo=lambda *_: None)
+    assert report["stopped"] is None and report["standings"][0]["commander_casts"] == {"Talrand, Sky Summoner": 2}   # the second time with its tax paid
     events = [json.loads(line) for line in (Path(report["directory"]) / "events.jsonl").read_text().splitlines()]
     written = [e for e in events if e["tool"] == "hooks" and any("Talrand, Sky Summoner: Whenever you cast" in line for line in e["public"])]
     recast = [e for e in events if e["tool"] == "cast" and e["seat"] == 0][1]

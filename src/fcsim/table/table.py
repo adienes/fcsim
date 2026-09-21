@@ -10,7 +10,7 @@ from __future__ import annotations
 import copy
 from collections.abc import Callable
 
-from . import mechanics, mutations, ops, turn
+from . import mana, mechanics, mutations, ops, turn
 from .model import STEPS, Dice, Game, Obj, Seat, StackItem, TableError
 from .views import Handles, obj_view, view
 
@@ -333,6 +333,14 @@ class Table:
                                         f"(it is the {game.turn.step} step of {game.seats[game.turn.active].name}'s turn"
                                         + (", with something on the stack" if game.stack else "") + "). If an effect lets you cast it "
                                         "now, call cast again with `because` naming that effect.")
+        payment = args.get("payment") or {}
+        if info and payment.get("tap") and not payment.get("note") and not self._replaying and not face_down:
+            tax = 2 * game.seats[seat].commander_casts.get(name, 0) if from_command else 0
+            problem = mana.payment_problem(game, seat, info, payment["tap"], x=int(args.get("x") or 0), tax=tax, lookup=self.card_lookup)
+            if problem:
+                # In the third pod {2}{G}{G} was paid with Swamp, Swamp, Rogue's Passage and a Forest, and the auditor found it a turn later.
+                raise TableError("cannot_pay", f"{name}: {problem} Tap sources that can make it; or if something else pays or "
+                                               "changes the cost (a Treasure you sacrifice, a cost reducer), say what in the payment's `note`.")
         paid = self._pay(game, seat, args.get("payment"))
         lints = []
         tapped = len((args.get("payment") or {}).get("tap", []))
@@ -541,6 +549,16 @@ class Table:
         if game.control.kind == "turn_action":  # unless a follow-up ended the game or asked a question
             turn.turn_action_done(game)
         return told
+
+    def affordable(self, seat: int) -> list[str]:
+        """The cards in `seat`'s hand and command zone that its untapped mana sources could pay for now."""
+        if not self.card_lookup:
+            return []
+        game, me = self.game, self.game.seats[seat]
+        cards = [(game.objects[i].name, self.card_lookup(game.objects[i].name), 0) for i in me.hand]
+        cards += [(game.objects[i].name, self.card_lookup(game.objects[i].name), 2 * me.commander_casts.get(game.objects[i].name, 0))
+                  for i in me.command]
+        return mana.affordable(game, seat, cards, self.card_lookup)
 
     def proposed_damage(self, viewer: int | None) -> dict | None:
         """This combat damage step as the table works it out, in `viewer`'s handles, with a line of

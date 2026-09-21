@@ -79,7 +79,10 @@ the way past it when a card says otherwise:
 | Attacking: tapped, defender, arrived this turn without haste | refused |
 | Blocking: tapped blocker; a flier blocked without flying or reach | refused |
 | Combat damage: first strike and double strike steps, trample, deathtouch, lifelink, indestructible, lethal damage, a commander's move to the command zone | worked out by the table from printed numbers, counters and the auditor's stamps (which now carry keywords); offered to the attacker as `as_proposed`, and applied without a wake when nothing has happened since the attack that could change it |
-| Still the agents' and the auditor's: everything a card's text says | mana and costs, menace, the legend rule and zero toughness are next |
+| Paying for a spell: the permanents tapped must be able to make the cost, colors, X and commander tax included | refused, unless the payment's `note` says what else pays. The third pod paid {2}{G}{G} with one green source; the auditor found it a turn later |
+| What a player can afford | the briefing lists the cards its untapped mana sources can pay for, so no model counts lands |
+| Triggers and holds of a card any auditor has described before | on the ledger from the moment the card arrives, from a hook library kept across games (R12) |
+| Still the agents' and the auditor's: everything a card's text says | ability costs, menace, the legend rule and zero toughness are next |
 
 ## Second pod: what the new driver did
 
