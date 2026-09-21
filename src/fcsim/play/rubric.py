@@ -44,7 +44,9 @@ def measure(game_dir: str | Path) -> dict:
         last.update(turn=number, round=this_round)
         life_at_start.setdefault(number, [s.life for s in game.seats])
         turn = turns.setdefault(number, {"seat": active, "round": this_round, "land": False, "spells": 0, "abilities": 0,
-                                         "attackers": 0, "actions": 0})
+                                         "attackers": 0, "actions": 0, "lands_played": [], "cast": [],
+                                         "lands_at_start": sum(1 for i in game.battlefield if game.objects[i].controller == active
+                                                               and "Land" in game.objects[i].type_line.split("—")[0])})
         seat, tool, args = event["seat"], event["tool"], event["args"]
         if seat is None:
             return
@@ -68,10 +70,13 @@ def measure(game_dir: str | Path) -> dict:
                 seats[seat]["responses"] += 1  # at instant speed: on another's turn, or in answer to another's spell
             if tool == "cast":
                 seats[seat]["spells"] += 1
+                if seat == active and args.get("card") in game.objects:
+                    turn["cast"].append(game.objects[args["card"]].name)
             if seat == active and tool != "add_trigger":
                 turn["spells" if tool == "cast" else "abilities"] += 1
         elif tool == "play_land" and seat == active:
             turn["land"] = True
+            turn["lands_played"] += [game.objects[args["card"]].name] if args.get("card") in game.objects else []
         elif tool == "declare_attackers":
             turn["attackers"] += len(args.get("attacks", []))
             seats[seat]["attackers"] += len(args.get("attacks", []))
@@ -101,6 +106,7 @@ def measure(game_dir: str | Path) -> dict:
                    status=game.seats[index].status, left_in_round=out.get(index, {}).get("round"),
                    rounds_sat_out=rounds - out[index]["round"] if index in out else 0)
     return {"directory": str(directory.path), "seats": seats, "rounds": rounds, "over": over,
+            "turns": [{"turn": number, **row} for number, row in sorted(turns.items())],
             "winner": names[game.winner] if game.winner is not None else None,
             "scores": _scores(names, seats, turns, pressure, out, rounds, over, _STARTING_LIFE)}
 
@@ -161,6 +167,14 @@ def _scores(names: list[str], seats: list[dict], turns: dict, pressure: dict, ou
           else "every seat dealt damage or drew the table's attention; whether each deck did its thing is for a reader to judge",
           "a seat that neither hurt anyone nor was ever worth attacking or targeting probably never mattered")
     return scores
+
+
+def render_turns(result: dict, seat: int) -> str:
+    """One seat's own turns as the log has them: the facts a reviewer most easily gets wrong."""
+    lines = [f"{result['seats'][seat]['name']}'s own turns (lands it controlled as the turn began; the land it played; the spells it cast)"]
+    lines += [f"  round {t['round']} (table turn {t['turn']}): {t['lands_at_start']} lands; played {', '.join(t['lands_played']) or 'no land'}; "
+              f"cast {', '.join(t['cast']) or 'nothing'}; attacked with {t['attackers']}" for t in result["turns"] if t["seat"] == seat]
+    return "\n".join(lines)
 
 
 def render_markdown(result: dict) -> str:

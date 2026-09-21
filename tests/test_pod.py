@@ -531,20 +531,29 @@ def test_a_deck_is_reviewed_over_its_games_and_only_sound_swaps_are_offered(comb
                 {"cut": "Island", "add": "Opt", "reason": "-", "evidence": "-", "expected_effect": "-"},
                 {"cut": "Island", "add": "Conterspell of Doom", "reason": "-", "evidence": "-", "expected_effect": "-"},
                 {"cut": "Island", "add": "Time Warp", "reason": "One too many.", "evidence": "-", "expected_effect": "-"}]
-    reviewer = FakeRunner([{"review": "## What happened\nLands.", "causes": {"deck": "All lands.", "pilot": "Fine.", "pod": "Quiet.", "variance": "None."},
-                            "lessons": ["Cast the commander sooner."], "swaps": proposed}])
+    draft = {"review": "## What happened\nStuck on two lands all game.", "causes": {"deck": "All lands.", "pilot": "Fine.", "pod": "Quiet.", "variance": "None."},
+             "lessons": ["Cast the commander sooner."], "swaps": proposed}
+    wrong = {"claim": "Stuck on two lands all game.", "record": "The turn-by-turn lines show a land played on every turn."}
+    reviewer = FakeRunner([draft, {"problems": [wrong]}, {**draft, "review": "## What happened\nLands, one a turn."}])
     result = review(deck, [report["directory"]], reviewer, database, swaps=6, echo=lambda *_: None)
+    # The draft is checked against the record by a second pass, and written again when a claim does not hold.
+    assert result["corrected"] == [wrong] and [a["schema"]["required"][0] for a in reviewer.asked] == ["review", "problems", "review"]
+    assert "THE REVIEW TO CHECK" in reviewer.asked[1]["prompt"] and "Stuck on two lands" in reviewer.asked[1]["prompt"]
+    assert "A FACT-CHECK OF THAT DRAFT FOUND\n- You wrote: Stuck on two lands all game." in reviewer.asked[2]["prompt"]
     assert [(s["cut"], s["add"]) for s in result["swaps"]] == [("Island", "Counterspell")]          # the Oracle name; the seventh was over the limit
     assert len(result["refused"]) == 5 and "outside the commander's color identity" in result["refused"][0]
     assert "not legal in Commander" in result["refused"][1] and "it is the commander" in result["refused"][2]
     assert "already in the list" in result["refused"][3] and "no card named" in result["refused"][4]
     asked = reviewer.asked[0]
     assert "not the strongest deck" in asked["system"] and "6 at most" in asked["system"]
-    for heading in ("THE LIST", "MEASURED FROM THE LOG", "WHAT HAPPENED TO EACH CARD THE PILOT SAW", "THE GAME, ROUND BY ROUND",
+    assert "round 4 (table turn 12): 3 lands; played Island; cast Talrand, Sky Summoner; attacked with 0" in asked["prompt"]
+    assert "instants with mana value 2 or less: 1 (Opt)" in asked["prompt"] and "100 cards; 98 lands" in asked["prompt"]
+    for heading in ("THE LIST", "THE LIST IN NUMBERS", "THIS SEAT TURN BY TURN", "MEASURED FROM THE LOG", "WHAT HAPPENED TO EACH CARD THE PILOT SAW", "THE GAME, ROUND BY ROUND",
                     "WHAT THE PILOT SAID IT WAS DOING", "RULES FINDINGS ABOUT THIS SEAT", "this deck sat at seat 0 as Talrand"):
         assert heading in asked["prompt"]
     written = Path(result["review"])
     assert written == tmp_path / "talrand.review.md" and "- [ ] cut **Island**, add **Counterspell**: No interaction." in written.read_text()
+    assert "Lands, one a turn." in written.read_text() and "## Fact check" in written.read_text() and "- Draft: Stuck on two lands" in written.read_text()
     assert apply(deck, written, database)[1] == []                                                  # nothing is ticked yet
     written.write_text(written.read_text().replace("- [ ] cut **Island**", "- [x] cut **Island**"))
     assert main(["deck", "apply", str(deck), str(written), "-o", str(tmp_path / "next.txt")]) == 0
@@ -554,6 +563,9 @@ def test_a_deck_is_reviewed_over_its_games_and_only_sound_swaps_are_offered(comb
         other = tmp_path / "pirless.txt"
         other.write_text("99 Forest\n\n1 Wilson, Refined Grizzly\n", encoding="utf-8")
         review(other, [report["directory"]], reviewer, database, echo=lambda *_: None)
+    sound = FakeRunner([draft, {"problems": []}])
+    assert review(deck, [report["directory"]], sound, database, out=tmp_path / "second.md", echo=lambda *_: None)["corrected"] == []
+    assert "found nothing to correct" in (tmp_path / "second.md").read_text() and len(sound.asked) == 2
 
 
 def test_opening_hands_are_decided_together_and_a_game_always_starts(database, tmp_path):

@@ -18,7 +18,7 @@ from ..play.cardlog import render as render_cards
 from ..play.gamedir import GameDirectory
 from ..play.goldfish import _deck_reference
 from ..play.narrative import _accounts_in
-from ..play.rubric import measure
+from ..play.rubric import measure, render_turns
 from ..play.rubric import render as render_rubric
 from .static import analyze
 
@@ -52,8 +52,29 @@ round, what happened), and the effect you expect on the games. Keep the deck's i
 cards that did not pull their weight for this plan, not the pet cards that make it this deck. \
 Never cut a commander.
 
+Facts. The sections headed MEASURED, THIS SEAT TURN BY TURN, WHAT HAPPENED TO EACH CARD and THE \
+LIST IN NUMBERS are computed from the log and the card data. Never state anything they contradict, \
+and do not repeat a claim from a round account or a pilot's note that they contradict: say how many \
+lands the deck had from the turn-by-turn lines, and count cards from the list, not from memory. \
+Your review is checked against them before the owner sees it.
+
 Answer in the required JSON form. `review` is Markdown for the deck's owner, 300 to 600 words, \
 with the headings: What happened, The deck, The pilot, The pod and the draws, What to watch next."""
+
+CHECK_SYSTEM = """\
+You are the fact-checker for a review of a Commander deck's games. You are given everything the \
+reviewer was given, and the review it wrote. Find every statement of fact in the review, its \
+causes, its lessons and its swaps that the record contradicts or does not support: how many lands \
+the deck had and when, what was cast or held and when, life totals, who did what, how many cards \
+of some kind the list contains, what a card does. The sections computed from the log (MEASURED, \
+THIS SEAT TURN BY TURN, WHAT HAPPENED TO EACH CARD, THE LIST IN NUMBERS) and the card texts in THE \
+LIST outrank the round accounts and the pilot's notes. Judgements and recommendations are not \
+your business: only facts. For each problem quote the claim and say what the record shows. An \
+empty list is the right answer when the review is sound."""
+
+CHECK_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["problems"], "properties": {"problems": {"type": "array", "items": {
+    "type": "object", "additionalProperties": False, "required": ["claim", "record"],
+    "properties": {"claim": {"type": "string"}, "record": {"type": "string"}}}}}}
 
 SCHEMA = {
     "type": "object", "additionalProperties": False, "required": ["review", "causes", "lessons", "swaps"],
@@ -105,7 +126,8 @@ def _game_material(game_dir: Path, seat: int) -> str:
     return "\n\n".join([
         f"GAME {directory.path.name}: this deck sat at seat {seat} as {names[seat]}; the pod was {', '.join(names)}.",
         *([f"THE OWNER'S OWN REACTION TO THIS GAME (the strongest evidence you have)\n{feedback.read_text(encoding='utf-8').strip()}"] if feedback.is_file() else []),
-        "MEASURED FROM THE LOG\n" + render_rubric(measure(directory.path)),
+        "MEASURED FROM THE LOG\n" + render_rubric(scored := measure(directory.path)),
+        "THIS SEAT TURN BY TURN\n" + render_turns(scored, seat),
         "WHAT HAPPENED TO EACH CARD THE PILOT SAW\n" + render_cards(card_record(directory.path), seat),
         "THE GAME, ROUND BY ROUND\n" + story,
         "WHAT THE PILOT SAID IT WAS DOING\n" + ("\n".join(said) or "(nothing recorded)"),
@@ -140,8 +162,23 @@ def check_swaps(swaps: list[dict], deck, database: CardDatabase) -> tuple[list[d
     return good, refused
 
 
+def _list_numbers(deck) -> str:
+    """Counts a reviewer would otherwise make from memory, and get wrong."""
+    cards = [card for card, count in deck.cards for _ in range(count)]
+    spells = [card for card in cards if not card.is_land]
+
+    def named(found: list) -> str:
+        return f"{len(found)}" + (f" ({', '.join(card.name for card in found)})" if 0 < len(found) <= 24 else "")
+    lines = [f"{deck.size} cards; {sum(1 for card in cards if card.is_land)} lands; {len(spells)} nonland cards in the 99",
+             "nonland cards by mana value: " + ", ".join(f"{value}: {sum(1 for c in spells if min(int(c.mana_value), 7) == value)}" for value in range(8)) + " (7 means 7 or more)"]
+    lines += [f"{kind}s: {named([c for c in spells if kind in c.types])}" for kind in ("Instant", "Sorcery", "Creature", "Artifact", "Enchantment", "Planeswalker")]
+    lines.append("instants with mana value 2 or less: " + named([c for c in spells if "Instant" in c.types and c.mana_value <= 2]))
+    lines.append("nonland cards with mana value 5 or more: " + named([c for c in spells if c.mana_value >= 5]))
+    return "\n".join(lines)
+
+
 def review(deck_path: str | Path, game_dirs: list[str | Path], runner, database: CardDatabase, *, swaps: int = 5,
-           out: str | Path | None = None, echo=print) -> dict:
+           out: str | Path | None = None, check: bool = True, echo=print) -> dict:
     """Review the deck at `deck_path` over the games it played in, and write the review with its
     proposed swaps as checkboxes. The default place is beside the list: `<list>.review.md`."""
     deck_path = Path(deck_path)
@@ -160,12 +197,27 @@ def review(deck_path: str | Path, game_dirs: list[str | Path], runner, database:
     shape = (f"{analysis['lands']['lands']} lands; average mana value {analysis['average_mana_value']}; "
              + ", ".join(f"{role} {row['count']}" for role, row in analysis["roles"].items()))
     echo(f"reviewing {deck_path.name} over {len(games)} game(s) ...")
-    reply = runner.ask(SYSTEM.format(swaps=swaps), "\n\n".join([
+    materials = "\n\n".join([
         f"THE DECK: {' + '.join(card.name for card in deck.commanders)} ({deck_path.name})\n{shape}",
+        "THE LIST IN NUMBERS\n" + _list_numbers(deck),
         "THE LIST (count, name, cost, type, text)\n" + _deck_reference(deck, database),
-        *("=" * 60 + "\n" + _game_material(path, seat) for path, seat in games),
-        f"Review the deck. At most {swaps} swaps."]), schema=SCHEMA)
-    result = reply.data
+        *("=" * 60 + "\n" + _game_material(path, seat) for path, seat in games)])
+    reply = runner.ask(SYSTEM.format(swaps=swaps), f"{materials}\n\nReview the deck. At most {swaps} swaps.", schema=SCHEMA)
+    result, seconds, corrected = reply.data, reply.seconds, []
+    if check:
+        # A reviewer reads thousands of lines and then writes from its impression of them. In its first
+        # real reviews it invented a land stall and miscounted the list; both read as perfectly plausible.
+        echo("checking the review's facts against the record ...")
+        checked = runner.ask(CHECK_SYSTEM, f"{materials}\n\n{'=' * 60}\nTHE REVIEW TO CHECK\n{json.dumps(result, indent=1, ensure_ascii=False)}",
+                             schema=CHECK_SCHEMA)
+        corrected, seconds = list((checked.data or {}).get("problems") or []), seconds + checked.seconds
+        if corrected:
+            echo(f"{len(corrected)} claim(s) did not hold; asking for the review again ...")
+            again = runner.ask(SYSTEM.format(swaps=swaps), f"{materials}\n\n{'=' * 60}\nYOUR FIRST DRAFT\n{json.dumps(result, indent=1, ensure_ascii=False)}"
+                               "\n\nA FACT-CHECK OF THAT DRAFT FOUND\n" + "\n".join(f"- You wrote: {p['claim']} The record: {p['record']}" for p in corrected)
+                               + f"\n\nWrite the review again with these corrected. Drop or rethink any conclusion, lesson or swap that rested on a "
+                               f"false claim. At most {swaps} swaps.", schema=SCHEMA)
+            result, seconds = again.data, seconds + again.seconds
     good, refused = check_swaps(result.get("swaps", [])[:swaps], deck, database)
     lines = [f"# Review: {' + '.join(card.name for card in deck.commanders)}", "",
              f"List `{deck_path}`; games: " + ", ".join(f"`{path.name}`" for path, _ in games) + ".", "", result["review"].strip(), "",
@@ -177,10 +229,13 @@ def review(deck_path: str | Path, game_dirs: list[str | Path], runner, database:
     lines += [f"- [ ] cut **{s['cut']}**, add **{s['add']}**: {s['reason']} _Evidence: {s['evidence']} Expected: {s['expected_effect']}_" for s in good]
     lines += ["- none proposed"] if not good else []
     lines += ["", "Refused by the card data:", *(f"- {line}" for line in refused)] if refused else []
+    lines += ["", "## Fact check", "", "A second pass checked the first draft against the log and the list, and the review above was rewritten "
+              "with these corrected:", "", *(f"- Draft: {p['claim']} Record: {p['record']}" for p in corrected)] if corrected else \
+        ["", "## Fact check", "", "A second pass checked this review against the log and the list and found nothing to correct."] if check else []
     path = Path(out) if out else deck_path.with_suffix(".review.md")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return {"review": str(path), "swaps": good, "refused": refused, "causes": result["causes"], "lessons": result.get("lessons", []),
-            "seconds": round(reply.seconds, 1)}
+            "corrected": corrected, "seconds": round(seconds, 1)}
 
 
 _SWAP = re.compile(r"^- \[(?P<tick>[ xX])\] cut \*\*(?P<cut>.+?)\*\*, add \*\*(?P<add>.+?)\*\*")

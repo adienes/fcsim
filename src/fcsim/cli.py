@@ -154,6 +154,7 @@ def main(argv: list[str] | None = None) -> int:
     reviewed.add_argument("game_dirs", nargs="+", help="Games it played in; run `fcsim summarize` on them first for a better review")
     reviewed.add_argument("--swaps", type=int, default=5, help="The most swaps to propose")
     reviewed.add_argument("--out", help="Where to write the review (default: beside the list, as <list>.review.md)")
+    reviewed.add_argument("--no-check", action="store_true", help="Skip the second pass that checks the review's facts against the record")
     reviewed.add_argument("--max-calls", type=int, default=5, help="Hard limit on model calls for this run")
     _model_options(reviewed, audited=False, cost_default=5.0)
 
@@ -378,7 +379,7 @@ def _status(args: argparse.Namespace) -> int:
 
 def _review(args: argparse.Namespace) -> int:
     runner = make_runner(args.backend, model=args.model, effort=args.effort, budget=_budget(args))
-    result = review_deck(args.deck, args.game_dirs, runner, CardDatabase(), swaps=args.swaps, out=args.out)
+    result = review_deck(args.deck, args.game_dirs, runner, CardDatabase(), swaps=args.swaps, out=args.out, check=not args.no_check)
     with open(result["review"], encoding="utf-8") as text:
         print("\n" + text.read())
     print(f"Written to {result['review']}")
