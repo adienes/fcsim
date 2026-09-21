@@ -494,14 +494,14 @@ class Table:
     def _do_act(self, game: Game, seat: int, args: dict):
         if not args.get("because"):
             raise TableError("because_required", "`act` needs a `because`: the rule or effect you are carrying out.")
-        told = ops.apply_batch(game, self.dice, seat, args.get("mutations"))
+        told = ops.apply_batch(game, self.dice, seat, args.get("mutations"), replaying=self._replaying)
         told.public.insert(0, f"{self._name(seat)} acts: {args['because']}")
         if game.control.kind == "priority" and seat in game.control.seats:
             turn.acted(game)
         return told
 
     def _do_resolve(self, game: Game, seat: int, args: dict):
-        told = ops.apply_batch(game, self.dice, seat, args.get("mutations"))
+        told = ops.apply_batch(game, self.dice, seat, args.get("mutations"), replaying=self._replaying)
         if game.resolution:
             game.resolution["batches"] += 1
         return told
@@ -633,7 +633,7 @@ class Table:
             if later and later["assignments"]:  # somebody is left to deal regular damage after the first-strike step
                 game.turn.remaining.insert(0, "combat_damage")
         if args.get("then"):
-            followup = ops.apply_batch(game, self.dice, seat, args["then"])
+            followup = ops.apply_batch(game, self.dice, seat, args["then"], replaying=self._replaying)
             told.public += followup.public
             told.show += followup.show
         if args.get("another_step"):

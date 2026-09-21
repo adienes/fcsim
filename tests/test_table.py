@@ -6,6 +6,7 @@ import random
 import pytest
 
 from fcsim.table import ScriptedRunner, Table, mutations
+from fcsim.table.model import MECHANICS
 from fcsim.table.script import ScriptError
 
 
@@ -1473,6 +1474,18 @@ def test_in_an_audited_game_a_player_who_has_lost_is_removed_by_the_driver_not_b
     table.patch([{"op": "eliminate", "seat": 1, "reason": "0 life, rule 704.5a"}], "state-based action")                                  # the driver, once the turn is checked
     assert table.game.control.kind == "over" and table.game.winner == 0
     assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()
+    # A journal holds what was accepted once. Game 4 of the second batch was played under this rules version before the refusal
+    # existed, its players removed by hand, and the report could no longer read it.
+    earlier = Table(seats(), seed=5, first=0, gated="turn", mechanics=5)
+    before = ScriptedRunner(earlier)
+    for seat in range(3):
+        before.step(seat, "keep")
+    pass_until(earlier, before, "main1")
+    first = spell_in_hand(earlier, 0)
+    before.step(0, "act", {"because": "as players did", "mutations": [{"op": "life", "seat": 1, "delta": -40}, {"op": "eliminate", "seat": 1, "reason": "0 life"},
+                                                                       {"op": "move", "obj": f"@{first}", "to": "stack"}]})
+    rebuilt = Table.replay({**earlier.config, "mechanics": MECHANICS}, earlier.events)
+    assert rebuilt.game.seats[1].status == "eliminated" and rebuilt.game.to_dict() == {**earlier.game.to_dict(), "mechanics": MECHANICS}
     free, other = started()                                             # with no auditor there is no driver to do it
     pass_until(free, other, "main1")
     other.step(0, "act", {"because": "x", "mutations": [{"op": "life", "seat": 1, "delta": -40}, {"op": "eliminate", "seat": 1, "reason": "0 life"}]})

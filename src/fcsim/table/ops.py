@@ -68,7 +68,7 @@ def apply_op(game: Game, dice: Dice, actor: int, op: dict, told: Told, *, by_tab
     match kind:
         case "move":
             for obj in _selected(game, dice, actor, op):
-                if op.get("to") == "stack" and obj.zone != "stack" and game.mechanics >= 6:
+                if op.get("to") == "stack" and obj.zone != "stack" and game.mechanics >= 6 and not by_table:
                     raise TableError("cast_it", f"{_named(obj)} gets onto the stack by being cast, not moved: call `cast`, which works during a "
                                                 "resolution too (name the effect in `because`; say in the payment's `note` if its mana cost is not "
                                                 "paid). A card moved there has no spell to go with it and is in no zone anyone can see.")
@@ -312,8 +312,9 @@ def _shaped(op: dict) -> dict:
     return {"op": named[0], **inner, **{k: v for k, v in op.items() if k != named[0]}}
 
 
-def apply_batch(game: Game, dice: Dice, actor: int, batch: list[dict], *, by_table: bool = False) -> Told:
-    """`by_table` is True for the driver's own repairs, which are made in the active player's name but are nobody's play."""
+def apply_batch(game: Game, dice: Dice, actor: int, batch: list[dict], *, by_table: bool = False, replaying: bool = False) -> Told:
+    """`by_table` is True for the driver's own repairs, which are made in the active player's name but are nobody's play.
+    `replaying` is True while a journal is rebuilt: what it holds was accepted once, and a refusal added since must let it by."""
     if not isinstance(batch, list) or not batch or not all(isinstance(op, dict) for op in batch):
         raise TableError("bad_batch", "Give a non-empty list of mutations, each like {\"op\": \"tap\", \"objs\": [...]}.")
     told = Told()
@@ -322,5 +323,5 @@ def apply_batch(game: Game, dice: Dice, actor: int, batch: list[dict], *, by_tab
         if op.get("op") == "request_choice" and index != len(batch) - 1:
             raise TableError("bad_batch", "`request_choice` must be the last mutation in its batch: nothing "
                                           "after it can happen until the answers are in.")
-        apply_op(game, dice, actor, op, told, by_table=by_table)
+        apply_op(game, dice, actor, op, told, by_table=by_table or replaying)
     return told
