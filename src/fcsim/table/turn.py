@@ -250,7 +250,7 @@ def collect_triggers(game: Game) -> None:
     for fact in facts:
         for hook in game.ledger:
             on = hook.get("on") or {}
-            if hook.get("kind") != "event_trigger" or not triggers.matches(on, fact, hook):
+            if hook.get("kind") != "event_trigger" or not triggers.matches(on, fact, hook, alternatives_alone=game.mechanics >= 5):
                 continue
             if not (on.get("event") or on.get("any_of")):
                 continue

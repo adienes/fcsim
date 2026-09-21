@@ -1223,3 +1223,15 @@ def test_a_slip_with_one_possible_meaning_is_understood_and_a_stale_handle_says_
     several = table.act(0, "play_land", {"card": "Island"})
     assert several["error"]["code"] == "unknown_handle" and "cards you can point at are called 'Island'" in several["error"]["message"]
     assert table.act(0, "play_land", {"card": "An Island nobody has"})["error"]["code"] == "unknown_handle"
+
+
+def test_alternatives_alone_decide_whatever_event_is_written_beside_them():
+    from fcsim.table import triggers
+    zuko = {"event": "cast", "any_of": [{"event": "cast", "from": "exile", "who": "you"}, {"event": "moved", "from": "exile", "to": "battlefield", "who": "you"}]}
+    hook = {"controller": 0, "source": 7}
+    from_hand = {"event": "cast", "from": "hand", "controller": 1, "was_controller": 1, "type_line": "", "id": 9, "old_id": None}
+    mine_from_exile = {**from_hand, "from": "exile", "controller": 0, "was_controller": 0}
+    assert not triggers.matches(zuko, from_hand, hook) and triggers.matches(zuko, mine_from_exile, hook)
+    assert triggers.matches(zuko, from_hand, hook, alternatives_alone=False)        # how it was read, kept only to replay games recorded then
+    shared = {"who": "you", "any_of": [{"event": "cast"}, {"event": "attacks"}]}     # a filter beside the alternatives narrows each of them
+    assert triggers.matches(shared, mine_from_exile, hook) and not triggers.matches(shared, from_hand, hook)

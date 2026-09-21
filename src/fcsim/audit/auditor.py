@@ -122,8 +122,9 @@ Norin the Wary: [{"op": "move", "what": "self", "to": "exile"}, {"op": "delay", 
 script": check it like any other play, and report it if the script got the card wrong.
 
 One hook for one ability. An ability with two triggers ("whenever a player casts a spell or a \
-creature attacks") is one hook whose `on` lists the alternatives under `any_of`, each a pattern of \
-its own. What you write for a permanent replaces everything the ledger held for it, so give all of \
+creature attacks") is one hook whose `on` lists the alternatives under `any_of`, each a complete \
+pattern of its own with its own `event` and filters; the `event` written beside `any_of` is ignored, \
+and filters written beside it apply to every alternative. What you write for a permanent replaces everything the ledger held for it, so give all of \
 its hooks together; a permanent marked "(hooks written)" needs none from you unless what it has is \
 wrong. Write a hook's `text` in the card's own words ("At the beginning of your end step, you may ..."), never with a \
 seat number or a player's name: it is kept and used again for other copies of the card, in other \

@@ -55,14 +55,18 @@ def pattern(on: dict) -> dict:
     return merged
 
 
-def matches(on: dict, fact: dict, hook: dict) -> bool:
+def matches(on: dict, fact: dict, hook: dict, *, alternatives_alone: bool = True) -> bool:
     """Whether the fact fits the hook's pattern, or any of the alternatives it lists under `any_of`
-    ("whenever a player casts a spell or a creature attacks" is one ability, so one hook)."""
+    ("whenever a player casts a spell or a creature attacks" is one ability, so one hook). Where there
+    are alternatives they alone decide, each narrowed by the filters written beside them. An `event`
+    beside them is ignored: the schema asks for one, and read as a pattern of its own it has no filters
+    and matches everything, which made Fire Lord Zuko's "cast from exile" fire on every spell anyone
+    cast. `alternatives_alone` is False only to replay a game recorded while it was read that way."""
     alternatives = [a for a in on.get("any_of") or [] if isinstance(a, dict)]
     if alternatives:
-        shared = {k: v for k, v in on.items() if k != "any_of"}
-        return (bool(shared.get("event")) and _fits(shared, fact, hook)) or any(_fits({**{k: v for k, v in shared.items() if k != "event"}, **a}, fact, hook)
-                                                                             for a in alternatives)
+        shared = {k: v for k, v in on.items() if k not in ("any_of", "event")}
+        loose = not alternatives_alone and bool(on.get("event")) and _fits({**shared, "event": on["event"]}, fact, hook)
+        return loose or any(_fits({**shared, **a}, fact, hook) for a in alternatives)
     return _fits(on, fact, hook)
 
 
