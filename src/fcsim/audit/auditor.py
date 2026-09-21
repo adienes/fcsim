@@ -87,7 +87,9 @@ that the table can put the trigger in front of its controller the moment the eve
 `event` is cast, enters, dies, leaves or attacks; `who` is "you" (the permanent's controller cast \
 the spell or controlled the object), "opponent" or "any"; `type` is a word that must be in the \
 object's type line, such as Creature, Dragon, Zombie or Instant; `nontoken` is true if tokens do \
-not count; `other` is true if the ability says "another". Leave `on` out when the trigger does not \
+not count; `other` is true if the ability says "another"; `from` is the zone a spell must be cast \
+from or a permanent must enter from, when the ability names one (hand, exile, graveyard, command, \
+library; a permanent spell that resolves enters from the stack). Leave `on` out when the trigger does not \
 fit these words, and describe it in text alone.
 - static: a continuous effect that changes other objects, players or the rules while the \
 permanent stays: "other Zombie creatures you control get +1/+1", "spells cost {1} less", \
@@ -168,7 +170,8 @@ VERDICT_SCHEMA = {
                 "on": {"type": "object", "additionalProperties": False, "required": ["event"], "properties": {
                     "event": {"type": "string", "enum": ["cast", "enters", "dies", "leaves", "attacks"]},
                     "who": {"type": "string", "enum": ["you", "opponent", "any"]},
-                    "type": {"type": "string"}, "nontoken": {"type": "boolean"}, "other": {"type": "boolean"}}}}}},
+                    "type": {"type": "string"}, "nontoken": {"type": "boolean"}, "other": {"type": "boolean"},
+                    "from": {"type": "string", "enum": ["hand", "exile", "graveyard", "command", "library", "stack"]}}}}}},
         "disputes": {"type": "array", "items": {
             "type": "object", "additionalProperties": False, "required": ["event", "upheld", "answer"],
             "properties": {"event": {"type": "integer", "description": "The number of the event in which the player raised the dispute."},

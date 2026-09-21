@@ -243,6 +243,8 @@ def collect_triggers(game: Game) -> None:
                 continue
             if on.get("nontoken") and fact.get("token"):
                 continue
+            if on.get("from") and fact.get("from") and str(on["from"]).lower() != fact["from"]:
+                continue  # "whenever you cast a spell from exile": the third pod declined this trigger on every cast from hand
             if on.get("other") and hook.get("source") in (fact.get("id"), fact.get("old_id")):
                 continue
             what = {"cast": "cast", "attacks": "attacked", "enters": "entered", "leaves": "left the battlefield", "dies": "died"}

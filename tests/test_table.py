@@ -857,3 +857,24 @@ def test_the_table_checks_that_what_was_tapped_can_pay_the_cost():
     assert not table2_mana.pays(table2_mana.parse_cost("{2}{G}{G}"), [{"colors": {"B"}, "amount": 1}] * 2 + [{"colors": {"C"}, "amount": 1}, {"colors": {"G"}, "amount": 1}])
     assert table2_mana.pays(table2_mana.parse_cost("{R/W}{X}", x=2), [{"colors": {"W"}, "amount": 1}, {"colors": {"C"}, "amount": 2}])
     assert table2_mana.parse_cost("{Q}") is None
+
+
+def test_an_event_trigger_can_depend_on_where_the_spell_was_cast_from():
+    table, runner = started()
+    pass_until(table, runner, "main1")
+    engine, first, second = [name for name in hand(table, 0) if "spell" in name][:3]
+    runner.step(0, "act", {"because": "test set-up", "mutations": [{"op": "move", "obj": f"@{engine}", "to": "battlefield"},
+                                                                  {"op": "move", "obj": f"@{second}", "to": "exile"}]})
+    handle = next(o["handle"] for o in table.view(None)["battlefield"] if o["name"] == engine)
+    table.apply_hooks([{"kind": "event_trigger", "handle": handle, "text": "Whenever you cast a spell from exile, put a counter on each creature.",
+                        "on": {"event": "cast", "who": "you", "from": "exile"}}])
+    runner.step(0, "cast", {"card": f"@{first}"})
+    runner.step(0, "pass_priority")
+    assert table.view(0)["waiting_triggers"] == [] and table.expected() == [(1, "priority")]      # from hand: nothing to decline
+    for seat in (1, 2):
+        runner.step(seat, "pass_priority")
+    runner.step(0, "finish_resolution")
+    runner.step(0, "cast", {"card": table.view(0)["seats"][0]["exile"][0]["handle"], "because": "exiled with Prosper"})
+    runner.step(0, "pass_priority")                                                               # triggers go on before anyone gets priority
+    assert table.expected() == [(0, "triggers")]
+    assert [t["text"] for t in table.view(0)["waiting_triggers"]] == [f"Whenever you cast a spell from exile, put a counter on each creature. (because {second} cast)"]

@@ -351,8 +351,9 @@ class Table:
             if casts.get(name):
                 lints.append(f"Commander tax: {name} costs {{{2 * casts[name]}}} more this time.")
             casts[name] = casts.get(name, 0) + 1
+        cast_from = obj.zone
         card = mutations.move(game, obj, "stack", controller=seat, face_down=face_down)
-        game.facts.append({"event": "cast", "id": card.id, "old_id": None, "name": name, "type_line": card.type_line,
+        game.facts.append({"event": "cast", "id": card.id, "old_id": None, "name": name, "type_line": card.type_line, "from": cast_from,
                            "controller": seat, "was_controller": seat, "token": False})
         item = StackItem(id=game.new_id(), kind="spell", controller=seat,
                          source_name="a face-down spell" if face_down else name, text=str(args.get("text", "")),
@@ -752,7 +753,7 @@ class Table:
             entry = {"kind": hook["kind"], "text": str(hook.get("text", "")), "source": source.id,
                      "controller": hook.get("controller", source.controller)}
             if hook["kind"] == "event_trigger" and isinstance(hook.get("on"), dict):
-                entry["on"] = {k: hook["on"][k] for k in ("event", "who", "type", "nontoken", "other") if k in hook["on"]}
+                entry["on"] = {k: hook["on"][k] for k in ("event", "who", "type", "nontoken", "other", "from") if k in hook["on"]}
             if hook["kind"] == "hold":
                 entry |= {"step": hook.get("step"), "seat": hook.get("seat", source.controller)}
             elif hook["kind"] == "step_trigger":
