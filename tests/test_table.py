@@ -689,3 +689,15 @@ def test_a_land_is_played_only_in_ones_own_main_phase_but_an_old_journal_still_r
     table._replaying = False
     assert table.events[-1]["lints"] == ["A land is normally played in your own main phase with an empty stack."]
     assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()
+
+
+def test_casting_from_an_unusual_zone_needs_the_player_to_say_what_allows_it():
+    table, runner = started()
+    pass_until(table, runner, "main1")
+    spell = spell_in_hand(table, 0)
+    runner.step(0, "act", {"because": "test", "mutations": [{"op": "move", "obj": f"@{spell}", "to": "exile"}]})
+    refused = table.act(0, "cast", {"card": table.view(0)["seats"][0]["exile"][0]["handle"]})
+    assert refused["error"]["code"] == "say_why" and "Ann's exile" in refused["error"]["message"]      # a slip of a handle changes nothing
+    assert "error" not in table.act(0, "cast", {"card": table.view(0)["seats"][0]["exile"][0]["handle"], "because": "Exiled with Prosper: I may play it."})
+    assert "(allowed by: Exiled with Prosper: I may play it.)" in table.events[-1]["public"][0]
+    assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()

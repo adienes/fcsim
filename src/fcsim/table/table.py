@@ -311,6 +311,14 @@ class Table:
         obj = mutations.get(game, args["card"])
         face_down = bool(args.get("face_down"))
         name, origin, from_command = obj.name, ops._where(game, obj), obj.zone == "command"
+        usual = obj.owner == seat and obj.zone in ("hand", "command")
+        because = str(args.get("because", "")).strip()
+        if not usual and not because and not self._replaying:
+            # A slip of a handle, or a real permission (flashback, a card exiled "you may play it", an
+            # opponent's card): only the player knows, so it has to say. In the second pod a player cast
+            # another player's exiled card by mistake and had to undo it by hand.
+            raise TableError("say_why", f"{name} is in {origin}, not in your hand or your command zone. If an effect lets you cast it "
+                                        "from there, call cast again with `because` naming that effect.")
         paid = self._pay(game, seat, args.get("payment"))
         lints = []
         info = self.card_lookup(name) if self.card_lookup else None
@@ -334,6 +342,7 @@ class Table:
         turn.acted(game)
         told = ops.Told(public=[f"{self._name(seat)} casts {item.source_name} from {origin}"
                                 f"{self._targets_text(game, item.targets)}" + (f", {paid}" if paid else "")
+                                + (f" (allowed by: {because})" if because and not usual else "")
                                 + self._declared(item, hide_text=face_down) + "."])
         return told, lints
 

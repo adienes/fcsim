@@ -796,6 +796,7 @@
     "cast",
     {
      "card": "@Divination",
+     "because": "It is a sorcery and it is my main phase, so I can cast it.",
      "payment": {
       "tap": [
        "@Island",
