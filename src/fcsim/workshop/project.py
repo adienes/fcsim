@@ -90,8 +90,11 @@ class DeckProject:
             claim = " ".join(str(lesson.get("claim", "")).split())
             if not claim:
                 continue
-            match = max(known, key=lambda k: difflib.SequenceMatcher(None, k["claim"].lower(), claim.lower()).ratio(), default=None)
-            if match is not None and difflib.SequenceMatcher(None, match["claim"].lower(), claim.lower()).ratio() > 0.6:
+            # Whoever wrote the lesson was shown the ones on record and says which it restates. Likeness of wording is only the
+            # fallback: the same lesson learned from another game comes back in other words, and nothing was ever borne out.
+            named = next((k for k in known if k["id"] == str(lesson.get("same_as") or "").strip()), None)
+            match = named or max(known, key=lambda k: difflib.SequenceMatcher(None, k["claim"].lower(), claim.lower()).ratio(), default=None)
+            if match is not None and (named is not None or difflib.SequenceMatcher(None, match["claim"].lower(), claim.lower()).ratio() > 0.6):
                 fresh = [g for g in games if g not in match["games"]]
                 if fresh:  # the same games reviewed again are not a second witness
                     match["games"] += fresh

@@ -44,18 +44,36 @@ untapped beside a card it could have cast, the turns it had attackers and sent n
 home from a player with no untapped blocker. Each of those is a lesson only if the pilot had no good \
 reason at the time (a held instant, a swing into first strikers): read what it said it was doing, \
 and say which it was. A loss that followed from a hand that should have gone back teaches about \
-mulligans, not about the cards that were stuck in it.
+mulligans, not about the cards that were stuck in it. Under `piloting`, go through every game first \
+and say what the record shows of its keep, its mana and its attacks. Wherever that was a mistake, \
+one of your lessons must be about it, in this deck's own terms and numbers (how many lands and \
+which colours this list needs to function, what it does with its second and third turns), and such \
+a lesson need name no card. A pilot that plays its cards cleverly from a hand it should not have \
+kept has learned the smaller thing.
+
+LESSONS ALREADY RECORDED lists what earlier studies of this deck taught, each with an id. If a \
+lesson you would write is one of those, give its id in `same_as` and restate it only as far as these \
+games add to it: a lesson seen again in a different game is how it comes to be trusted, and one \
+written twice in other words is only clutter.
 
 Facts. The sections headed MEASURED, THIS SEAT TURN BY TURN, HOW THIS SEAT WAS PILOTED, WHAT HAPPENED TO EACH CARD and THE LIST \
 IN NUMBERS are computed from the log and the card data. Never state anything they contradict, and \
 do not repeat a claim from a round account or a pilot's note that they contradict. Your lessons are \
 checked against them. Answer in the required JSON form."""
 
-LESSONS_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["lessons"], "properties": {"lessons": {"type": "array", "items": {
-    "type": "object", "additionalProperties": False, "required": ["claim", "kind", "cards", "evidence"],
-    "properties": {"claim": {"type": "string", "description": "The lesson, as an instruction to the next pilot, in one or two sentences."},
-                   "kind": {"type": "string", "enum": KINDS}, "cards": {"type": "array", "items": {"type": "string"}},
-                   "evidence": {"type": "string", "description": "Which game and round, and what happened."}}}}}}
+LESSONS_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["piloting", "lessons"], "properties": {
+    "piloting": {"type": "array", "description": "One entry for each game, before any lesson: what the measured piloting record shows.", "items": {
+        "type": "object", "additionalProperties": False, "required": ["game", "keep", "mana", "attacks"],
+        "properties": {"game": {"type": "string", "description": "The game's directory name."},
+                       "keep": {"type": "string", "description": "The hand that was kept, in numbers, and whether it should have gone back, with the reason."},
+                       "mana": {"type": "string", "description": "Land drops missed and turns ended with a castable card and the mana for it: a mistake, or not, and why."},
+                       "attacks": {"type": "string", "description": "Turns its attackers stayed home: a mistake, or not, and why."}}}},
+    "lessons": {"type": "array", "items": {
+        "type": "object", "additionalProperties": False, "required": ["claim", "kind", "cards", "evidence"],
+        "properties": {"claim": {"type": "string", "description": "The lesson, as an instruction to the next pilot, in one or two sentences."},
+                       "kind": {"type": "string", "enum": KINDS}, "cards": {"type": "array", "items": {"type": "string"}},
+                       "evidence": {"type": "string", "description": "Which game and round, and what happened."},
+                       "same_as": {"type": "string", "description": "The id of the lesson already recorded that this one restates (L004), if it does."}}}}}}
 
 PRIMER_SYSTEM = """\
 You write the primer a pilot reads before every game with one Commander deck. It is short, because \
@@ -87,10 +105,13 @@ def learn(project_path: str | Path, game_dirs: list[str | Path], runner, databas
         f"THE DECK: {' + '.join(card.name for card in deck.commanders)}",
         "THE LIST IN NUMBERS\n" + _list_numbers(deck), "THE LIST (count, name, cost, type, text)\n" + _deck_reference(deck, database),
         *(["THE PRIMER ITS PILOTS WERE GIVEN\n" + project.primer()] if project.primer() else []),
+        *(["LESSONS ALREADY RECORDED\n" + "\n".join(f"- {k['id']} [{k['status']}, from {len(k['games'])} game(s), {k['kind']}] {k['claim']}" for k in project.lessons())]
+          if project.lessons() else []),
         *("=" * 60 + "\n" + _game_material(path, seat) for path, seat in games)])
     echo(f"studying {len(games)} game(s) of {project.path.name} ...")
     reply = runner.ask(LESSONS_SYSTEM, f"{materials}\n\nWrite the lessons.", schema=LESSONS_SCHEMA)
     lessons = list((reply.data or {}).get("lessons") or [])
+    piloting = [row for row in (reply.data or {}).get("piloting") or [] if isinstance(row, dict)]
     echo(f"checking {len(lessons)} lesson(s) against the record ...")
     checked = runner.ask(CHECK_SYSTEM, f"{materials}\n\n{'=' * 60}\nTHE REVIEW TO CHECK (a list of piloting lessons; check each one's claim and "
                                        f"evidence)\n{json.dumps(lessons, indent=1, ensure_ascii=False)}", schema=CHECK_SCHEMA)
@@ -112,6 +133,9 @@ def learn(project_path: str | Path, game_dirs: list[str | Path], runner, databas
     note.parent.mkdir(exist_ok=True)
     note.write_text("\n".join([f"# Lessons from {', '.join(path.name for path, _ in games)}", "",
                                *(f"- **{k['kind']}** {k['claim']} _Evidence: {k['evidence']}_" for k in kept), "",
+                               "## How it was piloted, game by game", "",
+                               *([f"- `{row.get('game', '')}` **Keep:** {row.get('keep', '')} **Mana:** {row.get('mana', '')} **Attacks:** {row.get('attacks', '')}"
+                                  for row in piloting] or ["- not said"]), "",
                                "## Dropped by the fact check", "", *([f"- {p['claim']} Record: {p['record']}" for p in problems] or ["- none"])]) + "\n", encoding="utf-8")
     project.log(f"studied {len(games)} game(s): {counts['added']} new lesson(s), {counts['validated']} validated, {len(wrong)} dropped by the fact "
                 f"check; primer rewritten ({len(primer.split())} words). See `{note.relative_to(project.path)}`.")

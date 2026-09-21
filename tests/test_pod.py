@@ -949,7 +949,11 @@ def test_a_deck_project_teaches_its_pilot_what_earlier_games_learned(combat_game
     # the same games studied again are not a second witness; a different game is, and the lesson becomes validated
     again = Writes([{"lessons": [lesson]}, {"problems": []}])
     assert learn(project.path, [game], again, database, echo=lambda *_: None)["validated"] == 0
-    assert project.record([lesson], games=["another-game"], database=database) == {"added": 0, "validated": 1, "total": 1}
+    # learned from another game it comes back in other words: whoever wrote it was shown the record and says which lesson it restates
+    reworded = {"claim": "Get the commander down early, as soon as the fourth land is there.", "kind": "commander_timing", "cards": ["Talrand, Sky Summoner"],
+                "evidence": "another game", "same_as": "L001"}
+    assert "LESSONS ALREADY RECORDED" in again.asked[0]["prompt"] and "- L001 [tentative" in again.asked[0]["prompt"]
+    assert project.record([reworded], games=["another-game"], database=database) == {"added": 0, "validated": 1, "total": 1}
     assert project.lessons()[0]["status"] == "validated" and project.lessons()[0]["games"] == [Path(game).name, "another-game"]
 
     # the next game's pilot is told, and the game keeps exactly what it was told
