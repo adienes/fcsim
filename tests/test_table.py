@@ -1304,3 +1304,31 @@ def test_floating_mana_lives_in_a_pool_that_payments_spend_and_steps_empty():
     assert table.view(0)["seats"][0]["mana_pool"] == "{B}"                                        # mana an effect says is never lost stays
     assert table.act(0, "act", {"because": "x", "mutations": [{"op": "mana", "add": "purple"}]})["error"]["code"] == "bad_mana"
     assert Table.replay(table.config, table.events, card_lookup=table.card_lookup).game.to_dict() == table.game.to_dict()
+
+
+def test_a_trigger_on_what_a_permanent_is_attached_to_fires_for_that_and_nothing_else():
+    table, runner = started()
+    pass_until(table, runner, "main1")
+    blade, bearer, bystander = [name for name in hand(table, 0) if "spell" in name][:3]
+    runner.step(0, "act", {"because": "test set-up", "mutations": [{"op": "move", "obj": f"@{name}", "to": "battlefield"} for name in (blade, bearer, bystander)]})
+    handles = {o["name"]: o["handle"] for o in table.view(None)["battlefield"]}
+    table.apply_hooks([
+        {"kind": "event_trigger", "handle": handles[blade], "text": "Whenever equipped creature becomes tapped, ...", "on": {"event": "tapped", "attached": True}},
+        {"kind": "event_trigger", "handle": handles[blade], "text": "Whenever equipped creature dies, ...", "on": {"event": "moved", "from": "battlefield", "to": "graveyard", "attached": True}}])
+    runner.step(0, "act", {"because": "test", "mutations": [{"op": "tap", "objs": [f"@{bearer}"]}]})   # it lies unattached: Pip-Boy 3000 asked about every attack at the table
+    runner.step(0, "pass_priority")
+    assert table.expected() == [(1, "priority")] and not table.view(0)["waiting_triggers"]
+    for seat in (1, 2):
+        runner.step(seat, "pass_priority")
+    runner.step(0, "act", {"because": "test", "mutations": [{"op": "untap", "objs": [f"@{bearer}"]}, {"op": "attach", "obj": f"@{blade}", "host": f"@{bearer}"},
+                                                            {"op": "tap", "objs": [f"@{bearer}", f"@{bystander}"]}]})
+    runner.step(0, "pass_priority")
+    waiting = table.view(0)["waiting_triggers"]
+    assert [w["text"].split(",")[0] for w in waiting] == ["Whenever equipped creature becomes tapped"] and "triggered" not in waiting[0]["text"] and bystander not in waiting[0]["text"]
+    runner.step(0, "skip_trigger", {"pending": waiting[0]["handle"], "because": "test"})
+    pass_until(table, runner, "main1", seat=0)
+    runner.step(0, "act", {"because": "test", "mutations": [{"op": "move", "obj": f"@{bearer}", "to": "graveyard"}, {"op": "move", "obj": f"@{bystander}", "to": "graveyard"}]})
+    runner.step(0, "pass_priority")   # the move let go of the blade, and still says what was attached
+    waiting = table.view(0)["waiting_triggers"]
+    assert [w["text"].split(",")[0] for w in waiting] == ["Whenever equipped creature dies"] and f"(because {bearer} " in waiting[0]["text"]
+    assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()

@@ -759,6 +759,8 @@ def test_a_hook_that_plainly_triggers_on_its_own_permanent_is_marked_so():
     assert bog["on"] == {"event": "enters", "who": "you", "self": True}
     laelia = _own_trigger("Laelia, the Blade Reforged", {"kind": "event_trigger", "text": "Whenever Laelia attacks, exile the top card of your library."})
     assert laelia["on"]["event"] == "attacks" and laelia["on"]["self"]
+    pip = _own_trigger("Pip-Boy 3000", {"kind": "event_trigger", "on": {"event": "attacks", "who": "any"}, "text": "Whenever equipped creature attacks, choose one — ..."})
+    assert pip["on"] == {"event": "attacks", "attached": True}   # not "anyone's creature attacks"
     anthem = {"kind": "event_trigger", "on": {"event": "enters", "who": "you", "type": "Dragon"}, "text": "Whenever a Dragon you control enters, it deals damage."}
     assert _own_trigger("Lathliss, Dragon Queen", anthem) == anthem and _own_trigger("X", {"kind": "static", "text": "When this enters"}) == {"kind": "static", "text": "When this enters"}
 

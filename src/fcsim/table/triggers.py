@@ -91,6 +91,8 @@ def _fits(on: dict, fact: dict, hook: dict) -> bool:
     ids = (fact.get("id"), fact.get("old_id"))
     if (want.get("other") and hook.get("source") in ids) or (want.get("self") and hook.get("source") not in ids):
         return False
+    if want.get("attached") and hook.get("source") not in (fact.get("attachments") or []):
+        return False  # "whenever equipped creature attacks": the hook's permanent is attached to what did it
     if want.get("nontoken") and fact.get("token"):
         return False
     if "combat" in want and bool(want["combat"]) != bool(fact.get("combat")):

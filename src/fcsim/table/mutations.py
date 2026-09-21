@@ -55,13 +55,15 @@ def move(game: Game, obj: Obj, to: str, *, position: str | int = "top", controll
         source.remove(obj.id)
     knew = set(range(len(game.seats))) if obj.public else set(obj.known_by)
     came_from, was_controller, old_id = obj.zone, obj.controller, obj.id
+    attachments = [other.id for other in game.objects.values() if other.attached_to == obj.id]  # "whenever equipped creature dies"
     for other in game.objects.values():
         if other.attached_to == obj.id:
             other.attached_to = None
     game.stack[:] = [item for item in game.stack if item.obj != obj.id or to == "stack"]
     if obj.token is not None and to != "battlefield" and came_from == "battlefield":
         game.facts.append({"event": "moved", "id": None, "old_id": old_id, "name": obj.name, "type_line": obj.type_line,
-                           "from": came_from, "to": to, "controller": was_controller, "was_controller": was_controller, "token": True})
+                           "from": came_from, "to": to, "controller": was_controller, "was_controller": was_controller, "token": True,
+                           "attachments": attachments})
         del game.objects[obj.id]
         return None
 
@@ -97,7 +99,7 @@ def move(game: Game, obj: Obj, to: str, *, position: str | int = "top", controll
     renew(game, obj)
     game.facts.append({"event": "moved", "id": obj.id, "old_id": old_id, "name": obj.name, "type_line": obj.type_line,
                        "from": came_from, "to": to, "controller": obj.controller, "was_controller": was_controller,
-                       "token": obj.token is not None})
+                       "token": obj.token is not None, "attachments": attachments})
     return obj
 
 

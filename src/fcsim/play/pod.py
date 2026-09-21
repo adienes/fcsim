@@ -983,7 +983,7 @@ def _hook_key(hook: dict) -> tuple | None:
     if not on and hook.get("kind") == "event_trigger":
         return None
     return (hook.get("kind"), hook.get("step"), str(hook.get("whose", hook.get("seat"))),
-            *(str(triggers.pattern(on).get(k)) for k in ("event", "from", "to", "who", "self", "other", "kind", "sign")), len(on.get("any_of") or []))
+            *(str(triggers.pattern(on).get(k)) for k in ("event", "from", "to", "who", "self", "attached", "other", "kind", "sign")), len(on.get("any_of") or []))
 
 
 def _tidy(hooks: list[dict]) -> list[dict]:
@@ -1008,6 +1008,11 @@ def _own_trigger(name: str, hook: dict) -> dict:
     `self` the table would offer it whenever anything entered or attacked."""
     if hook.get("kind") != "event_trigger":
         return hook
+    if re.search(r"\bwhen(?:ever)? (?:equipped|enchanted|fortified) (?:creature|land|permanent|artifact)\b", str(hook.get("text", "")), re.I):
+        # The same for what it is attached to: written as "anyone's creature attacks", Pip-Boy 3000 asked
+        # its controller about every attack at the table while it lay unattached.
+        on = {k: v for k, v in (hook.get("on") or {}).items() if k != "who"}
+        return {**hook, "on": {**on, "attached": True}} if on.get("event") or on.get("any_of") else hook
     short = re.escape(name.split(",")[0])
     found = re.search(rf"\bwhen(?:ever)? (?:this \w+|{re.escape(name)}|{short}) (enters|attacks|dies|leaves)", str(hook.get("text", "")), re.I)
     if not found:

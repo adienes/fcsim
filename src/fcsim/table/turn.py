@@ -250,6 +250,8 @@ def collect_triggers(game: Game) -> None:
     fired: set[int] = set()  # hooks that have triggered in this batch
     grouped: dict[int, dict] = {}
     for fact in facts:
+        if "attachments" not in fact:  # a move records them itself, since it lets go of them
+            fact["attachments"] = [o.id for o in game.objects.values() if o.attached_to is not None and o.attached_to == fact.get("id")]
         for hook in game.ledger:
             on = hook.get("on") or {}
             if hook.get("kind") != "event_trigger" or not triggers.matches(on, fact, hook, alternatives_alone=game.mechanics >= 5):
