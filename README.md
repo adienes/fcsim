@@ -227,6 +227,7 @@ poison, 21 commander damage or a draw from an empty library before anyone gets p
 ```sh
 uv run fcsim summarize games/<game_dir>          # narrative.md: the story, then the round accounts it came from
 uv run fcsim rubric games/<game_dir>             # scores from the log alone; no model
+uv run fcsim report games/*_pod-* --deck zuko    # several games side by side, and every card a deck's pilot saw
 uv run fcsim review examples/zuko.txt games/<game_dir> [more games]
 uv run fcsim deck apply examples/zuko.txt examples/zuko.review.md -o examples/zuko-v2.txt
 ```

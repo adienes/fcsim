@@ -15,6 +15,8 @@ from .audit import render as render_report
 from .cards import CardDatabase, CardsError
 from .cards.edhrec import average_deck
 from .play import goldfish, play_pod
+from .play.aggregate import aggregate
+from .play.aggregate import render as render_aggregate
 from .play.narrative import STYLES, summarize
 from .play.rubric import measure as measure_rubric
 from .play.rubric import render as render_rubric
@@ -151,6 +153,11 @@ def main(argv: list[str] | None = None) -> int:
     reviewed.add_argument("--max-calls", type=int, default=5, help="Hard limit on model calls for this run")
     _model_options(reviewed, audited=False, cost_default=5.0)
 
+    several = commands.add_parser("report", help="Several games side by side: rubric verdicts, each deck's showing, each card's; no model call")
+    several.add_argument("game_dirs", nargs="+")
+    several.add_argument("--deck", help="Also list every card this deck's pilot saw (part of the seat's name)")
+    several.add_argument("--json", action="store_true")
+
     scored = commands.add_parser("rubric", help="Score a game against the table-quality rubric, from its log; no model call")
     scored.add_argument("game_dir")
     scored.add_argument("--json", action="store_true")
@@ -175,9 +182,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command in ("goldfish", "pod", "summarize", "review") or (args.command == "audit" and args.action == "suite"):
         _stay_awake()
-    if args.command in ("cards", "deck", "audit", "goldfish", "pod", "status", "summarize", "rubric", "review"):
+    if args.command in ("cards", "deck", "audit", "goldfish", "pod", "status", "summarize", "rubric", "review", "report"):
         try:
-            return {"cards": _cards, "deck": _deck, "audit": _audit, "goldfish": _goldfish, "pod": _pod, "status": _status, "summarize": _summarize, "rubric": _rubric, "review": _review}[args.command](args)
+            return {"cards": _cards, "deck": _deck, "audit": _audit, "goldfish": _goldfish, "pod": _pod, "status": _status, "summarize": _summarize, "rubric": _rubric, "review": _review, "report": _report}[args.command](args)
         except (CardsError, RunnerError, ValueError, OSError) as exc:
             print(json.dumps({"error": {"code": "cards_error", "message": str(exc)}}), file=sys.stderr)
             return 2
@@ -338,6 +345,12 @@ def _review(args: argparse.Namespace) -> int:
     with open(result["review"], encoding="utf-8") as text:
         print("\n" + text.read())
     print(f"Written to {result['review']}")
+    return 0
+
+
+def _report(args: argparse.Namespace) -> int:
+    result = aggregate(args.game_dirs)
+    print(json.dumps(result, indent=2, ensure_ascii=False) if args.json else render_aggregate(result, deck=args.deck))
     return 0
 
 

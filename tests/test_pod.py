@@ -606,3 +606,18 @@ def test_a_player_spoken_to_by_name_answers_before_the_speaker_acts(database, tm
     assert [(t["seat"], t["reply"]) for t in report["talk"]] == [(1, "Deal, for two turns."), (2, "")]
     asked = next(p for p in seats[1].prompts if "has just said to you" in p)
     assert "You are not acting now, only talking." in asked and "YOUR HAND" in asked
+
+
+def test_several_games_are_reported_side_by_side_with_their_sample_size(combat_game, capsys):
+    from fcsim.cli import main
+    from fcsim.play.aggregate import aggregate
+
+    directory = combat_game[0]["directory"]
+    report = aggregate([directory, directory])
+    assert len(report["games"]) == 2 and report["verdicts"]["length"] == {"unfinished": 2} and report["verdicts"]["participation"] == {"bad": 2}
+    talrand = report["decks"]["Talrand"]
+    assert (talrand["games"], talrand["wins"], talrand["damage_to_players"], talrand["spells"]) == (2, 0, 8, 2)
+    assert report["cards"]["Talrand"]["Talrand, Sky Summoner"] == {"seen": 2, "played": 2, "rounds_held": 0, "stuck_at_end": 0}
+    assert main(["report", directory, "--deck", "thras"]) == 0
+    out = capsys.readouterr().out
+    assert "1 game(s). With so few" in out and "CARDS Thrasios saw" in out and "CARDS Talrand saw" not in out
