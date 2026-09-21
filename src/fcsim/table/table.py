@@ -11,7 +11,7 @@ import copy
 from collections.abc import Callable
 
 from . import mana, mechanics, mutations, ops, turn
-from .model import STEPS, Dice, Game, Obj, Seat, StackItem, TableError
+from .model import MECHANICS, STEPS, Dice, Game, Obj, Seat, StackItem, TableError
 from .views import Handles, obj_view, view
 
 _OBJECT_KEYS = frozenset({"card", "source", "obj", "objs", "attacker", "blocker", "attached_to", "copy_of",
@@ -41,7 +41,7 @@ _NOT_AUDITABLE = frozenset({"pass_priority", "say", "write_notes", "mulligan", "
 class Table:
     def __init__(self, seats: list[dict], *, seed: int | None = None, first: int | None = None, gated: bool | str = False,
                  card_lookup: Callable[[str], dict | None] | None = None, on_event: Callable[[dict], None] | None = None,
-                 _setup_random: list | None = None):
+                 mechanics: int | None = None, _setup_random: list | None = None):
         """`seats` is a list of {name, commanders: [card names], library: [card names]}.
 
         With `gated`, the table stops at an audit checkpoint whenever something auditable has
@@ -49,7 +49,8 @@ class Table:
         `release` when it is satisfied. With `gated="turn"` it stops only between turns, which is all a
         driver that audits whole turns needs: every other stop is journalled and released for nothing. `on_event` receives each event as it is committed, so a
         journal on disk never lags the game."""
-        self.config = {"seats": copy.deepcopy(seats), "seed": seed, "first": first, "gated": gated}
+        self.config = {"seats": copy.deepcopy(seats), "seed": seed, "first": first, "gated": gated,
+                       "mechanics": MECHANICS if mechanics is None else mechanics}
         self.card_lookup, self.gated, self.on_event = card_lookup, gated, on_event
         self.dice = Dice(seed)
         self.events: list[dict] = []
@@ -58,7 +59,7 @@ class Table:
         self.handles: dict[int | None, Handles] = {viewer: Handles() for viewer in (None, *range(len(seats)))}
         self._wakes: dict[str, dict] = {}
         self._replaying = False  # a journal holds calls that were accepted: checks added since must not refuse them
-        game = Game(seats=[Seat(index, seat["name"]) for index, seat in enumerate(seats)], gated=gated)
+        game = Game(seats=[Seat(index, seat["name"]) for index, seat in enumerate(seats)], gated=gated, mechanics=self.config["mechanics"])
         for index, seat in enumerate(seats):
             for zone, names, commander in (("command", seat.get("commanders", []), True),
                                            ("library", seat.get("library", []), False)):
@@ -831,7 +832,7 @@ class Table:
         if not events or events[0]["tool"] != "setup":
             raise TableError("bad_log", "An event log starts with the setup event.")
         table = cls(config["seats"], seed=config["seed"], first=config["first"], gated=config.get("gated", False),
-                    card_lookup=card_lookup, _setup_random=events[0]["random"])
+                    card_lookup=card_lookup, mechanics=config.get("mechanics", 0), _setup_random=events[0]["random"])
         table._replaying = True
         for event in events[1:]:
             if before is not None:

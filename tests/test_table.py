@@ -909,3 +909,20 @@ def test_a_trigger_on_the_permanent_itself_is_not_offered_when_something_else_en
     table.rewrite_hooks(handle, [{"kind": "event_trigger", "text": "Whenever a creature enters under your control, gain 1 life.", "on": {"event": "enters", "who": "you"}}])
     assert [e["text"] for e in table.game.ledger] == ["Whenever a creature enters under your control, gain 1 life."]
     assert Table.replay(table.config, table.events).game.ledger == table.game.ledger
+
+
+def test_the_rad_counter_trigger_is_the_tables_and_an_older_journal_replays_without_it():
+    table, runner = started()
+    pass_until(table, runner, "main1")
+    runner.step(0, "act", {"because": "test", "mutations": [{"op": "counters", "seat": 1, "kind": "rad", "delta": 2}]})
+    pass_until(table, runner, "end", seat=0)
+    for _ in range(40):  # on to Bob's turn: the table stops for his trigger as his first main phase begins
+        seat, kind = table.expected()[0]
+        if kind == "triggers":
+            break
+        runner.step(seat, {"priority": "pass_priority", "discard": "finish_step"}.get(kind, kind))
+    assert table.expected() == [(1, "triggers")] and table.game.turn.step == "main1" and table.game.turn.active == 1
+    assert table.view(1)["waiting_triggers"][0]["text"].startswith("Rad counters (rule 728.1): mill 2 card(s)")
+    assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()
+    old = Table(seats(), seed=5, first=0, mechanics=0)     # as a journal from before this rule was the table's would be rebuilt
+    assert old.config["mechanics"] == 0 and table.config["mechanics"] >= 1

@@ -13,6 +13,9 @@ HIDDEN_ZONES = ("library", "hand")
 SEAT_ZONES = ("library", "hand", "graveyard", "exile", "command")
 
 
+MECHANICS = 1  # 1: the rad counter trigger (rule 728.1) is the table's
+
+
 class TableError(ValueError):
     """A rejected call. The message tells an agent what was wrong and what to do instead."""
 
@@ -176,6 +179,7 @@ class Game:
     whispers: list[list] = field(default_factory=list)  # [seat, sentence] to tell one seat privately with the next event
     audit_pending: bool = False   # something auditable has happened since the last checkpoint was released
     gated: bool | str = False     # True: stop at every audit checkpoint and between turns; "turn": only between turns
+    mechanics: int = 0            # which of the table's own rules apply: a journal replays under the rules it was played with
 
     def new_id(self) -> int:
         self.next_id += 1

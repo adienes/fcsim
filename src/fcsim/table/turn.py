@@ -210,6 +210,14 @@ def _cleanup(game: Game) -> bool:
 
 
 def _queue_step_triggers(game: Game, step: str) -> None:
+    active = game.seats[game.turn.active]
+    rad = sum(n for kind, n in active.counters.items() if kind.lower().startswith("rad"))
+    if game.mechanics >= 1 and step == "main1" and rad > 0 and active.status == "alive":
+        # Rule 728.1: an ability with no source, so no permanent's hook can carry it. In the fourth pod a
+        # player remembered it late and put it on the stack by hand.
+        game.pending_triggers.append({"id": game.new_id(), "seat": active.index, "source": None,
+                                      "text": f"Rad counters (rule 728.1): mill {rad} card(s), one for each of your rad counters; for each nonland "
+                                              "card milled this way, lose 1 life and remove one rad counter."})
     for entry in game.ledger:
         if entry.get("kind") == "step_trigger" and entry.get("step") == step \
                 and entry.get("whose", "each") in ("each", game.turn.active):

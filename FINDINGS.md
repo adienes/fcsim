@@ -85,6 +85,7 @@ the way past it when a card says otherwise:
 | Paying for a spell: the permanents tapped must be able to make the cost, colors, X and commander tax included | refused, unless the payment's `note` says what else pays. The third pod paid {2}{G}{G} with one green source; the auditor found it a turn later |
 | What a player can afford | the briefing lists the cards its untapped mana sources can pay for, so no model counts lands |
 | Triggers and holds of a card any auditor has described before | on the ledger from the moment the card arrives, from a hook library kept across games (R12) |
+| The rad counter trigger (rule 728.1), an ability with no source that no permanent's hook can carry | queued by the table as the player's first main phase begins. Rules the table takes over are numbered (`mechanics` in a game's config), so a journal replays under the rules it was played with |
 | Still the agents' and the auditor's: everything a card's text says | ability costs, menace, the legend rule and zero toughness are next |
 
 ## Second pod: what the new driver did
