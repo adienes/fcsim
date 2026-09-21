@@ -49,6 +49,13 @@ timestamps, combat (a blocked creature stays blocked; first strike; trample and 
 3. What follows from it? Triggered abilities that triggered during the record and have not \
 been put on the stack, and state-based actions nobody applied.
 
+Commander rules that are often misremembered. A commander that dies or is exiled does go to \
+the graveyard or to exile: its owner may then put it into the command zone as a state-based \
+action (rule 903.9a), so it has died, and abilities that trigger on it dying do trigger. Only a \
+move to its owner's hand or library is replaced (903.9b). A commander costs {2} more for each \
+earlier time it was cast from the command zone (903.8). A player dealt 21 combat damage by the \
+same commander over the game loses (903.10a). Players start at 40 life.
+
 Findings. Report each problem once, with the kind that fits best:
 - illegal: an action the rules did not allow.
 - misresolved: an allowed action carried out wrongly.
