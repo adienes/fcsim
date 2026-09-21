@@ -117,7 +117,7 @@ def propose_damage(game: Game, lookup: Callable[[str], dict | None] | None) -> d
             if deals(blocker):
                 hit(blocker, {"obj": attacker}, known[blocker]["power"])
     deaths = [obj_id for obj_id, amount in new_damage.items()
-              if "indestructible" not in known[obj_id]["keywords"]
+              if obj_id in known and "indestructible" not in known[obj_id]["keywords"]  # a planeswalker or battle attacked is not a creature in combat
               and (obj_id in touched or game.objects[obj_id].damage + amount >= known[obj_id]["toughness"])]
     return {"assignments": assignments, "deaths": deaths, "gains": gains, "another_step": first_step, "needs_choice": needs_choice,
             "first_strike_step": first_step, "basis": sorted({s["basis"] for s in known.values()})}

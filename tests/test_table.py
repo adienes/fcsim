@@ -1235,3 +1235,19 @@ def test_alternatives_alone_decide_whatever_event_is_written_beside_them():
     assert triggers.matches(zuko, from_hand, hook, alternatives_alone=False)        # how it was read, kept only to replay games recorded then
     shared = {"who": "you", "any_of": [{"event": "cast"}, {"event": "attacks"}]}     # a filter beside the alternatives narrows each of them
     assert triggers.matches(shared, mine_from_exile, hook) and not triggers.matches(shared, from_hand, hook)
+
+
+def test_combat_damage_to_a_planeswalker_takes_its_loyalty_and_the_arithmetic_copes():
+    table, runner, n = combat_table({"A1": {"power": "3", "toughness": "3"}, "B1": {"power": "0", "toughness": "0"}})
+    oko = next(o for o in table.game.objects.values() if o.name == n["B1"])
+    oko.type_line, oko.counters = "Legendary Planeswalker — Oko", {"loyalty": 4}
+    pass_until(table, runner, "begin_combat")
+    for seat in (0, 1, 2):
+        runner.step(seat, "pass_priority")
+    runner.step(0, "declare_attackers", {"attacks": [{"attacker": f"@{n['A1']}", "target": {"object": f"@{n['B1']}"}}]})
+    while table.expected()[0][1] != "combat_damage":
+        seat, kind = table.expected()[0]
+        runner.step(seat, {"priority": "pass_priority"}.get(kind, kind))
+    assert table.proposed_damage(0)["lines"] == [f"{n['A1']} deals 3 to {n['B1']}"]          # this raised, and took a real game down with it
+    done = runner.step(0, "combat_damage", {"as_proposed": True})
+    assert f"{n['A1']} deals 3 to {n['B1']}, which has 1 loyalty left." in done["log"] and oko.id in table.game.objects

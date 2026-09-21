@@ -586,6 +586,18 @@ class Table:
                                                          "commander": source.id, "amount": amount}, told)
             else:
                 victim = mutations.get(game, hit["target"]["obj"])
+                if "planeswalker" in victim.type_line.lower() and "creature" not in victim.type_line.lower():
+                    # Rule 306.8: damage dealt to a planeswalker takes that many loyalty counters off it; with none left it goes (704.5i).
+                    left = max(0, victim.counters.get("loyalty", 0) - amount)
+                    victim.counters["loyalty"] = left
+                    told.public.append(f"{ops._named(source)} deals {amount} to {ops._named(victim)}, which has {left} loyalty left.")
+                    if amount:
+                        game.facts.append(triggers.fact("damage", name=source.name, controller=source.controller, obj=source, to="permanent",
+                                                        target_id=victim.id, amount=amount, combat=True))
+                    if left == 0 and game.mechanics >= 5:
+                        mutations.move(game, victim, "graveyard")
+                        told.public.append(f"{ops._named(victim)} has no loyalty left and is put into its owner's graveyard (rule 704.5i).")
+                    continue
                 victim.damage += amount
                 if amount:
                     game.facts.append(triggers.fact("damage", name=source.name, controller=source.controller, obj=source, to="permanent",

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import difflib
 import json
+import traceback
 import random
 import re
 import secrets
@@ -827,6 +828,12 @@ class _Pod:
                 self.report["stopped"] = str(stop)
             except RunnerError as error:
                 self.report["stopped"] = f"model error: {error}"
+            except Exception as error:  # noqa: BLE001 - a bug in the driver or the table must not cost the game
+                # The journal holds every accepted call, so the game can be resumed once the bug is fixed; say what happened
+                # where it will be seen. The second game of the first batch died of an attack on a planeswalker and left no report.
+                self.report["stopped"] = f"internal error: {error!r}"
+                self.directory.write("error.txt", traceback.format_exc())
+                self.echo(f"INTERNAL ERROR, the game is stopped and can be resumed: {error!r}")
         game = self.table.game
         self.directory.flush_log()
         self.report["standings"] = [{"seat": s.index, "name": s.name, "status": s.status, "life": s.life, "hand": len(s.hand),

@@ -876,3 +876,24 @@ def test_the_driver_is_an_object_whose_pieces_can_be_tried_without_playing_a_gam
     told = pod.briefing(first)
     assert "WHAT YOUR UNTAPPED MANA CAN PAY FOR" in told and "YOUR HAND" in told and pod.when().startswith(f"Round 1, {names[first]}'s turn")
     assert pod.news(first).startswith("Since your last wake:") or pod.news(first).startswith("Nothing has happened")
+
+
+def test_a_bug_in_the_driver_stops_the_game_where_it_can_be_resumed_instead_of_losing_it(database, tmp_path, monkeypatch):
+    from fcsim.play import pod
+    budget = Budget(max_calls=100)
+    calls = {"n": 0}
+
+    def breaks_once(table):
+        calls["n"] += 1
+        if calls["n"] == 3:
+            raise KeyError("a planeswalker the arithmetic did not expect")
+        return []
+    monkeypatch.setattr(pod, "_must_lose", breaks_once)
+    report = play_pod(decks(tmp_path), [ScriptedSeat(budget) for _ in range(3)], FakeRunner([OK] * 20, budget), database, cycles=2, seed=4,
+                      out_root=tmp_path / "games", echo=lambda *_: None)
+    directory = Path(report["directory"])
+    assert report["stopped"].startswith("internal error: KeyError") and "Traceback" in (directory / "error.txt").read_text()
+    assert (directory / "report.md").is_file() and report["journal"] == "replays to the same game"
+    monkeypatch.undo()
+    resumed = play_pod([], [ScriptedSeat(budget) for _ in range(3)], FakeRunner([OK] * 20, budget), database, cycles=1, resume=directory, echo=lambda *_: None)
+    assert resumed["stopped"] is None and resumed["turns_played"] >= 3                     # the journal had everything: the game goes on
