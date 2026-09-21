@@ -1,0 +1,97 @@
+1 Arcane Signet
+1 Athreos, Shroud-Veiled
+1 Atraxa, Praetors' Voice
+1 Avacyn, Angel of Hope
+1 Birds of Paradise
+1 Bloom Tender
+1 Breeding Pool
+1 Carth the Lion
+1 Chromatic Lantern
+1 Chromatic Orrery
+1 Command Tower
+1 Commander's Sphere
+1 Counterspell
+1 Cultivate
+1 Cyclonic Rift
+1 Deepglow Skate
+1 Delighted Halfling
+1 Demonic Tutor
+1 Doubling Season
+1 Dryad of the Ilysian Grove
+1 Elspeth, Sun's Champion
+1 Exotic Orchard
+1 Faeburrow Elder
+1 Farseek
+1 Fellwar Stone
+1 Fierce Guardianship
+1 Flooded Strand
+2 Forest
+1 Godless Shrine
+1 Hallowed Fountain
+1 Heliod, God of the Sun
+1 Heroic Intervention
+1 Ichormoon Gauntlet
+1 Indatha Triome
+1 Iroas, God of Victory
+2 Island
+1 Jodah, the Unifier
+1 Karametra, God of Harvests
+1 Keranos, God of Storms
+1 Ketria Triome
+1 Klothys, God of Destiny
+1 Kodama's Reach
+1 Kruphix, God of Horizons
+1 Leyline of the Guildpact
+1 Mana Drain
+1 Marsh Flats
+1 Mirari's Wake
+1 Misty Rainforest
+1 Mogis, God of Slaughter
+1 Mountain
+1 Nature's Lore
+1 Nicol Bolas, Dragon-God
+1 Nicol Bolas, God-Pharaoh
+1 Nylea, God of the Hunt
+1 Nylea, Keen-Eyed
+1 Oath of Teferi
+1 Overgrown Tomb
+1 Paradox Haze
+1 Path of Ancestry
+1 Path to Exile
+2 Plains
+1 Polluted Delta
+1 Primevals' Glorious Rebirth
+1 Rampant Growth
+1 Rhystic Study
+1 Sacred Foundry
+1 Scalding Tarn
+1 Sisay, Weatherlight Captain
+1 Smothering Tithe
+1 Sol Ring
+1 Spara's Headquarters
+1 Sphinx of the Second Sun
+1 Steam Vents
+1 Sterling Grove
+1 Stomping Ground
+2 Swamp
+1 Swords to Plowshares
+1 Tamiyo, Field Researcher
+1 Teferi's Protection
+1 Temple Garden
+1 The Chain Veil
+1 The World Tree
+1 Three Visits
+1 Timeless Lotus
+1 Ugin, the Spirit Dragon
+1 Urza's Ruinous Blast
+1 Vampiric Tutor
+1 Verdant Catacombs
+1 Vorinclex, Monstrous Raider
+1 Vraska, Betrayal's Sting
+1 Watery Grave
+1 Windswept Heath
+1 Wooded Foothills
+1 Xenagos, God of Revels
+1 Zagoth Triome
+
+1 Esika, God of the Tree
