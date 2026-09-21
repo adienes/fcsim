@@ -62,7 +62,7 @@ def _selected(game: Game, dice: Dice, actor: int, op: dict) -> list[Obj]:
     return [mutations.get(game, i) for i in ids]
 
 
-def apply_op(game: Game, dice: Dice, actor: int, op: dict, told: Told) -> None:
+def apply_op(game: Game, dice: Dice, actor: int, op: dict, told: Told, *, by_table: bool = False) -> None:
     kind, me = op.get("op"), _who(game, actor)
     because = f" ({op['because']})" if op.get("because") else ""
     match kind:
@@ -256,6 +256,14 @@ def apply_op(game: Game, dice: Dice, actor: int, op: dict, told: Told) -> None:
             told.public.append(f"{player.name} has taken {player.commander_damage[key]} commander damage from {key}.")
         case "eliminate":
             seat = _seat(game, op.get("seat"))
+            loser = game.seats[seat]
+            if not by_table and game.gated and game.mechanics >= 6 and (
+                    loser.life <= 0 or loser.counters.get("poison", 0) >= 10 or loser.drew_from_empty or any(n >= 21 for n in loser.commander_damage.values())):
+                # Nothing brings a player back, so the driver has the turn so far audited before it removes one. In a whole game
+                # it never got the chance: each player at 0 life was removed by hand, in the same wake as the damage.
+                raise TableError("table_does_it", f"{loser.name} has lost by a state-based action, which the table sees for itself: it removes them "
+                                                  "as soon as anyone would get priority, once the turn so far has been checked. Leave this out "
+                                                  "and finish what you are doing.")
             mutations.eliminate(game, seat)
             told.public.append(f"{_who(game, seat)} is out of the game: {op.get('reason', 'no reason given')}.")
         case "extra_turn":
@@ -304,7 +312,8 @@ def _shaped(op: dict) -> dict:
     return {"op": named[0], **inner, **{k: v for k, v in op.items() if k != named[0]}}
 
 
-def apply_batch(game: Game, dice: Dice, actor: int, batch: list[dict]) -> Told:
+def apply_batch(game: Game, dice: Dice, actor: int, batch: list[dict], *, by_table: bool = False) -> Told:
+    """`by_table` is True for the driver's own repairs, which are made in the active player's name but are nobody's play."""
     if not isinstance(batch, list) or not batch or not all(isinstance(op, dict) for op in batch):
         raise TableError("bad_batch", "Give a non-empty list of mutations, each like {\"op\": \"tap\", \"objs\": [...]}.")
     told = Told()
@@ -313,5 +322,5 @@ def apply_batch(game: Game, dice: Dice, actor: int, batch: list[dict]) -> Told:
         if op.get("op") == "request_choice" and index != len(batch) - 1:
             raise TableError("bad_batch", "`request_choice` must be the last mutation in its batch: nothing "
                                           "after it can happen until the answers are in.")
-        apply_op(game, dice, actor, op, told)
+        apply_op(game, dice, actor, op, told, by_table=by_table)
     return told

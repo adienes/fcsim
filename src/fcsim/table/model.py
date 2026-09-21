@@ -20,6 +20,7 @@ SEAT_ZONES = ("library", "hand", "graveyard", "exile", "command")
 # 6: a script a player gave for one trigger that does nothing when it resolves is no resolution; they resolve it by hand.
 # And a card is not moved to the stack by hand: it is cast, which the table now allows during a resolution. An additional
 # combat phase comes after the phase it was made in, not after the step. A pool is left alone while its owner's effect keeps mana.
+# In a game with an auditor, a player who has lost by a state-based action is removed by the driver, not by another player.
 MECHANICS = 6
 
 

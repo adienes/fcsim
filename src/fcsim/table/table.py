@@ -902,7 +902,7 @@ class Table:
     def patch(self, batch: list[dict], because: str, *, _recorded: list | None = None) -> dict:
         """Repair the state going forward (a judge's remedy). Kills every open wake."""
         def run(game: Game):
-            told = ops.apply_batch(game, self.dice, game.turn.active, batch)
+            told = ops.apply_batch(game, self.dice, game.turn.active, batch, by_table=True)
             told.public.insert(0, f"The judge corrects the table: {because}")
             return told
         result = self._commit(None, "patch", {"mutations": batch, "because": because}, run, _recorded)

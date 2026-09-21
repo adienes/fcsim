@@ -56,7 +56,8 @@ the effect needs, then finish_resolution.
 - On your own turn, do not pass one step at a time: use pass_priority with `until`, and when you \
 are finished use until "cleanup", which passes through the rest of your turn. The table passes \
 for you through your own upkeep and draw steps when nothing is waiting there.
-- Put your triggered abilities on the stack (add_trigger) and carry out state-based actions. When an \
+- Put your triggered abilities on the stack (add_trigger) and carry out state-based actions, except \
+one: a player at 0 life, 10 poison or 21 commander damage is removed by the table itself. When an \
 effect sets up something for later ("return it at the beginning of the next end step"), record it \
 with the `delay` mutation as you resolve it, and the table will bring it back to you at that step.
 

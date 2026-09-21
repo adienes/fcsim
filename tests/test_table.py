@@ -1458,3 +1458,21 @@ def test_an_additional_combat_made_during_combat_comes_after_that_combat_not_in_
     pass_until(old, before, "declare_attackers")
     before.step(0, "act", {"because": "as it was", "mutations": [{"op": "extra_combat"}]})
     assert old.game.turn.remaining[:2] == ["begin_combat", "declare_attackers"]
+
+
+def test_in_an_audited_game_a_player_who_has_lost_is_removed_by_the_driver_not_by_another_player():
+    table = Table(seats(), seed=5, first=0, gated="turn")
+    runner = ScriptedRunner(table)
+    for seat in range(3):
+        runner.step(seat, "keep")
+    pass_until(table, runner, "main1")
+    runner.step(0, "act", {"because": "a big spell", "mutations": [{"op": "life", "seat": 1, "delta": -40}]})
+    refused = table.act(0, "act", {"because": "704.5a", "mutations": [{"op": "eliminate", "seat": 1, "reason": "0 life"}]})
+    assert refused["error"]["code"] == "table_does_it" and table.game.seats[1].status == "alive"
+    runner.step(0, "act", {"because": "Door to Nothingness", "mutations": [{"op": "eliminate", "seat": 2, "reason": "a card says so"}]})   # not a state-based loss: theirs to do
+    table.patch([{"op": "eliminate", "seat": 1, "reason": "0 life, rule 704.5a"}], "state-based action")                                  # the driver, once the turn is checked
+    assert table.game.control.kind == "over" and table.game.winner == 0
+    assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()
+    free, other = started()                                             # with no auditor there is no driver to do it
+    pass_until(free, other, "main1")
+    other.step(0, "act", {"because": "x", "mutations": [{"op": "life", "seat": 1, "delta": -40}, {"op": "eliminate", "seat": 1, "reason": "0 life"}]})
