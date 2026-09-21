@@ -309,6 +309,16 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
                  for e in events if (e["text"] and e["tool"] != "pass_priority") or e.get("private")][-40:]  # passes are noise
         return "Since your last wake:\n" + "\n".join(lines) if lines else "Nothing has happened since your last wake."
 
+    def ask_all(prompts: dict[int, str], schema: dict, *, quick: bool = False) -> list:
+        """One question, no tools, to several seats at the same time: (seat, reply) for each. Every such
+        question in a game comes through here. The caller builds the prompts, in this thread: the card
+        database is not for several threads at once. `quick` uses the lower-effort runners, if there are any."""
+        if not prompts:
+            return []
+        asked = (triage_runners or runners) if quick else runners
+        with ThreadPoolExecutor(max_workers=len(prompts)) as pool:
+            return list(pool.map(lambda seat: (seat, asked[seat].ask(systems[seat], prompts[seat], schema=schema)), prompts))
+
     def triage(seats: list[int]) -> dict[int, bool]:
         """Ask several seats at once, each with one question and no tools, whether they want to
         respond to what is on the stack. Most answers are no, and a no costs seconds, not a wake.
@@ -333,10 +343,7 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
         prompts = {seat: f"{when()} {question(seat)}\n\n"
                          f"{news(seat)}\n\n{briefing(seat)}" for seat in seats}
 
-        def one(seat: int):
-            return seat, (triage_runners or runners)[seat].ask(systems[seat], prompts[seat], schema=_TRIAGE)
-        with ThreadPoolExecutor(max_workers=len(seats)) as pool:
-            replies = list(pool.map(one, seats))
+        replies = ask_all(prompts, _TRIAGE, quick=True)
         answers = {}
         for seat, reply in replies:
             data = reply.data or {}
@@ -370,10 +377,7 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
                         f"exactly that many handles in `bottom`.\n\n{briefing(seat)}")
             prompts = {seat: question(seat) for seat in deciding}  # built here: the card database is not for several threads at once
 
-            def one(seat: int):
-                return seat, runners[seat].ask(systems[seat], prompts[seat], schema=_OPENING)
-            with ThreadPoolExecutor(max_workers=len(deciding)) as pool:
-                replies = list(pool.map(one, deciding))
+            replies = ask_all(prompts, _OPENING)
             for seat, reply in replies:
                 data, started = reply.data or {}, len(table.events)
                 result = table.act(seat, "mulligan") if data.get("keep") is False else table.act(seat, "keep", {"bottom": data.get("bottom") or []})
@@ -401,12 +405,7 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
                           "talking. Say what serves you: agree, refuse, bargain, bluff, point at the real threat. Deals are not "
                           f"binding. Leave `reply` empty to stay silent.\n\n{news(seat)}\n\n{briefing(seat)}") for seat in asked}
 
-        def one(seat: int):
-            return seat, runners[seat].ask(systems[seat], prompts[seat], schema=_REPLY)
-        if not asked:
-            return []
-        with ThreadPoolExecutor(max_workers=len(asked)) as pool:
-            answers = list(pool.map(one, asked))
+        answers = ask_all(prompts, _REPLY)
         said = []
         for seat, reply in answers:
             words = str((reply.data or {}).get("reply", "")).strip()
@@ -429,10 +428,7 @@ def _play(directory: GameDirectory, table: Table, names: list[str], decks: list,
                     "act=false to pass. Answer act=true only if you would actually do it now; you will then be woken to do it.")
         prompts = {seat: f"{when()} {question}\n\n{news(seat)}\n\n{briefing(seat)}" for seat in seats}
 
-        def one(seat: int):
-            return seat, (triage_runners or runners)[seat].ask(systems[seat], prompts[seat], schema=_WINDOW)
-        with ThreadPoolExecutor(max_workers=len(seats)) as pool:
-            replies = list(pool.map(one, seats))
+        replies = ask_all(prompts, _WINDOW, quick=True)
         acting = set()
         for seat, reply in replies:
             data = reply.data or {}
