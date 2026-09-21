@@ -1050,3 +1050,35 @@ def test_a_resumed_game_can_be_taken_up_from_an_earlier_event_and_nobody_counts_
     assert "WHAT WAS DONE" in auditor.asked[0]["prompt"] and f"event {back} " in auditor.asked[0]["prompt"]   # the turn it went back into is audited from its start
     played = sum(1 for e in events if e["tool"] == "play_land" and e["n"] not in gone)
     assert sum(1 for turn in measure(directory)["turns"] if turn["land"]) == played <= lands_before + 3   # the scores count each land once
+
+
+def test_a_missed_trigger_written_as_text_alone_unmarks_its_card_so_the_next_audit_gives_it_a_pattern(database, tmp_path):
+    from fcsim.audit.auditor import describe
+    from fcsim.cards import read_decklist, resolve
+    from fcsim.play.gamedir import GameDirectory
+    from fcsim.play.pod import _lookup, _Pod
+    from fcsim.table import Table
+
+    lists = [resolve(read_decklist(path), database) for path in decks(tmp_path)]
+    names = ["Talrand", "Pir", "Thrasios"]
+    directory = GameDirectory(tmp_path / "games", "pod_missed", 4)
+    table = Table([{"name": n, "commanders": [c.name for c in d.commanders], "library": [c.name for c in d.library()]} for n, d in zip(names, lists, strict=True)],
+                  seed=4, first=0, gated="turn", on_event=directory.journal, card_lookup=_lookup(database))
+    budget = Budget(max_calls=10)
+    pod = _Pod(directory, table, names, lists, [ScriptedSeat(budget) for _ in names], FakeRunner([], budget), database, 1, None, lambda *_: None)
+    for seat in range(3):
+        table.act(seat, "keep")
+    commander = table.view(0)["seats"][0]["command"][0]["handle"]
+    table.act(0, "act", {"because": "test", "mutations": [{"op": "move", "obj": commander, "to": "battlefield"}]})
+    handle = next(o["handle"] for o in table.view(None)["battlefield"])
+    table.apply_hooks([{"kind": "event_trigger", "handle": handle, "text": "Whenever one or more nonland cards are milled, ..."},
+                       {"kind": "static", "handle": handle, "text": "Other Wizards get +1/+1."}])
+    assert "(hooks written)" in describe(table.view(None), database)
+    pod.flag_missed({"kind": "trigger", "seat": 0, "summary": "A nonland card was milled, which triggers Talrand. It was never put on the stack."})
+    told = describe(table.view(None), database)
+    assert "(a trigger of this was missed: write its hooks again)" in told and "(hooks written)" not in told
+    assert [e.get("missed") for e in table.game.ledger] == [True, None]                        # the static ability is kept as it was
+    table.apply_hooks([{"kind": "event_trigger", "handle": handle, "text": "Whenever one or more nonland cards are milled, ...", "on": {"event": "milled", "nonland": True, "once": True}},
+                       {"kind": "static", "handle": handle, "text": "Other Wizards get +1/+1."}])
+    assert "(hooks written)" in describe(table.view(None), database) and not any(e.get("missed") for e in table.game.ledger)
+    assert Table.replay(table.config, table.events, card_lookup=_lookup(database)).game.to_dict() == table.game.to_dict()

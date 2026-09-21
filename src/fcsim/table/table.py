@@ -463,7 +463,9 @@ class Table:
                 raise TableError("bad_script", f"That is not a script the table can run ({wrong}). Leave `script` out and resolve the trigger by hand.")
         item = StackItem(id=game.new_id(), kind="triggered", controller=seat, source=source.id if source else None,
                          source_name=ops._named(source) if source else "a triggered ability", text=text,
-                         targets=args.get("targets", []), script=script, bound={"self": source.uid if source else None, "it": None})
+                         targets=args.get("targets", []), script=script,
+                         bound={"self": source.uid if source else None, "it": None, **((waiting or {}).get("about") or {})},
+                         given=bool(script) and game.mechanics >= 6)
         game.stack.append(item)
         if game.control.kind == "triggers":
             game.turn.passed = []  # something new is on the stack: everyone gets priority again, whoever passed before
@@ -865,6 +867,8 @@ class Table:
                      "controller": hook.get("controller", source.controller)}
             if hook["kind"] == "event_trigger" and isinstance(hook.get("on"), dict):
                 entry["on"] = {k: v for k, v in hook["on"].items() if isinstance(v, (str, int, bool, list))}  # a pattern over facts: see `triggers`
+            if hook["kind"] == "event_trigger" and "on" not in entry and hook.get("missed"):
+                entry["missed"] = True  # text alone, and the table has failed to offer it: whoever describes the card next is asked for a pattern
             hook["script"] = scripts.shaped(hook.get("script"))
             if hook.get("script") and hook["kind"] in ("event_trigger", "step_trigger") and scripts.problem(hook["script"]) is None:
                 # `scripted` is the driver's word that this script has earned its trust; without it the script is only kept.

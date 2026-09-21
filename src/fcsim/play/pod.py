@@ -486,7 +486,10 @@ class _Pod:
                     "draw {who, count}; mill {who, count}; create_token {token: {name, types, power, toughness, text}, count}; move {what, "
                     "to}; tap {what}; untap {what}; delay {step, text, script}. `what` is \"self\" (the permanent the ability is on); `on` is "
                     "\"self\", \"each_creature_you_control\", \"each_other_creature_you_control\" or a player; a player (`who`) is \"you\", "
-                    "\"each_opponent\" or \"each_player\"; `to` is battlefield, graveyard, exile, hand or command. \"wake\": anything else "
+                    "\"each_opponent\", \"each_player\" or, for a trigger about one thing, \"that_player\" (who lost the life, was dealt the "
+                    "damage, cast the spell); a `count` may be \"that_many\" and a `delta` \"that_many\" or \"minus_that_many\" for the amount "
+                    "it was about; `to` is battlefield, graveyard, exile, hand or command. A script that turns out to do nothing is handed back "
+                    "to you to resolve by hand. \"wake\": anything else "
                     "(a target, a choice, a card to look at, an effect these operations cannot say): you are woken to do it by hand. If "
                     "in doubt, \"wake\". For a trigger that says it triggered several times, `times` says how many go on the stack.")
         (_, reply), = self.ask_all({seat: f"{question}\n\n{self.news(seat)}\n\n{self.briefing(seat)}"}, _TRIGGERS, quick=True)
@@ -677,6 +680,8 @@ class _Pod:
         for finding in verdict.get("findings", []):
             seat = finding.get("seat")
             seat = seat if isinstance(seat, int) and 0 <= seat < self.count and self.table.game.seats[seat].status == "alive" else None
+            if finding["kind"] == "trigger":
+                self.flag_missed(finding)
             if finding["kind"] == "trigger" and seat is not None:
                 self.table.queue_trigger(seat, finding["summary"])
             elif finding["kind"] in SERIOUS and finding["kind"] != "trigger":
@@ -696,6 +701,17 @@ class _Pod:
                     self.wake(server, seat, "correction")  # the judge agreed there was a problem: no appeal this time
             if self.table.game.control.kind == "correction":
                 self.table.act(seat, "finish_step")
+
+    def flag_missed(self, finding: dict) -> None:
+        """A missed trigger of a permanent whose hook for it is text alone: say so on the ledger, so that the next
+        audit is asked for a pattern in place of being told the card is done."""
+        game = self.table.game
+        for obj in [game.objects[i] for i in game.battlefield]:
+            mine = [e for e in game.ledger if e.get("source") == obj.id]
+            bare = [e for e in mine if e.get("kind") == "event_trigger" and not e.get("on") and not e.get("missed")]
+            if bare and obj.name.split(",")[0] in str(finding.get("summary", "")):
+                hooks = [{**{k: v for k, v in e.items() if k != "source"}, **({"missed": True} if e in bare else {})} for e in mine]
+                self.table.rewrite_hooks(self.table.handles[None].of("c", obj.id), hooks)
 
     def adjudicate(self, since: int) -> None:
         """A player has contested a finding. In the first real game nobody could, and two players gave
@@ -989,6 +1005,8 @@ def _script_trusted(card, hook: dict) -> bool:
     scored = [(difflib.SequenceMatcher(None, str(hook.get("text", "")).lower(), line.lower()).ratio(), line) for line in lines if line]
     ratio, printed = max(scored, default=(0, ""))
     effect = printed.split(", ", 1)[1] if ", " in printed else printed
+    if any(step.get(k) in scripts.AMOUNTS for step in hook["script"] if isinstance(step, dict) for k in ("count", "delta")):
+        effect = re.sub(r"\bthat (many|much)\b", "", effect, flags=re.I)  # a variable amount the table saw for itself is no unknown
     return ratio >= 0.55 and not _CHOICES.search(effect)
 
 

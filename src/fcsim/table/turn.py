@@ -267,12 +267,14 @@ def collect_triggers(game: Game) -> None:
                     # The same ability triggering again for something that happened together: one waiting item with a
                     # count, not an item each. Ten attackers made Norin the Wary's controller decline thirty offers.
                     if not on.get("once"):
+                        grouped[id(hook)].pop("about", None)  # about several things at once: no one "that player"
                         grouped[id(hook)]["count"] += 1
                         grouped[id(hook)]["causes"].append(cause)
                         _describe(grouped[id(hook)], hook)
                     continue
                 fired.add(id(hook))
-            waiting = {"id": game.new_id(), "seat": hook["controller"], "source": hook.get("source"), "count": 1, "causes": [cause]}
+            waiting = {"id": game.new_id(), "seat": hook["controller"], "source": hook.get("source"), "count": 1, "causes": [cause],
+                       "about": about(game, fact)}  # for a script its controller may give: "that player mills that many"
             _describe(waiting, hook)
             grouped[id(hook)] = waiting
             game.pending_triggers.append(waiting)
@@ -294,12 +296,18 @@ def _state_based_deaths(game: Game) -> None:
             game.announcements.append(f"{gone.name} is a commander, and goes from the graveyard to the command zone (rule 903.9a).")
 
 
+def about(game: Game, fact: dict | None) -> dict:
+    """What a script's "it", "that_player" and "that_many" stand for, from the fact that set the trigger off."""
+    it = game.objects.get((fact or {}).get("id"))
+    player = (fact or {}).get("to_player") if (fact or {}).get("to_player") is not None else (fact or {}).get("controller")
+    return {"it": it.uid if it else None, "player": player, "amount": abs(int((fact or {}).get("amount") or (fact or {}).get("delta") or 0))}
+
+
 def _stack_script(game: Game, entry: dict, cause: str, fact: dict | None = None) -> None:
     """A trigger whose effect the table carries out itself goes straight on the stack: nobody has to be
     woken to put it there, and nobody to resolve it. It can still be responded to."""
     source = game.objects.get(entry.get("source"))
-    it = game.objects.get((fact or {}).get("id"))
-    bound = dict(entry.get("bound") or {"self": source.uid if source else None, "it": it.uid if it else None})
+    bound = dict(entry.get("bound") or {"self": source.uid if source else None, **about(game, fact)})
     if source is None:  # a delayed trigger belongs to no permanent, but the card it came from is still somewhere ("return Norin the Wary")
         source = next((o for o in game.objects.values() if bound.get("self") is not None and o.uid == bound["self"]), None)
     game.stack.append(StackItem(id=game.new_id(), kind="triggered", controller=entry["controller"], source=entry.get("source"),
@@ -399,11 +407,18 @@ def _begin_resolution(game: Game) -> None:
         return grant_priority(game, game.turn.active)
     if item.script:
         from . import ops, scripts  # ops imports this module
-        told = ops.Told()
+        told, written = ops.Told(), len(game.ledger)
         scripts.run(game, item.script, item.controller, item.bound, lambda op: ops.apply_op(game, None, item.controller, op, told))
-        game.announcements.append(f"{item.source_name} ({game.seats[item.controller].name}) resolves by script: "
-                                  + (" ".join(told.public) or "it does nothing now."))
-        return grant_priority(game, game.turn.active)
+        if told.public or len(game.ledger) != written or not item.given:
+            game.announcements.append(f"{item.source_name} ({game.seats[item.controller].name}) resolves by script: "
+                                      + (" ".join(told.public) or "it does nothing now."))
+            return grant_priority(game, game.turn.active)
+        # A card's own script may find nothing to do. One a player wrote a moment ago for this very trigger meant something,
+        # and the table's few operations could not say it: "that player mills that many cards" was written as a mill that
+        # milled nothing, the stack item was gone, and the auditor had it put right a turn later.
+        game.announcements.append(f"The script {game.seats[item.controller].name} gave for {item.source_name} does nothing as written, "
+                                  "so it is theirs to resolve by hand.")
+        item.script = None
     game.resolution = {"item": item, "batches": 0, "status": "open"}
     game.control = Control("resolution", [item.controller])
 

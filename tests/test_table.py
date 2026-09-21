@@ -1339,3 +1339,48 @@ def test_a_trigger_on_what_a_permanent_is_attached_to_fires_for_that_and_nothing
     waiting = table.view(0)["waiting_triggers"]
     assert [w["text"].split(",")[0] for w in waiting] == ["Whenever equipped creature dies"] and f"(because {bearer} " in waiting[0]["text"]
     assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()
+
+
+def test_a_script_can_speak_of_the_player_and_the_amount_its_trigger_was_about():
+    """Mindcrank: "Whenever an opponent loses life, that player mills that many cards." Its controller wrote a mill of
+    nothing for everybody, having no word for either; the table counted it resolved, and the auditor put it right a turn later."""
+    from fcsim.table import scripts
+    assert scripts.problem([{"op": "mill", "who": "that_player", "count": "that_many"}]) is None
+    assert scripts.problem([{"op": "life", "who": "that_player", "delta": "minus_that_many"}]) is None
+    assert "must be int" in scripts.problem([{"op": "mill", "who": "you", "count": "minus_that_many"}])   # nobody mills a negative number
+    table, runner = started()
+    pass_until(table, runner, "main1")
+    crank = spell_in_hand(table, 0)
+    runner.step(0, "act", {"because": "test set-up", "mutations": [{"op": "move", "obj": f"@{crank}", "to": "battlefield"}]})
+    handle = next(o["handle"] for o in table.view(None)["battlefield"] if o["name"] == crank)
+    table.apply_hooks([{"kind": "event_trigger", "handle": handle, "text": "Whenever an opponent loses life, that player mills that many cards.",
+                        "on": {"event": "loses_life", "who": "opponent"}}])
+    runner.step(0, "act", {"because": "test", "mutations": [{"op": "life", "seat": 2, "delta": -3}]})
+    runner.step(0, "pass_priority")
+    waiting = table.view(0)["waiting_triggers"][0]
+    before = table.view(None)["seats"][2]["library"]["count"]
+    runner.step(0, "add_trigger", {"pending": waiting["handle"], "script": [{"op": "mill", "who": "that_player", "count": "that_many"}]})
+    for _ in range(3):
+        runner.step(table.expected()[0][0], "pass_priority")
+    assert table.view(None)["seats"][2]["library"]["count"] == before - 3 and "Cat mills" in " ".join(table.events[-1]["public"])
+    assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()
+
+
+def test_a_script_its_player_gave_that_does_nothing_is_theirs_to_resolve_by_hand():
+    table, runner = started()
+    pass_until(table, runner, "main1")
+    table.queue_trigger(0, "When the creature died, its counters go on The Ozolith.")
+    runner.step(0, "pass_priority")
+    assert table.expected() == [(0, "triggers")]
+    gone = [{"op": "counters", "on": "it", "kind": "+1/+1", "delta": 1}]      # "it" is nothing the table knows here: the script will find nothing to do
+    runner.step(0, "add_trigger", {"pending": table.view(0)["waiting_triggers"][0]["handle"], "script": gone})
+    assert table.game.stack[-1].given
+    for _ in range(3):
+        runner.step(table.expected()[0][0], "pass_priority")
+    assert table.expected() == [(0, "resolution")] and "does nothing as written, so it is theirs to resolve by hand" in " ".join(table.events[-1]["public"])
+    runner.step(0, "resolve", {"because": "by hand", "mutations": [{"op": "life", "seat": 0, "delta": 1}]})
+    runner.step(0, "finish_resolution")
+    assert table.view(None)["seats"][0]["life"] == 41 and not table.game.stack
+    assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()
+    old = Table(seats(), seed=5, first=0, mechanics=5)     # a journal from before this was the rule replays as it was played
+    assert old.config["mechanics"] == 5

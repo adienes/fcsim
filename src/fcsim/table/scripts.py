@@ -17,7 +17,8 @@ from __future__ import annotations
 from .model import Game, TableError
 
 OBJECTS = ("self", "it", "each_creature_you_control", "each_other_creature_you_control")
-PLAYERS = ("you", "each_opponent", "each_player", "its_controller")
+PLAYERS = ("you", "each_opponent", "each_player", "its_controller", "that_player")
+AMOUNTS = ("that_many", "minus_that_many")  # what the trigger was about: the life lost or gained, the damage dealt, the counters put on
 STEPS = ("upkeep", "draw", "main1", "begin_combat", "end_combat", "main2", "end")
 ZONES = ("battlefield", "graveyard", "exile", "hand", "command")
 _SHAPES = {  # operation -> the fields it must have, each with what it may hold
@@ -68,8 +69,10 @@ def problem(script) -> str | None:
             if isinstance(allowed, tuple):
                 if value not in allowed:
                     return f"`{step['op']}.{field}` is one of: {', '.join(allowed)}"
+            elif allowed is int and value in AMOUNTS and (field == "delta" or value == "that_many"):
+                continue  # "that player mills that many cards": the table saw how many, so nobody has to say
             elif not isinstance(value, allowed) or isinstance(value, bool):
-                return f"`{step['op']}.{field}` must be {allowed.__name__}"
+                return f"`{step['op']}.{field}` must be {allowed.__name__}" + (f", or one of: {', '.join(AMOUNTS)}" if allowed is int else "")
         if step["op"] == "delay" and (nested := problem(step["script"])):
             return f"in the delayed script: {nested}"
         if step["op"] == "delay" and any(s["op"] == "delay" for s in step["script"]):
@@ -88,6 +91,8 @@ def _objects(game: Game, who: str, controller: int, bound: dict) -> list:
 
 def _players(game: Game, who: str, controller: int, bound: dict) -> list[int]:
     alive = [s.index for s in game.seats if s.status == "alive"]
+    if who == "that_player":  # whoever the trigger was about: who lost the life, who was dealt the damage, who cast the spell
+        return [s for s in alive if s == bound.get("player")]
     if who == "its_controller":
         found = _objects(game, "it", controller, bound)
         return [found[0].controller] if found else []
@@ -100,6 +105,8 @@ def run(game: Game, script: list[dict], controller: int, bound: dict, apply) -> 
     the effect expects it is left alone."""
     for step in script:
         op = step["op"]
+        step = {k: (int(bound.get("amount") or 0) * (-1 if v == "minus_that_many" else 1) if k in ("count", "delta") and v in AMOUNTS else v)
+                for k, v in step.items()}
         if op == "counters":
             for obj in (_objects(game, step["on"], controller, bound) if step["on"] in OBJECTS else []):
                 if obj.zone == "battlefield":

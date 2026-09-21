@@ -17,7 +17,8 @@ SEAT_ZONES = ("library", "hand", "graveyard", "exile", "command")
 # again, and identical triggers queued together are one item with a count. 3: a trusted scripted trigger goes on the stack
 # and resolves by itself. 4: a creature with lethal damage, or no toughness left, dies before anyone gets priority. 5: where a
 # hook lists alternatives, they alone decide: the `event` beside them is not one more pattern that matches everything.
-MECHANICS = 5
+# 6: a script a player gave for one trigger that does nothing when it resolves is no resolution; they resolve it by hand.
+MECHANICS = 6
 
 
 class TableError(ValueError):
@@ -117,6 +118,7 @@ class StackItem:
     auto_permanent: bool = False  # declared at cast: enters with nothing to decide, so no wake
     script: list | None = None    # a triggered ability the table resolves itself (see `scripts`)
     bound: dict = field(default_factory=dict)  # what "self" and "it" meant when it triggered, by uid
+    given: bool = False           # the script is its controller's own, written for this one trigger, not a card's trusted one
 
 
 @dataclass

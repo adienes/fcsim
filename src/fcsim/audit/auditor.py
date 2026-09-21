@@ -121,7 +121,10 @@ delay {step, text, script} for "at the beginning of the next end step, ..." (its
 delay again; add "whose": "mine" for "your next ..."). `what` is "self" (this permanent) or "it" (the \
 object that caused the trigger); `on` is one of those, "each_creature_you_control", \
 "each_other_creature_you_control", or a player; a player (`who`) is "you", "each_opponent", \
-"each_player" or "its_controller"; `to` is battlefield, graveyard, exile, hand or command. Example, \
+"each_player", "its_controller" or "that_player" (whoever the trigger was about: the player who lost \
+the life, was dealt the damage, cast the spell); a `count` may be "that_many", and a `delta` \
+"that_many" or "minus_that_many", for the amount the trigger was about (Mindcrank: [{"op": "mill", \
+"who": "that_player", "count": "that_many"}]); `to` is battlefield, graveyard, exile, hand or command. Example, \
 Norin the Wary: [{"op": "move", "what": "self", "to": "exile"}, {"op": "delay", "step": "end", "text": \
 "Return Norin the Wary to the battlefield under its owner's control.", "script": [{"op": "move", \
 "what": "self", "to": "battlefield"}]}]. A scripted resolution appears in the record as "resolves by \
@@ -132,7 +135,9 @@ creature attacks") is one hook whose `on` lists the alternatives under `any_of`,
 pattern of its own with its own `event` and filters; the `event` written beside `any_of` is ignored, \
 and filters written beside it apply to every alternative. What you write for a permanent replaces everything the ledger held for it, so give all of \
 its hooks together; a permanent marked "(hooks written)" needs none from you unless what it has is \
-wrong. Write a hook's `text` in the card's own words ("At the beginning of your end step, you may ..."), never with a \
+wrong. One marked "(a trigger of this was missed: write its hooks again)" has a trigger written as text \
+alone, which the table therefore never offered its controller: write all its hooks again, with an `on` \
+for every trigger a pattern fits. Write a hook's `text` in the card's own words ("At the beginning of your end step, you may ..."), never with a \
 seat number or a player's name: it is kept and used again for other copies of the card, in other \
 games. Write no hook for a permanent that needs none.
 
@@ -315,8 +320,12 @@ def describe(view: dict, database: CardDatabase | None = None) -> str:
         # A permanent whose script is still waiting for a second opinion is not marked: the auditor describes it
         # again without seeing the first description, and only agreement makes the script trusted.
         unsure = {e.get("source") for e in view["ledger"] if e.get("script") and not e.get("scripted")}
-        described = {e.get("source") for e in view["ledger"] if e.get("kind") != "delayed"} - unsure
-        lines += [f"    - {_object_line(obj, names, combat, database)}" + (" (hooks written)" if obj["handle"] in described else "") for obj in mine]
+        # Nor is one whose trigger, written as text alone, the table has failed to offer: The Wise Mothman's mill trigger was
+        # missed four times in one game, each a finding and a late trigger, while the mark kept anyone from giving it a pattern.
+        missed = {e.get("source") for e in view["ledger"] if e.get("missed")}
+        described = {e.get("source") for e in view["ledger"] if e.get("kind") != "delayed"} - unsure - missed
+        lines += [f"    - {_object_line(obj, names, combat, database)}" + (" (hooks written)" if obj["handle"] in described else "")
+                  + (" (a trigger of this was missed: write its hooks again)" if obj["handle"] in missed else "") for obj in mine]
     effects = [e for e in view["ledger"] if e.get("kind") == "static"]
     if effects:
         lines = ["CONTINUOUS EFFECTS IN PLAY (they change what is printed on other cards)",
