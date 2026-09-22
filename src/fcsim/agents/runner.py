@@ -30,6 +30,17 @@ def seconds_until_reset(message: str, now: datetime.datetime | None = None) -> i
     return int((reset - now).total_seconds()) + 120
 
 
+_TRANSIENT = re.compile(r"\b(500|502|503|504|529)\b|overloaded|server-side issue|internal server error|try again in a moment", re.I)
+_PAUSES = (30, 90, 180)  # seconds before each of three more attempts at a call that failed on the server's side
+
+
+def transient(message: str) -> bool:
+    """Whether Claude Code's error is the API's own passing trouble (a 500, a 529 Overloaded), worth trying again, as against
+    the session limit, a bad request or a model that would not answer in form. Two games in one evening stopped on such
+    errors, one of them at round 8 of a game that had gone well; a player at a table would have waited a minute."""
+    return bool(_TRANSIENT.search(message)) and "session limit" not in message.lower()
+
+
 class RunnerError(RuntimeError):
     """The model could not be run, or did not answer in the form asked for."""
 
@@ -123,7 +134,21 @@ class ClaudeCodeRunner:
 
     def ask(self, system: str, prompt: str, *, schema: dict | None = None,
             tools: McpConnection | None = None) -> Reply:
-        """One fresh session, requesting structured output when a schema is supplied."""
+        """One fresh session, requesting structured output when a schema is supplied. An error on the API's side is tried
+        again, up to three more times with a pause between; everything else is raised at once."""
+        for attempt, pause in enumerate((*_PAUSES, None)):
+            try:
+                return self._ask(system, prompt, schema=schema, tools=tools)
+            except RunnerError as error:
+                if pause is None or not transient(str(error)):
+                    raise
+                self.tell(f"the model's API failed on its own side ({str(error)[:120]}); trying again in {pause} s")
+                time.sleep(pause)
+        raise AssertionError("unreachable")  # pragma: no cover
+
+    tell = staticmethod(lambda line: print(f"         {line}", flush=True))  # where a retry is announced; a test replaces it
+
+    def _ask(self, system: str, prompt: str, *, schema: dict | None = None, tools: McpConnection | None = None) -> Reply:
         if shutil.which(self.executable) is None:
             raise RunnerError(f"`{self.executable}` is not on PATH. Install Claude Code and log in.")
         self.budget.begin()

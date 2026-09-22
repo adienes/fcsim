@@ -189,3 +189,33 @@ def test_the_session_limits_own_message_says_how_long_to_wait():
     assert seconds_until_reset("limit · resets 12am", datetime.datetime(2026, 9, 21, 23, 0)) is None             # not the session limit's message
     assert seconds_until_reset("You've hit your session limit · resets 12am", datetime.datetime(2026, 9, 21, 23, 0)) == 3600 + 120
     assert seconds_until_reset("model error: The model did not answer within 600 seconds.") is None
+
+
+def test_an_error_on_the_apis_own_side_is_tried_again_and_the_rest_are_not(monkeypatch):
+    import json
+    import subprocess
+
+    from fcsim.agents import runner
+    from fcsim.agents.runner import ClaudeCodeRunner, RunnerError, transient
+
+    assert transient("Claude Code reported an error: API Error: 529 Overloaded. This is a server-side issue, usually temporary")
+    assert transient("API Error: 500 Internal server error") and not transient("You've hit your session limit · resets 3:30pm") \
+        and not transient("The model did not answer in the requested form: hello")
+    answers = [{"is_error": True, "result": "API Error: 500 Internal server error. This is a server-side issue, usually temporary — try again in a moment."},
+               {"is_error": True, "result": "API Error: 529 Overloaded"},
+               {"result": "fine", "structured_output": {"ok": True}, "total_cost_usd": 0.01, "usage": {}}]
+    slept, told = [], []
+    monkeypatch.setattr(runner.shutil, "which", lambda name: "/usr/bin/claude")
+    monkeypatch.setattr(runner.subprocess, "run", lambda command, **_: subprocess.CompletedProcess(command, 0, stdout=json.dumps(answers.pop(0)), stderr=""))
+    monkeypatch.setattr(runner.time, "sleep", slept.append)
+    monkeypatch.setattr(ClaudeCodeRunner, "tell", staticmethod(told.append))
+    reply = ClaudeCodeRunner().ask("system", "prompt", schema={"type": "object"})
+    assert reply.data == {"ok": True} and slept == [30, 90] and len(told) == 2 and "529 Overloaded" in told[1]
+    answers[:] = [{"is_error": True, "result": "You've hit your session limit · resets 3:30pm (America/New_York)"}]
+    with pytest.raises(RunnerError, match="session limit"):
+        ClaudeCodeRunner().ask("system", "prompt")
+    assert slept == [30, 90]                                                                     # not the API's trouble: raised at once
+    answers[:] = [{"is_error": True, "result": "API Error: 529 Overloaded"}] * 4
+    with pytest.raises(RunnerError, match="529"):
+        ClaudeCodeRunner().ask("system", "prompt")
+    assert slept == [30, 90, 30, 90, 180]                                                        # three more tries, then it is raised

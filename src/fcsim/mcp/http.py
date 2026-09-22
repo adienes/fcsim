@@ -33,12 +33,15 @@ class McpServer:
 
             def _send(self, status: int, body: dict | None = None) -> None:
                 data = json.dumps(body).encode() if body is not None else b""
-                self.send_response(status)
-                if data:
-                    self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(data)))
-                self.end_headers()
-                self.wfile.write(data)
+                try:
+                    self.send_response(status)
+                    if data:
+                        self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass  # the model's process died while its call was being answered (an API error killed it): nobody to answer
 
             def do_GET(self) -> None:  # no server-initiated stream is offered
                 self._send(405)
