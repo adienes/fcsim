@@ -316,6 +316,8 @@ def test_summarize_condenses_each_round_once_and_writes_the_story(database, tmp_
     directory = Path(game["directory"])
     written = (directory / "narrative.md").read_text()
     assert result["rounds"] == 2 and written.startswith("An account (3).\n\n## Appendix")           # two rounds, then the story
+    from fcsim.play.rubric import measure
+    assert game["rounds"] == 2 and measure(directory)["rounds"] == 2   # the turn the cap stopped as it began is no round taken
     assert "### Round 1\n\nAn account (1).\n\n### Round 2\n\nAn account (2).\n" in written and not (directory / "narrative").exists()
     first = writer.asked[0][1]
     assert first.startswith("ROUND 1 (table turns 1 to 3)") and "Pir plays Forest" in first and "[private to Pir: Drew" in first

@@ -97,7 +97,9 @@ def measure(game_dir: str | Path) -> dict:
     game = table.game
     before(table, {"seat": None, "tool": "end", "args": {}})  # whoever left during the last event
     over = game.control.kind == "over"
-    rounds = max((s.turns_taken for s in game.seats), default=0)
+    # A capped game stops as soon as a seat begins the round past the cap: that turn, with nothing played in it, is no round taken.
+    unplayed = not over and game.turn.number in turns and not turns[game.turn.number]["actions"] and not turns[game.turn.number]["land"]
+    rounds = max((s.turns_taken - (1 if unplayed and s.index == game.turn.active else 0) for s in game.seats), default=0)
     for index, row in enumerate(seats):
         own = [t for t in turns.values() if t["seat"] == index]
         settled = [t for t in own if t["round"] >= 3]  # a land and a pass is a normal first or second turn

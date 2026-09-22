@@ -63,7 +63,8 @@ def _keeper(game: Game, seat: int) -> str | None:
     """The name of a permanent of this player whose continuous effect, as the ledger has it, speaks of unspent mana."""
     for entry in game.ledger:
         source = game.objects.get(entry.get("source"))
-        if entry.get("kind") == "static" and entry.get("controller") == seat and "unspent" in str(entry.get("text", "")).lower() and source is not None:
+        if entry.get("kind") == "static" and entry.get("controller") == seat and "unspent" in str(entry.get("text", "")).lower() \
+                and source is not None and source.zone == "battlefield":
             return source.name
     return None
 
@@ -82,8 +83,13 @@ def empty_pools(game: Game, *, entering: str | None) -> None:
         keeper = _keeper(game, seat.index) if game.mechanics >= 6 else None
 
         def goes(floating: list, keeper=keeper) -> bool:
+            if floating[1] == "kept" and game.mechanics < 7:
+                return False
             if floating[1] in ("kept", "held"):
-                return floating[1] == "held" and keeper is None
+                # No mana is kept for ever: it is always some permanent's doing (Kruphix, Omnath, Leyline Tyrant, Ozai), and it
+                # goes with the first step that ends after that permanent has. A pilot who said "kept" with Ozai out kept
+                # four red through the phase Ozai died in, and the auditor had it removed a turn later.
+                return keeper is None
             return entering is None or floating[1] == "step" or (floating[1] == "end_of_combat" and entering in ("main2", "end", "cleanup"))
         gone = [m for m in seat.pool if goes(m)]
         shown = "".join(f"{{{m[0]}}}" for m in gone)

@@ -21,7 +21,8 @@ SEAT_ZONES = ("library", "hand", "graveyard", "exile", "command")
 # And a card is not moved to the stack by hand: it is cast, which the table now allows during a resolution. An additional
 # combat phase comes after the phase it was made in, not after the step. A pool is left alone while its owner's effect keeps mana.
 # In a game with an auditor, a player who has lost by a state-based action is removed by the driver, not by another player.
-MECHANICS = 6
+# 7: mana "kept" stays only while a permanent of its owner's speaks of unspent mana, and goes with the first step that ends after none does.
+MECHANICS = 7
 
 
 class TableError(ValueError):

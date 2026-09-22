@@ -972,7 +972,8 @@ class _Pod:
                                 "commander_damage": s.commander_damage, "commander_casts": s.commander_casts} for s in game.seats]
         self.report["winner"] = self.names[game.winner] if game.winner is not None else None
         self.report["turns_played"] = game.turn.number
-        self.report["rounds"] = max(s.turns_taken for s in game.seats)
+        capped = game.control.kind != "over" and game.seats[game.turn.active].turns_taken > self.last_round  # begun, and stopped there
+        self.report["rounds"] = max(s.turns_taken - (1 if capped and s.index == game.turn.active else 0) for s in game.seats)
         self.report["usage"] = self.auditor_runner.budget.to_dict()
         try:  # the journal is the game: say at once if it no longer rebuilds what was played, not when a later tool trips on it
             rebuilt = Table.replay(self.table.config, self.directory.events(), card_lookup=self.table.card_lookup)

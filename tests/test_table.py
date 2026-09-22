@@ -1304,12 +1304,14 @@ def test_floating_mana_lives_in_a_pool_that_payments_spend_and_steps_empty():
     pass_until(table, runner, "main2")                                                             # combat is over
     assert "mana_pool" not in table.view(0)["seats"][0]
     assert any("Ann's unspent {R} empties from their mana pool." in line for e in table.events for line in e["public"])
+    keeper = next(o["handle"] for o in table.view(None)["battlefield"] if o["name"] == red)
+    table.apply_hooks([{"kind": "static", "handle": keeper, "text": "You don't lose unspent mana as steps and phases end."}])
     runner.step(0, "act", {"because": "a ritual", "mutations": [{"op": "mana", "add": "{R}{R}"}, {"mana": {"add": "B", "until": "kept"}}]})
     runner.step(0, "pass_priority", {"until": "end"})
     while table.game.turn.step != "end":
         seat, kind = table.expected()[0]
         runner.step(seat, "pass_priority")
-    assert table.view(0)["seats"][0]["mana_pool"] == "{B}"                                        # mana an effect says is never lost stays
+    assert table.view(0)["seats"][0]["mana_pool"] == "{R}{R}{B}"                                  # while a permanent says unspent mana is not lost, the table holds all of it
     assert table.act(0, "act", {"because": "x", "mutations": [{"op": "mana", "add": "purple"}]})["error"]["code"] == "bad_mana"
     assert Table.replay(table.config, table.events, card_lookup=table.card_lookup).game.to_dict() == table.game.to_dict()
 
@@ -1425,10 +1427,16 @@ def test_a_pool_is_left_alone_while_its_owners_own_effect_speaks_of_unspent_mana
     runner.step(0, "act", {"because": "Ozai: it becomes red", "mutations": [{"op": "mana", "remove": "G"}, {"op": "mana", "add": "R", "until": "kept"}]})
     runner.step(0, "act", {"because": "test", "mutations": [{"op": "move", "obj": f"@{ozai}", "to": "graveyard"}]})
     pass_until(table, runner, "end")
-    assert table.view(0)["seats"][0]["mana_pool"] == "{R}"           # the effect is gone: what was only held went with the step, what was kept stays
+    assert "mana_pool" not in table.view(0)["seats"][0]                # the effect is gone: held and "kept" alike went with the step, since no mana is kept for ever
     assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()
-    old = Table(seats(), seed=5, first=0, mechanics=5)
-    assert old.game.mechanics == 5
+    old = Table(seats(), seed=5, first=0, mechanics=6)                 # under the rules before, "kept" meant for ever
+    before = ScriptedRunner(old)
+    for seat in range(3):
+        before.step(seat, "keep")
+    pass_until(old, before, "main1")
+    before.step(0, "act", {"because": "as it was", "mutations": [{"op": "mana", "add": "R", "until": "kept"}]})
+    pass_until(old, before, "end")
+    assert old.view(0)["seats"][0]["mana_pool"] == "{R}"
 
 
 def test_an_additional_combat_made_during_combat_comes_after_that_combat_not_in_the_middle_of_it():
