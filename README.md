@@ -208,7 +208,7 @@ uv run fcsim pilot games/<a> --seat zuko                   # how a seat was play
 
 A project is a deck's identity across revisions of its list. What its pilots learn accumulates there: a lesson is recorded
 with its evidence, stays tentative until a different game bears it out, and is flagged rather than taught once none of the
-cards it leans on is in the list. Only the primer, 600 words at most, reaches a pilot.
+cards it leans on is in the list. Only the primer reaches a pilot: about 600 words, and more where every line earns its place.
 
 A deck that loses has not shown that it is weak. `fcsim pilot` reads from the journal what each seat kept, the land drops
 it missed, the turns it ended with mana untapped beside a card it could have cast, and the turns its attackers stayed

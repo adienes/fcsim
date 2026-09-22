@@ -28,7 +28,7 @@ from pathlib import Path
 
 from ..cards import CardDatabase, read_decklist, resolve
 
-PRIMER_WORDS = 600  # about 800 tokens: a primer is read at the start of every wake's session
+PRIMER_WORDS = 600  # a guide, not a cutoff: about 800 tokens, read at the start of every wake's session; a line that earns its place stays
 
 
 class DeckProject:

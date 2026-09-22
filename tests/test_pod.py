@@ -961,14 +961,14 @@ def test_a_deck_project_teaches_its_pilot_what_earlier_games_learned(combat_game
     assert [k["claim"] for k in project.lessons() if k["kind"] == "opening_hand"] == ["This list has 99 Islands, so keep any hand."]
     assert "Put right by the fact check: THE LIST has 99 Islands." in project.lessons()[-1]["evidence"][0]
 
-    class Rambles(Writes):   # a primer over its limit is asked for once more, with the count
+    class Rambles(Writes):   # a primer half again over its guide is asked for once more, with the count; one a third over is kept as it is
         def ask(self, system, prompt, *, schema=None, **_):
             if schema is None and "THE PRIMER YOU WROTE" not in prompt:
                 self.asked.append({"system": system, "prompt": prompt, "schema": None})
-                return Reply(data=None, text="## Gameplan\n" + "word " * 700, cost_usd=0.01, seconds=0.1, model="fake")
+                return Reply(data=None, text="## Gameplan\n" + "word " * 1000, cost_usd=0.01, seconds=0.1, model="fake")
             return super().ask(system, prompt, schema=schema)
     long = Rambles([{"lessons": [lesson]}, {"problems": []}])
-    assert learn(project.path, [game], long, database, echo=lambda *_: None)["primer_words"] < 20 and "It is 702 words and may be 600" in long.asked[-1]["prompt"]
+    assert learn(project.path, [game], long, database, echo=lambda *_: None)["primer_words"] < 20 and "It is 1002 words against a guide of 600" in long.asked[-1]["prompt"]
     assert "Cast Talrand on four lands" in project.primer()
 
     # learned from another game it comes back in other words: whoever wrote it was shown the record and says which lesson it restates
