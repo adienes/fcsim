@@ -38,7 +38,9 @@ with `set` to correct a wrong total · eliminate {seat, reason}
 extra_turn {seat?} · extra_combat · end_turn · skip_step {step} · remove_from_stack {item: handle}
 mana {add: "RRG", until?: "step" | "end_of_combat" | "end_of_turn" | "kept", seat?} - mana that is made and not spent at once \
 (firebending, a ritual, a Treasure cracked early) goes into your mana pool, which everyone can see; spend it with `pool` in a payment. It \
-empties as the step ends unless `until` says the effect keeps it longer ("kept": it is never lost). `remove` takes mana out again.
+empties as the step ends unless `until` says the effect keeps it longer ("kept": while a permanent of yours says unspent mana is not \
+lost). `remove` takes mana out again. `keep` (with `colors`?, e.g. "R") makes what is already in your pool last that long: a spell \
+that says "until end of turn, you don't lose unspent red mana" is {keep: "end_of_turn", colors: "R"}.
 delay {step, text, whose?: "mine" | seat} - a delayed trigger ("return it at the beginning of the next end step", "at the \
 beginning of your next upkeep, sacrifice it"): the table puts it in front of you when that step next begins, on anyone's turn unless \
 `whose` says otherwise, so that you need not remember it. Steps: upkeep, draw, main1, begin_combat, end_combat, main2, end.

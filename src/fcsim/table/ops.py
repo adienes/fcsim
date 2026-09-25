@@ -146,16 +146,24 @@ def apply_op(game: Game, dice: Dice, actor: int, op: dict, told: Told, *, by_tab
             # Floating mana had nowhere to live: it was a note on a permanent, and the auditor twice caught it spent twice.
             player = game.seats[_seat(game, op.get("seat", actor))]
             added, removed = mana.parse_mana(op.get("add", "")) if op.get("add") else [], mana.parse_mana(op.get("remove", "")) if op.get("remove") else []
-            until = str(op.get("until") or "step")
-            if added is None or removed is None or not (added or removed) or until not in mana.LIFETIMES:
+            until, keep = str(op.get("until") or "step"), op.get("keep")
+            if added is None or removed is None or not (added or removed or keep) or until not in mana.LIFETIMES or (keep and keep not in mana.LIFETIMES):
                 raise TableError("bad_mana", "Give `add` (or `remove`) as mana, such as \"RRG\" or \"{R}{R}{G}\", and `until` as one of: "
-                                             + ", ".join(mana.LIFETIMES) + " (the default, step, empties as this step ends).")
+                                             + ", ".join(mana.LIFETIMES) + " (the default, step, empties as this step ends); or `keep` alone, "
+                                             "with one of those, for what is already in the pool.")
             mana.spend(game, player.index, removed)
+            if keep:
+                # A spell that says "until end of turn, you don't lose unspent red mana" (The Last Agni Kai) is no permanent the
+                # table could see keeping it; its player says so, and what is in the pool lasts at least that long.
+                colors = set(str(op.get("colors") or "WUBRGC"))
+                for floating in player.pool:
+                    if floating[0] in colors and mana.LIFETIMES.index(floating[1]) < mana.LIFETIMES.index(keep):
+                        floating[1] = keep
             player.pool += [[color, until] for color in added]
             holds = "".join(f"{{{m[0]}}}" for m in player.pool) or "nothing"
-            told.public.append(f"{player.name} " + (f"adds {''.join('{' + c + '}' for c in added)}" + ("" if until == "step" else f" (until {until.replace('_', ' ')})")
-                                                    if added else f"removes {''.join('{' + c + '}' for c in removed)}")
-                               + f"{because}; their mana pool holds {holds}.")
+            said = (f"adds {''.join('{' + c + '}' for c in added)}" + ("" if until == "step" else f" (until {until.replace('_', ' ')})") if added
+                    else f"removes {''.join('{' + c + '}' for c in removed)}" if removed else f"keeps the mana in their pool (until {str(keep).replace('_', ' ')})")
+            told.public.append(f"{player.name} {said}{because}; their mana pool holds {holds}.")
         case "delay":
             # A delayed triggered ability belongs to no permanent ("return it at the beginning of the next end
             # step", after the card that said so has left), so no hook can carry it. In the fifth pod Norin the

@@ -1556,3 +1556,18 @@ def test_the_calls_pilots_make_one_after_another_can_be_one_call_and_the_journal
     viewed = tools.call("r5", "get_view", {})
     assert viewed == table.view(0) or viewed.get("you") == 0                       # a view is passed through as it is
     assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()
+
+
+def test_a_spell_that_keeps_unspent_mana_until_end_of_turn_says_so_for_what_is_already_in_the_pool():
+    """The Last Agni Kai: "until end of turn, you don't lose unspent red mana". No permanent the table could see keeps it."""
+    table, runner = started()
+    pass_until(table, runner, "main1")
+    runner.step(0, "act", {"because": "firebending", "mutations": [{"op": "mana", "add": "RRG", "until": "end_of_combat"}]})
+    runner.step(0, "act", {"because": "The Last Agni Kai resolved", "mutations": [{"op": "mana", "keep": "end_of_turn", "colors": "R"}]})
+    assert "keeps the mana in their pool (until end of turn)" in table.events[-1]["public"][-1]
+    pass_until(table, runner, "main2")
+    assert table.view(0)["seats"][0]["mana_pool"] == "{R}{R}"                    # the green went at end of combat; the red stays
+    pass_until(table, runner, "end")
+    assert table.view(0)["seats"][0]["mana_pool"] == "{R}{R}"
+    assert table.act(0, "act", {"because": "x", "mutations": [{"op": "mana", "keep": "for ever"}]})["error"]["code"] == "bad_mana"
+    assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()
