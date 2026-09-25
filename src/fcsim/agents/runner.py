@@ -35,7 +35,8 @@ def seconds_until_reset(message: str, now: datetime.datetime | None = None) -> i
 # update checks and telemetry among it; without them 0.65 s. About two hundred calls a game.
 _QUIET = {"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "DISABLE_AUTOUPDATER": "1", "DISABLE_TELEMETRY": "1", "DISABLE_ERROR_REPORTING": "1"}
 
-_TRANSIENT = re.compile(r"\b(500|502|503|504|529)\b|overloaded|server-side issue|internal server error|try again in a moment", re.I)
+_TRANSIENT = re.compile(r"\b(500|502|503|504|529)\b|overloaded|server-side issue|internal server error|try again in a moment"
+                        r"|did not answer within", re.I)  # a hung call too: a sixth game stopped on an audit that never came back
 _PAUSES = (30, 90, 180)  # seconds before each of three more attempts at a call that failed on the server's side
 
 
@@ -139,13 +140,15 @@ class ClaudeCodeRunner:
 
     def ask(self, system: str, prompt: str, *, schema: dict | None = None,
             tools: McpConnection | None = None) -> Reply:
-        """One fresh session, requesting structured output when a schema is supplied. An error on the API's side is tried
-        again, up to three more times with a pause between; everything else is raised at once."""
+        """One fresh session, requesting structured output when a schema is supplied. A question without tools that fails on
+        the API's side, or hangs, is asked again, up to three more times with a pause between; everything else is raised at
+        once. A session with tools is not: it may have acted at the table before it failed, and asked again with the same
+        prompt it would act from a board that has moved. Its caller knows what it did, and decides."""
         for attempt, pause in enumerate((*_PAUSES, None)):
             try:
                 return self._ask(system, prompt, schema=schema, tools=tools)
             except RunnerError as error:
-                if pause is None or not transient(str(error)):
+                if pause is None or tools is not None or not transient(str(error)):
                     raise
                 self.tell(f"the model's API failed on its own side ({str(error)[:120]}); trying again in {pause} s")
                 time.sleep(pause)

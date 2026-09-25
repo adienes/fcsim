@@ -20,6 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from ..agents import BudgetExceeded, Runner, RunnerError, cost_summary
+from ..agents.runner import Reply, transient
 
 from ..audit import SERIOUS, Auditor, Judge, describe
 from ..audit.auditor import card_reference
@@ -660,11 +661,28 @@ class _Pod:
         prompt = f"{self.when()} {extra or _WHY.get(kind, 'The table is waiting for you.')}{_arithmetic(self.table, seat)}\n\n{self.news(seat)}\n\n{self.briefing(seat)}"
         self.echo(f"turn {game.turn.number} {game.turn.step}: {self.names[seat]} ({kind}) ...")
         started = len(self.table.events)
-        reply = self.runners[seat].ask(self.systems[seat], prompt, tools=server.connection(
-            token, tuple(t["name"] for t in self.current["tools"].definitions)))
+        failed = None
+        for pause in (30, 90, 180, None):
+            try:
+                reply = self.runners[seat].ask(self.systems[seat], prompt, tools=server.connection(
+                    token, tuple(t["name"] for t in self.current["tools"].definitions)))
+                break
+            except RunnerError as error:
+                if not transient(str(error)) or pause is None:
+                    raise
+                if any(not c["error"] and c["tool"] not in ("get_view", "get_log", "get_notes", "lookup_card", "lookup_rule")
+                       for c in self.current["tools"].calls):
+                    # It acted before the session failed. Asked again with the same prompt it would act from a board that has
+                    # moved; so the wake ends as it stands, and the table, still waiting for this seat, wakes it with a fresh briefing.
+                    failed = str(error)
+                    reply = Reply(data=None, text=f"(The session failed after {len(self.current['tools'].calls)} tool call(s): {failed[:160]})")
+                    self.echo(f"         {self.names[seat]}'s session failed on the API's side after acting; it will be woken again")
+                    break
+                self.echo(f"         {self.names[seat]}'s session failed on the API's side before acting ({str(error)[:100]}); again in {pause} s")
+                time.sleep(pause)
         self.table.close_wake(handle)
         forced = None
-        if self.holds_pen(seat) and self.table.game.control.kind != "setup" or (kind == "mulligan" and self.holds_pen(seat)):
+        if failed is None and (self.holds_pen(seat) and self.table.game.control.kind != "setup" or (kind == "mulligan" and self.holds_pen(seat))):
             forced = _default_action(self.table, seat)  # it stopped while the table still waited for it
         self.seen[seat] = len(self.table.events)
         entry = {"seat": seat, "turn": game.turn.number, "kind": kind, "summary": reply.text, "events": [started, len(self.table.events)],

@@ -1384,3 +1384,36 @@ def test_before_attacking_a_pilot_is_told_what_the_others_could_swing_back_with(
     told = own[-1].split("BEFORE YOU ATTACK")[1].split("\n\n")[0]
     assert "- Pir: " in told and "- Thrasios: " in told and "creature(s) with" in told and "Whatever attacks now without vigilance" in told
     assert not any("BEFORE YOU ATTACK" in p for p in seats[2].prompts if "is on top of the stack" in p)       # never in answer to someone else's spell
+
+
+def test_a_pilots_session_that_fails_on_the_apis_side_is_tried_again_or_woken_again_but_never_repeated(database, tmp_path, monkeypatch):
+    from fcsim.agents import RunnerError
+    from fcsim.play import pod
+    slept = []
+    monkeypatch.setattr(pod.time, "sleep", slept.append)
+
+    class Flaky(ScriptedSeat):
+        def __init__(self, budget):
+            super().__init__(budget, fidgets=True)
+            self.wakes = 0
+
+        def ask(self, system, prompt, *, tools=None, **more):
+            if tools is None:
+                return super().ask(system, prompt, tools=tools, **more)
+            self.wakes += 1
+            if self.wakes == 2:
+                raise RunnerError("Claude Code reported an error: API Error: 529 Overloaded")           # before acting: asked again
+            reply = super().ask(system, prompt, tools=tools, **more)
+            if self.wakes == 3:
+                raise RunnerError("Claude Code reported an error: API Error: 500 Internal server error")  # after acting: woken afresh
+            return reply
+
+    budget = Budget(max_calls=300)
+    flaky = Flaky(budget)
+    report = play_pod(decks(tmp_path), [flaky, ScriptedSeat(budget, fidgets=True), ScriptedSeat(budget, fidgets=True)], FakeRunner([OK] * 40, budget),
+                      database, cycles=3, seed=4, out_root=tmp_path / "games", echo=lambda *_: None)
+    assert report["stopped"] is None and report["journal"] == "replays to the same game" and slept == [30]
+    failed = [w for w in report["wakes"] if w["seat"] == 0 and w["summary"].startswith("(The session failed after")]
+    assert len(failed) == 1 and failed[0]["forced"] is None                                     # not passed for: woken again
+    assert failed[0]["events"][1] > failed[0]["events"][0]                                      # it had acted before the failure
+    assert any(w["events"][0] >= failed[0]["events"][1] for w in report["wakes"])              # and the game went on

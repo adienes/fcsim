@@ -219,3 +219,9 @@ def test_an_error_on_the_apis_own_side_is_tried_again_and_the_rest_are_not(monke
     with pytest.raises(RunnerError, match="529"):
         ClaudeCodeRunner().ask("system", "prompt")
     assert slept == [30, 90, 30, 90, 180]                                                        # three more tries, then it is raised
+    assert transient("The model did not answer within 600 seconds.")                            # a hung call is tried again too
+    from fcsim.mcp.connection import McpConnection
+    answers[:] = [{"is_error": True, "result": "API Error: 529 Overloaded"}]
+    with pytest.raises(RunnerError, match="529"):                                               # a session with tools is its caller's to retry
+        ClaudeCodeRunner().ask("system", "prompt", tools=McpConnection(name="table", url="http://127.0.0.1:1/mcp", headers={}, allowed_tools=("pass_priority",)))
+    assert slept == [30, 90, 30, 90, 180]
