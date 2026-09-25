@@ -20,7 +20,7 @@ HELP = "--ignore-user-config --ignore-rules --ephemeral --output-schema --output
 
 def test_factory_defaults_are_specific_to_backend():
     assert isinstance(make_runner(), ClaudeCodeRunner)
-    assert make_runner().model == "claude-opus-5"
+    assert make_runner().model == "claude-opus-5-5"
     assert make_runner("codex").model == "codex-default"
     assert make_runner("codex", model="chosen").model == "chosen"
     with pytest.raises(RunnerError, match="Unknown model backend"):

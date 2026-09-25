@@ -35,6 +35,9 @@ def seconds_until_reset(message: str, now: datetime.datetime | None = None) -> i
 # update checks and telemetry among it; without them 0.65 s. About two hundred calls a game.
 _QUIET = {"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "DISABLE_AUTOUPDATER": "1", "DISABLE_TELEMETRY": "1", "DISABLE_ERROR_REPORTING": "1"}
 
+DEFAULT_MODEL = "claude-opus-5-5"
+AUDIT_EFFORT = "medium"  # never left to the CLI's default, which drifted: see cli._model_options
+
 _TRANSIENT = re.compile(r"\b(500|502|503|504|529)\b|overloaded|server-side issue|internal server error|try again in a moment"
                         r"|did not answer within", re.I)  # a hung call too: a sixth game stopped on an audit that never came back
 _PAUSES = (30, 90, 180)  # seconds before each of three more attempts at a call that failed on the server's side
@@ -131,7 +134,7 @@ def cost_summary(usage: dict) -> str:
 class ClaudeCodeRunner:
     backend = "claude"
 
-    def __init__(self, *, model: str = "claude-opus-5", effort: str | None = None, budget: Budget | None = None,
+    def __init__(self, *, model: str = DEFAULT_MODEL, effort: str | None = None, budget: Budget | None = None,
                  timeout: int = 600, executable: str = "claude"):
         if effort not in (None, "low", "medium", "high", "xhigh", "max"):
             raise RunnerError(f"Unsupported Claude effort: {effort!r}; use low, medium, high, xhigh or max.")

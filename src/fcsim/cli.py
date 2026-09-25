@@ -51,12 +51,14 @@ def _cost_limit(value: str) -> float | None:
 
 def _model_options(parser: argparse.ArgumentParser, *, audited: bool, cost_default: float) -> None:
     parser.add_argument("--backend", choices=BACKENDS, default="claude", help="Model CLI backend (default: claude)")
-    parser.add_argument("--model", help="Model ID for this backend (default: Claude Opus 5 or Codex's built-in default)")
+    parser.add_argument("--model", help="Model ID for this backend (default: Claude Opus 5.5 or Codex's built-in default)")
     parser.add_argument("--effort", help="Backend reasoning effort, e.g. low, medium, high or xhigh")
     if audited:
         parser.add_argument("--audit-backend", choices=BACKENDS, help="Auditor backend (default: inherit --backend)")
         parser.add_argument("--audit-model", help="Auditor model (default: its backend's default)")
-        parser.add_argument("--audit-effort", help="Auditor reasoning effort")
+        # Left unset, the effort was the CLI's own default, and after three CLI updates the same audit took 66 s and 5,557
+        # tokens of thought where it had taken under 20. Opus 5.5 at medium found the same errors, and no false ones, at 15-25 s.
+        parser.add_argument("--audit-effort", default="medium", help="Auditor reasoning effort (default: medium)")
     parser.add_argument("--max-cost", type=_cost_limit, default=argparse.SUPPRESS, metavar="USD|none",
                         help=f"Reported-cost limit (default: {cost_default:g} USD for Claude-only runs, none with Codex)")
     parser.set_defaults(default_max_cost=cost_default)

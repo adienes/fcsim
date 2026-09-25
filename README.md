@@ -289,8 +289,11 @@ its trigger was about (`that_player`, `that_many`). A trigger written as text al
 is flagged, and the next audit is asked to give it a pattern. A script a player gives for one
 trigger that turns out to do nothing is handed back to them to resolve by hand.
 
-**Rules integrity.** The auditor checks each whole turn before the next begins (`--audit-every
-checkpoint` checks every time the pen moves: stricter, several times slower). Its hooks go into
+**Rules integrity.** The auditor checks each whole turn (`--audit-every checkpoint` checks every
+time the pen moves: stricter, several times slower). When every permanent that arrived in a turn is
+one the auditor has nothing to describe, that turn's audit runs while the next is played, and its
+verdict is applied at the next point where a player would have priority; otherwise the next turn
+waits for it. The auditor runs at medium effort (`--audit-effort`). Its hooks go into
 the ledger; a trigger it reports is put in front of its controller; event triggers it has
 described are queued by the table the moment their event happens; and it stamps creatures with
 their current power and toughness, which is worked out again before blocks if the battlefield
