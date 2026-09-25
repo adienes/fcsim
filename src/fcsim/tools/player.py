@@ -77,7 +77,11 @@ PLAYER_TOOLS = [
           "\"main2\" to skip combat, or until \"cleanup\" when you are finished, which passes through the rest of "
           "your turn including your end step.",
           {"until": {"type": "string", "enum": ["draw", "main1", "begin_combat", "declare_attackers", "declare_blockers",
-                                                "combat_damage", "end_combat", "main2", "end", "cleanup"]}}),
+                                                "combat_damage", "end_combat", "main2", "end", "cleanup"]},
+           "notes": {"type": "string", "description": "Replace your notes first, as write_notes does: one call where two would do."},
+           "policy": {"type": "string", "enum": ["ask", "ask_everything", "pass_unless_targeted", "pass_always"],
+                      "description": "Set your response policy first, as set_response_policy does; typically with until \"cleanup\"."},
+           "hold_for_end_step": {"type": "boolean", "description": "With `policy`, as set_response_policy takes it."}}),
     _tool("play_land", "Play a land: from your hand, or from anywhere else an effect lets you play it (a card exiled with \"you may "
           "play it\", the top of your library), in which case name that effect in `because`. It uses your land play for the turn.",
           {"card": _HANDLE, "enters": _ENTERS, "because": {"type": "string"}}, ("card",)),
@@ -90,7 +94,7 @@ PLAYER_TOOLS = [
           {"card": _HANDLE, "targets": _TARGETS, "payment": _PAYMENT, "x": {"type": "integer"},
            "modes": {"type": "array", "items": {"type": "string"}},
            "text": {"type": "string", "description": "What the spell will do as cast, including how damage is divided."},
-           "resolves": {"type": "string", "enum": ["auto_permanent"]}, "face_down": {"type": "boolean"},
+           "resolves": {"type": "string", "enum": ["auto_permanent"]}, "face_down": {"type": "boolean"}, "pass": {"type": "boolean", "description": "Pass priority straight after, as you usually would next: one call where two would do."},
            "because": {"type": "string", "description": "Needed only for a cast the table would not expect: a card from anywhere but "
                        "your hand or command zone (flashback, \"exiled with Prosper: I may play it this turn\"), or a card that is "
                        "not an instant and has no flash cast outside your own main phase or with something on the stack, or any "
@@ -98,7 +102,7 @@ PLAYER_TOOLS = [
     _tool("activate", "Activate an ability of a permanent. A mana ability (`mana_ability`: true) does not use the "
           "stack; anything else goes on the stack and you keep priority.",
           {"source": _HANDLE, "ability": {"type": "string", "description": "The ability's text."}, "targets": _TARGETS,
-           "payment": _PAYMENT, "x": {"type": "integer"}, "mana_ability": {"type": "boolean"}}, ("source", "ability")),
+           "payment": _PAYMENT, "x": {"type": "integer"}, "mana_ability": {"type": "boolean"}, "pass": {"type": "boolean", "description": "Pass priority straight after, as you usually would next: one call where two would do."}}, ("source", "ability")),
     _tool("add_trigger", "Put a triggered ability on the stack. If the table is waiting for your triggers, name "
           "which one with `pending` (a handle from `waiting_triggers`). A waiting trigger that says it triggered several "
           "times stands for that many: add_trigger puts one of them on the stack and the rest go on waiting, and "
@@ -109,11 +113,14 @@ PLAYER_TOOLS = [
           "`what` is \"self\"; `on` is \"self\", \"each_creature_you_control\", \"each_other_creature_you_control\" or a player; a "
           "player is \"you\", \"each_opponent\" or \"each_player\".",
           {"source": _HANDLE, "text": {"type": "string"}, "targets": _TARGETS, "pending": {"type": "string"},
-           "script": {"type": "array", "items": {"type": "object"}}}),
+           "script": {"type": "array", "items": {"type": "object"}}, "pass": {"type": "boolean", "description": "Pass priority straight after, as you usually would next: one call where two would do."}}),
     _tool("skip_trigger", "Decline a waiting trigger: a \"may\" you do not want, or one whose condition is false.",
           {"pending": {"type": "string"}, "because": {"type": "string"}}, ("pending", "because")),
     _tool("resolve", "Carry out part of the effect of your spell or ability that is resolving. Call it as many "
-          "times as the effect needs: draw first, see the cards, then choose. " + MUTATIONS, {"mutations": _BATCH}, ("mutations",)),
+          "times as the effect needs: draw first, see the cards, then choose. When these mutations are the whole of what is "
+          "left to do, set `finish` (with `card_to` and `enters` as finish_resolution takes them) and the resolution is "
+          "finished in the same call. " + MUTATIONS,
+          {"mutations": _BATCH, "finish": {"type": "boolean"}, "card_to": {"type": "string"}, "enters": _ENTERS}, ("mutations",)),
     _tool("finish_resolution", "The effect is done. A spell's card still on the stack goes to `card_to`: "
           "\"graveyard\" by default, \"battlefield\" for a permanent.",
           {"card_to": {"type": "string"}, "enters": _ENTERS}),
@@ -199,6 +206,48 @@ class SeatTools:
             except RulesError as error:
                 result = {"error": {"code": "rules_error", "message": str(error)}}
         else:
-            result = self.table.call(self.wake, request_id, name, arguments)
+            result = self._chained(request_id, name, dict(arguments))
         self.calls.append({"tool": name, "arguments": arguments, "error": (result.get("error") or {}).get("code")})
+        return result
+
+    def _chained(self, request_id: str, name: str, arguments: dict) -> dict:
+        """One tool call that stands for two or three the pilots made one after another in nearly every wake, each a round
+        trip to the model of two or three seconds: cast, activate or add_trigger then pass; resolve then finish_resolution;
+        write_notes and set_response_policy then pass. The table is called exactly as before, one call each, so the journal
+        does not change. The first refusal stops the chain and is returned."""
+        call = lambda suffix, tool, args: self.table.call(self.wake, f"{request_id}{suffix}", tool, args)  # noqa: E731
+        if name == "pass_priority":
+            notes, policy, hold = arguments.pop("notes", None), arguments.pop("policy", None), arguments.pop("hold_for_end_step", None)
+            if notes is not None and "error" in (done := call(":notes", "write_notes", {"text": str(notes)})):
+                return done
+            if policy is not None and "error" in (done := call(":policy", "set_response_policy",
+                                                            {"policy": policy, **({"hold_for_end_step": hold} if hold is not None else {})})):
+                return done
+            return self._enriched(call("", name, arguments))
+        if name in ("cast", "activate", "add_trigger") and arguments.pop("pass", False):
+            first = call("", name, arguments)
+            if "error" in first:
+                return first
+            then = call(":pass", "pass_priority", {})
+            return self._enriched({**first, **{k: v for k, v in then.items() if k != "log"}, "log": [*first.get("log", []), *then.get("log", [])]})
+        if name == "resolve" and arguments.pop("finish", False):
+            ending = {k: arguments.pop(k) for k in ("card_to", "enters") if k in arguments}
+            first = call("", name, arguments)
+            if "error" in first:
+                return first
+            then = call(":finish", "finish_resolution", ending)
+            return self._enriched({**first, **{k: v for k, v in then.items() if k != "log"}, "log": [*first.get("log", []), *then.get("log", [])]})
+        arguments.pop("finish", None), arguments.pop("pass", None)
+        return self._enriched(call("", name, arguments))
+
+    def _enriched(self, result: dict) -> dict:
+        """When the table now waits for this seat's triggers, say which, with their handles: sixty get_view calls in four
+        games came straight after a resolution, to find them."""
+        pen = result.get("pen") or {}
+        if "waiting_triggers" in result or "ok" not in result:
+            return result  # a view already shows them, and a refusal is told as it is
+        if pen.get("kind") == "triggers" and self.seat in (pen.get("seats") or []):
+            waiting = [t for t in self.table.view(self.seat)["waiting_triggers"] if t.get("seat") == self.seat]
+            if waiting:
+                result = {**result, "waiting_triggers": [{"handle": t["handle"], "text": t["text"]} for t in waiting]}
         return result

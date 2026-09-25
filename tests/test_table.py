@@ -1528,3 +1528,31 @@ def test_a_commander_goes_to_the_command_zone_however_it_left_play_unless_its_ow
     before.step(0, "act", {"because": "x", "mutations": [{"op": "move", "obj": old.view(0)["seats"][0]["command"][0]["handle"], "to": "graveyard"}]})
     before.step(0, "pass_priority")
     assert old.view(0)["seats"][0]["graveyard"] and not old.view(0)["seats"][0]["command"]
+
+
+def test_the_calls_pilots_make_one_after_another_can_be_one_call_and_the_journal_does_not_change():
+    """cast then pass, resolve then finish_resolution, and notes and policy then pass: each a round trip to the model."""
+    from fcsim.tools import SeatTools
+    table, runner = started()
+    pass_until(table, runner, "main1")
+    wake = table.open_wake(0)
+    tools = SeatTools(table, 0, wake)
+    spell = next(c["handle"] for c in table.view(0)["seats"][0]["hand"]["cards"] if "spell" in c["name"])
+    before = len(table.events)
+    cast = tools.call("r1", "cast", {"card": spell, "pass": True})
+    assert "error" not in cast and [e["tool"] for e in table.events[before:before + 2]] == ["cast", "pass_priority"]
+    assert "passes priority" in " ".join(cast["log"]) and cast["pen"]["seats"] == [1]
+    for seat in (1, 2):
+        runner.step(seat, "pass_priority")
+    assert table.expected() == [(0, "resolution")]
+    done = tools.call("r2", "resolve", {"mutations": [{"op": "life", "seat": 1, "delta": -2}], "finish": True})
+    assert "error" not in done and [e["tool"] for e in table.events[-2:]] == ["resolve", "finish_resolution"] and table.game.resolution is None
+    assert tools.call("r2", "resolve", {"mutations": [{"op": "life", "seat": 1, "delta": -2}], "finish": True}) == done     # a repeated call acts once
+    end = tools.call("r3", "pass_priority", {"until": "cleanup", "notes": "Bob is at 38.", "policy": "pass_unless_targeted"})
+    assert "error" not in end and table.notes[0] == "Bob is at 38." and table.game.seats[0].response_policy == "pass_unless_targeted"
+    refused = tools.call("r4", "cast", {"card": "c999", "pass": True})
+    assert refused["error"]["code"] in ("unknown_handle", "gone", "not_your_pen") and table.events[-1]["tool"] != "cast"
+    assert [c["tool"] for c in tools.calls] == ["cast", "resolve", "resolve", "pass_priority", "cast"]
+    viewed = tools.call("r5", "get_view", {})
+    assert viewed == table.view(0) or viewed.get("you") == 0                       # a view is passed through as it is
+    assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()

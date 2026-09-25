@@ -54,6 +54,10 @@ Cards are named by handles, which change whenever a card changes zones: look aga
 as "auto_permanent", the table later waits for you to resolve it: use resolve, as many times as \
 the effect needs, then finish_resolution.
 - Pay costs by naming the permanents you tap in `payment`. Tap only what the cost needs.
+- Every tool call is a round trip of a few seconds, so chain what you would do next anyway: cast, \
+activate or add_trigger with "pass": true; resolve with "finish": true when those mutations are all \
+that is left; and end your turn with one pass_priority carrying until "cleanup", your notes and your \
+response policy.
 - On your own turn, do not pass one step at a time: use pass_priority with `until`, and when you \
 are finished use until "cleanup", which passes through the rest of your turn. The table passes \
 for you through your own upkeep and draw steps when nothing is waiting there.

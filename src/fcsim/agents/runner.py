@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -29,6 +30,10 @@ def seconds_until_reset(message: str, now: datetime.datetime | None = None) -> i
         reset += datetime.timedelta(days=1)
     return int((reset - now).total_seconds()) + 120
 
+
+# Every call is a fresh process, and a bare call spent a median 1.3 s outside the API starting up and shutting down, with
+# update checks and telemetry among it; without them 0.65 s. About two hundred calls a game.
+_QUIET = {"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "DISABLE_AUTOUPDATER": "1", "DISABLE_TELEMETRY": "1", "DISABLE_ERROR_REPORTING": "1"}
 
 _TRANSIENT = re.compile(r"\b(500|502|503|504|529)\b|overloaded|server-side issue|internal server error|try again in a moment", re.I)
 _PAUSES = (30, 90, 180)  # seconds before each of three more attempts at a call that failed on the server's side
@@ -169,7 +174,7 @@ class ClaudeCodeRunner:
             started = time.monotonic()
             try:
                 done = subprocess.run(command, input=prompt, capture_output=True, text=True, cwd=scratch,
-                                      timeout=self.timeout, check=False)
+                                      timeout=self.timeout, check=False, env={**os.environ, **_QUIET})
             except subprocess.TimeoutExpired as exc:
                 self.budget.seconds += time.monotonic() - started  # its cost is unknown; its time and the attempt count
                 raise RunnerError(f"The model did not answer within {self.timeout} seconds.") from exc

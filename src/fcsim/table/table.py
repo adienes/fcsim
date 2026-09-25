@@ -216,7 +216,11 @@ class Table:
         return self._commit(seat, tool, args, run, recorded)
 
     def _commit(self, seat: int | None, tool: str, args: dict, run: Callable, recorded: list | None = None) -> dict:
-        game, before = copy.deepcopy(self.game), self.game.turn
+        # A live call runs on a copy, so that one refused halfway leaves the table as it was. A replay runs on the game itself:
+        # everything in a journal was accepted once, and a replay that fails fails whole. The copy was 98% of a replay's time,
+        # nine seconds a game, paid again by every report, rubric and resume that rebuilt the game.
+        game = self.game if self._replaying else copy.deepcopy(self.game)
+        before = copy.copy(self.game.turn)
         self.dice.begin(recorded)
         try:
             outcome = run(game) or ops.Told()
