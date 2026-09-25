@@ -287,7 +287,10 @@ the trigger is about the permanent itself (`self`), another one (`other`) or wha
 (`attached`: "whenever equipped creature attacks"); a script can speak of the player and the amount
 its trigger was about (`that_player`, `that_many`). A trigger written as text alone that gets missed
 is flagged, and the next audit is asked to give it a pattern. A script a player gives for one
-trigger that turns out to do nothing is handed back to them to resolve by hand.
+trigger that turns out to do nothing is handed back to them to resolve by hand, and one for a
+trigger whose text speaks of a target, an enchanted or equipped thing, or a choice is refused. Rad
+counters are the table's own: it mills, counts the nonland cards and takes the life and counters
+itself. A mutation with a key it does not read is refused, naming the fields it takes.
 
 **Rules integrity.** The auditor checks each whole turn (`--audit-every checkpoint` checks every
 time the pen moves: stricter, several times slower). When every permanent that arrived in a turn is
