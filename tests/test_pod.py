@@ -163,6 +163,7 @@ def test_a_pod_game_schedules_seats_audits_and_acts_on_findings(database, tmp_pa
     report = play_pod(decks(tmp_path), seats, FakeRunner(verdicts, budget), database, cycles=2, seed=4,
                       out_root=tmp_path / "games", echo=lambda *_: None)
     assert report["stopped"] is None and report["seats"] == ["Talrand", "Pir", "Thrasios"] and report["turns_played"] == 7
+    assert report["wall_seconds"] >= 0 and "minutes on the clock" in (Path(report["directory"]) / "report.md").read_text()
     kinds = {(w["seat"], w["kind"]) for w in report["wakes"]}
     assert {(0, "mulligan"), (1, "mulligan"), (2, "mulligan"), (2, "triggers"), (0, "correction")} <= kinds
     assert not any(w["forced"] for w in report["wakes"]) and report["standings"][0]["life"] == 39

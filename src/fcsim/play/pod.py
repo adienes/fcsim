@@ -11,10 +11,11 @@ from __future__ import annotations
 import difflib
 import hashlib
 import json
-import traceback
 import random
 import re
 import secrets
+import time
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -1000,6 +1001,7 @@ class _Pod:
             return "wake"
 
     def run(self) -> dict:
+        started = time.monotonic()
         with McpServer(self.tools_for) as server:
             try:
                 self.opening_hands(server)
@@ -1050,6 +1052,8 @@ class _Pod:
         self.report["turns_played"] = game.turn.number
         capped = game.control.kind != "over" and game.seats[game.turn.active].turns_taken > self.last_round  # begun, and stopped there
         self.report["rounds"] = max(s.turns_taken - (1 if capped and s.index == game.turn.active else 0) for s in game.seats)
+        # On the clock, as against the models' own seconds: what a batch of games actually waits for. A resumed game adds its runs.
+        self.report["wall_seconds"] = round((self.earlier or {}).get("wall_seconds", 0) + time.monotonic() - started)
         self.report["usage"] = self.auditor_runner.budget.to_dict()
         try:  # the journal is the game: say at once if it no longer rebuilds what was played, not when a later tool trips on it
             rebuilt = Table.replay(self.table.config, self.directory.events(), card_lookup=self.table.card_lookup)
@@ -1377,7 +1381,8 @@ def render(report: dict) -> str:
     if report.get("rubric"):
         lines += ["", rubric.render_markdown(report["rubric"]).rstrip()]
     usage = report["usage"]
-    lines += ["", "## Usage", "", f"{usage['calls']} model calls, {usage['seconds']:.0f} seconds of model time, "
+    lines += ["", "## Usage", "", (f"{report['wall_seconds'] / 60:.0f} minutes on the clock ({report['wall_seconds'] / max(report['turns_played'], 1):.0f} s a "
+                                     "table turn); " if report.get("wall_seconds") else "") + f"{usage['calls']} model calls, {usage['seconds']:.0f} seconds of model time, "
               f"{cost_summary(usage)}.",
               "", "`log.md` has the play-by-play, table talk included."]
     if report["stopped"]:
