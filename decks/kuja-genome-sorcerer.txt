@@ -1,0 +1,82 @@
+1 Abrade
+1 Arcane Signet
+1 Artist's Talent
+1 Bedevil
+1 Big Score
+1 Black Mage's Rod
+1 Black Waltz No. 3
+1 Blasphemous Act
+1 Blazemire Verge
+1 Blood Crypt
+1 Bojuka Bog
+1 Boltwave
+1 Chaos Warp
+1 Circle of Power
+1 City on Fire
+1 Collective Inferno
+1 Command Tower
+1 Cornered by Black Mages
+1 Coruscation Mage
+1 Dark Confidant
+1 Dark Ritual
+1 Deadly Dispute
+1 Demand Answers
+1 Dragonskull Summit
+1 Dualcaster Mage
+1 Faithless Looting
+1 Fandaniel, Telophoroi Ascian
+1 Feed the Swarm
+1 Fellwar Stone
+1 Fiery Inscription
+1 Firebrand Archer
+1 Flashback
+1 Foreboding Ruins
+1 Gandalf, Goblins' Bane
+1 Gleeful Arsonist
+1 Grab the Prize
+1 Graven Cairns
+1 Guttersnipe
+1 Harmonic Prodigy
+1 Haunted Ridge
+1 Jeska's Will
+1 Kefka, Dancing Mad
+1 Laughing Mad
+1 Light Up the Stage
+1 Lightning Bolt
+1 Lightning Greaves
+1 Lindblum, Industrial Regency
+1 Luxury Suite
+1 Mana Geyser
+1 Mind Stone
+1 Mizzix's Mastery
+12 Mountain
+1 Mysidian Elder
+1 Night's Whisper
+1 Path of Ancestry
+1 Queen Brahne
+1 Rakdos Charm
+1 Rakdos Signet
+1 Read the Bones
+1 Roaming Throne
+1 Ruby Medallion
+1 Seething Song
+1 Sign in Blood
+1 Smoldering Marsh
+1 Sol Ring
+1 Solphim, Mayhem Dominus
+1 Storm-Kiln Artist
+1 Sulfurous Springs
+9 Swamp
+1 Swiftfoot Boots
+1 Tainted Peak
+1 Talisman of Indulgence
+1 Terminate
+1 Thrill of Possibility
+1 Transpose
+1 Unexpected Windfall
+1 Untimely Malfunction
+1 Vandalblast
+1 Vivi's Persistence
+1 Wizard's Lightning
+
+1 Kuja, Genome Sorcerer

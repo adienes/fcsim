@@ -1,0 +1,96 @@
+1 An Offer You Can't Refuse
+1 Arcane Signet
+1 Arid Mesa
+1 Binding the Old Gods
+1 Birds of Paradise
+1 Bloodstained Mire
+1 Breeding Pool
+1 Chromatic Lantern
+1 City of Brass
+1 Clash of the Eikons
+1 Command Tower
+1 Counterspell
+1 Cultivate
+1 Demonic Tutor
+1 Eidolon of Blossoms
+1 Enchantress's Presence
+1 Enlightened Tutor
+1 Esper Origins
+1 Exotic Orchard
+1 Farseek
+1 Fellwar Stone
+1 Fierce Guardianship
+1 Flooded Strand
+3 Forest
+1 Garnet, Princess of Alexandria
+1 Godless Shrine
+1 Hall of Heliod's Generosity
+1 Hallowed Fountain
+1 Heroic Intervention
+2 Island
+1 Joshua, Phoenix's Dominant
+1 Jukai Naturalist
+1 Mana Confluence
+1 Marsh Flats
+1 Misty Rainforest
+1 Moonmist
+2 Mountain
+1 Mystic Remora
+1 Narci, Fable Singer
+1 Nature's Lore
+1 Nesting Grounds
+1 O'aka, Traveling Merchant
+1 Overgrown Tomb
+1 Path of Ancestry
+1 Path to Exile
+2 Plains
+1 Polluted Delta
+1 Power Conduit
+1 Rhystic Study
+1 Rydia, Summoner of Mist
+1 Sacred Foundry
+1 Sanctum Weaver
+1 Scalding Tarn
+1 Setessan Champion
+1 Sevinne's Reclamation
+1 Smothering Tithe
+1 Sol Ring
+1 Starfield of Nyx
+1 Starting Town
+1 Sterling Grove
+1 Stomping Ground
+1 Summon: Anima
+1 Summon: Bahamut
+1 Summon: Brynhildr
+1 Summon: Esper Valigarmanda
+1 Summon: Fenrir
+1 Summon: Good King Mog XII
+1 Summon: Ixion
+1 Summon: Knights of Round
+1 Summon: Kujata
+1 Summon: Magus Sisters
+1 Summon: Primal Odin
+1 Summon: Shiva
+1 Summon: Titan
+1 Summon: Valefor
+1 Summon: Yojimbo
+1 Summoner's Grimoire
+1 Swamp
+1 Swan Song
+1 Swords to Plowshares
+1 Sythis, Harvest's Hand
+1 Temple Garden
+1 The Apprentice's Folly
+1 The Eldest Reborn
+1 The Kami War
+1 Three Visits
+1 Tom Bombadil
+1 Utopia Sprawl
+1 Verdant Catacombs
+1 Weaver of Harmony
+1 Wild Growth
+1 Windswept Heath
+1 Wooded Foothills
+1 Yuna, Hope of Spira
+
+1 Terra, Magical Adept

@@ -1,0 +1,96 @@
+1 Alibou, Ancient Witness
+1 All Is Dust
+1 Alloy Myr
+1 Ancient Den
+1 Arcane Signet
+1 Brudiclad, Telchor Engineer
+1 Buried Ruin
+1 Chromatic Lantern
+1 Clock of Omens
+1 Command Tower
+1 Copper Myr
+1 Counterspell
+1 Cryptolith Rite
+1 Darkmoss Bridge
+1 Darksteel Citadel
+1 Darksteel Forge
+1 Darksteel Myr
+1 Dispatch
+1 Distant Melody
+1 Drossforge Bridge
+1 Etherium Sculptor
+1 Exotic Orchard
+2 Forest
+1 Forsaken Monument
+1 Foundry Inspector
+1 Frogmyr Enforcer
+1 Genesis Chamber
+1 Gold Myr
+1 Goldmire Bridge
+1 Great Furnace
+1 Heroic Intervention
+1 Hovermyr
+1 Ichorclaw Myr
+1 Inventors' Fair
+1 Iron Myr
+2 Island
+1 Jhoira, Weatherlight Captain
+1 Kindred Discovery
+1 Knighted Myr
+1 Leaden Myr
+1 Lodestone Myr
+1 Lux Artillery
+1 Master's Call
+1 Mechanized Production
+1 Mirrodin Besieged
+1 Mistvault Bridge
+2 Mountain
+1 Myr Battlesphere
+1 Myr Convert
+1 Myr Enforcer
+1 Myr Galvanizer
+1 Myr Kinsmith
+1 Myr Matrix
+1 Myr Propagator
+1 Myr Reservoir
+1 Myr Retriever
+1 Myr Sire
+1 Myr Superion
+1 Myr Turbine
+1 Myr Welder
+1 Myrsmith
+1 Mystic Forge
+1 Organic Extinction
+1 Palladium Myr
+1 Path of Ancestry
+1 Path to Exile
+1 Perilous Myr
+1 Plague Myr
+2 Plains
+1 Razortide Bridge
+1 Reliquary Tower
+1 Rustvale Bridge
+1 Seat of the Synod
+1 Shimmer Myr
+1 Silver Myr
+1 Silverbluff Bridge
+1 Skullclamp
+1 Slagwoods Bridge
+1 Sol Ring
+1 Spire of Industry
+1 Steel Overseer
+2 Swamp
+1 Swords to Plowshares
+1 Tanglepool Bridge
+1 Tempered Steel
+1 Tezzeret, Master of the Bridge
+1 Thornglint Bridge
+1 Thoughtcast
+1 Tree of Tales
+1 Unwinding Clock
+1 Urza's Incubator
+1 Vanquisher's Banner
+1 Vault of Whispers
+1 Wake the Past
+
+1 Urtet, Remnant of Memnarch

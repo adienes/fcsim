@@ -1,0 +1,89 @@
+1 Abrade
+1 An Offer You Can't Refuse
+1 Arcane Signet
+1 Archmage Emeritus
+1 Ashling, Flame Dancer
+1 Azula, Cunning Usurper
+1 Big Score
+1 Blasphemous Act
+1 Blood Crypt
+1 Bloodstained Mire
+1 Borne Upon a Wind
+1 Brainstorm
+1 Bulk Up
+1 Chaos Warp
+1 Command Tower
+1 Counterspell
+1 Crackle with Power
+1 Crumbling Necropolis
+1 Dark Ritual
+1 Deadly Rollick
+1 Deflecting Swat
+1 Demand Answers
+1 Demonic Tutor
+1 Dragonskull Summit
+1 Drowned Catacomb
+1 Dualcaster Mage
+1 Electro, Assaulting Battery
+1 Electrodominance
+1 Etali, Primal Storm
+1 Exotic Orchard
+1 Faerie Mastermind
+1 Fated Firepower
+1 Fellwar Stone
+1 Fire Nation Palace
+1 Firebender Ascension
+1 Firebending Student
+1 Fists of Flame
+1 Frantic Search
+1 Goblin Electromancer
+1 Guttersnipe
+1 High Fae Trickster
+5 Island
+1 Izzet Signet
+1 Jeska's Will
+1 Leyline of Anticipation
+1 Lightning Bolt
+1 Lightning Greaves
+1 Lightning Strike
+1 Mana Geyser
+6 Mountain
+1 Narset's Reversal
+1 Nightscape Familiar
+1 Opt
+1 Ozai, the Phoenix King
+1 Polluted Delta
+1 Pyretic Ritual
+1 Redirect Lightning
+1 Reliquary Tower
+1 Rhystic Study
+1 Rogue's Passage
+1 Scalding Tarn
+1 Seething Song
+1 Shivan Reef
+1 Snap
+1 Sol Ring
+1 Sozin's Comet
+1 Steam Vents
+1 Storm-Kiln Artist
+1 Stormcarved Coast
+1 Sulfur Falls
+4 Swamp
+1 Swiftfoot Boots
+1 Talisman of Creativity
+1 Talisman of Dominance
+1 Talisman of Indulgence
+1 The Last Agni Kai
+1 Thrill of Possibility
+1 Torrential Gearhulk
+1 Training Center
+1 Twinning Staff
+1 Unexpected Windfall
+1 Valley Floodcaller
+1 Veyran, Voice of Duality
+1 Waterlogged Teachings
+1 Watery Grave
+1 Xander's Lounge
+1 Zuko, Firebending Master
+
+1 Fire Lord Azula

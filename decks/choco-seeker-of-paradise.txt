@@ -1,0 +1,87 @@
+1 Airborne Aid
+1 Ambrosia Whiteheart
+1 Arcane Signet
+1 Aven Interrupter
+1 Aven Mindcensor
+1 Banner of Kinship
+1 Bartz and Boko
+1 Beastmaster Ascension
+1 Birds of Paradise
+1 Breeding Pool
+1 Canopy Vista
+1 Chocobo Camp
+1 Chocobo Kick
+1 Chocobo Racetrack
+1 Command Tower
+1 Counterspell
+1 Cultivate
+1 Dazzling Denial
+1 Derevi, Empyrial Tactician
+1 Emeria Angel
+1 Empyrean Eagle
+1 Esior, Wardwing Familiar
+1 Evolving Wilds
+1 Exotic Orchard
+1 Farseek
+1 Felidar Retreat
+1 Flooded Strand
+1 Flurry of Wings
+6 Forest
+1 Gilded Goose
+1 Glacial Fortress
+1 Growth Spiral
+1 Gwaihir the Windlord
+1 Gysahl Greens
+1 Hallowed Fountain
+1 Healer's Hawk
+1 Herald's Horn
+1 Hermes, Overseer of Elpis
+1 Heroic Intervention
+1 Hinterland Harbor
+1 Ishai, Ojutai Dragonspeaker
+6 Island
+1 Jackdaw Savior
+1 Judge's Familiar
+1 Kangee, Sky Warden
+1 Kastral, the Windcrested
+1 Kindred Discovery
+1 Ledger Shredder
+1 Misty Rainforest
+1 Mockingbird
+1 Murmuration
+1 Nature's Lore
+1 Patchwork Banner
+1 Path of Ancestry
+1 Path to Exile
+1 Perch Protection
+5 Plains
+1 Plumecreed Escort
+1 Prairie Stream
+1 Rampant Growth
+1 Rejuvenating Springs
+1 Reliquary Tower
+1 Ride the Shoopuf
+1 Sazh Katzroy
+1 Sazh's Chocobo
+1 Seaside Citadel
+1 Sidequest: Raise a Chocobo
+1 Sol Ring
+1 Soulcatchers' Aerie
+1 Spara's Headquarters
+1 Summon: Choco/Mog
+1 Summon: Fat Chocobo
+1 Sunpetal Grove
+1 Swan Song
+1 Swords to Plowshares
+1 Tawnos, the Toymaker
+1 Temple Garden
+1 The Goose Mother
+1 Three Tree City
+1 Three Visits
+1 Traveling Chocobo
+1 Warden of Evos Isle
+1 Watcher of the Spheres
+1 Windswept Heath
+1 Winged Portent
+
+1 Choco, Seeker of Paradise

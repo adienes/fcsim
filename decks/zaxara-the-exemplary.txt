@@ -1,0 +1,87 @@
+1 Animist's Awakening
+1 Arcane Signet
+1 Beast Within
+1 Benevolent Hydra
+1 Blue Sun's Zenith
+1 Branching Evolution
+1 Brass Infiniscope
+1 Breeding Pool
+1 Command Tower
+1 Condescend
+1 Corpsejack Menace
+1 Counterspell
+1 Cultivate
+1 Curse of the Swine
+1 Doubling Season
+1 Dreamroot Cascade
+1 Elementalist's Palette
+1 Erebos's Intervention
+1 Exotic Orchard
+1 Exsanguinate
+1 Farseek
+1 Finale of Revelation
+8 Forest
+1 Freed from the Real
+1 Gargos, Vicious Watcher
+1 Garruk's Uprising
+1 Genesis Hydra
+1 Goldvein Hydra
+1 Herald of Secret Streams
+1 Heroic Intervention
+1 Hinterland Harbor
+1 Hooded Hydra
+1 Hungering Hydra
+1 Hydroid Krasis
+1 Inspiring Call
+5 Island
+1 Kalonian Hydra
+1 Kodama's Reach
+1 Lifeblood Hydra
+1 Lightning Greaves
+1 Llanowar Wastes
+1 Managorger Hydra
+1 Mind Spring
+1 Mistcutter Hydra
+1 Nature's Lore
+1 Neverwinter Hydra
+1 Nexos
+1 Nyxborn Hydra
+1 Opulent Palace
+1 Overgrown Tomb
+1 Owlin Spiralmancer
+1 Path of Ancestry
+1 Pemmin's Aura
+1 Primordial Hydra
+1 Profane Command
+1 Protean Hydra
+1 Pull from Tomorrow
+1 Rampant Growth
+1 Rejuvenating Springs
+1 Reliquary Tower
+1 Repulsive Mutation
+1 Rogue's Passage
+1 Selvala, Heart of the Wilds
+1 Simic Ascendancy
+1 Sol Ring
+1 Steelbane Hydra
+1 Stonecoil Serpent
+1 Sunken Hollow
+4 Swamp
+1 Swiftfoot Boots
+1 Syncopate
+1 Terrasymbiosis
+1 Thassa's Intervention
+1 The Goose Mother
+1 The Ozolith
+1 Torment of Hailfire
+1 Unbound Flourishing
+1 Undergrowth Stadium
+1 Vastwood Hydra
+1 Villainous Wealth
+1 Voracious Hydra
+1 Watery Grave
+1 Woodland Cemetery
+1 Yavimaya Coast
+1 Zagoth Triome
+
+1 Zaxara, the Exemplary
