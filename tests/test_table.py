@@ -1497,3 +1497,34 @@ def test_in_an_audited_game_a_player_who_has_lost_is_removed_by_the_driver_not_b
     free, other = started()                                             # with no auditor there is no driver to do it
     pass_until(free, other, "main1")
     other.step(0, "act", {"because": "x", "mutations": [{"op": "life", "seat": 1, "delta": -40}, {"op": "eliminate", "seat": 1, "reason": "0 life"}]})
+
+
+def test_a_commander_goes_to_the_command_zone_however_it_left_play_unless_its_owner_says_it_stays():
+    """Rule 903.9. The table sent a commander home only from deaths it applied itself; one sacrificed by a player stayed in its
+    owner's graveyard, and the pilot never cast its commander again."""
+    table, runner = started()
+    pass_until(table, runner, "main1")
+    commander = table.view(0)["seats"][0]["command"][0]["handle"]
+    runner.step(0, "act", {"because": "test set-up", "mutations": [{"op": "move", "obj": commander, "to": "battlefield"}]})
+    on_board = lambda: next(o["handle"] for o in table.view(0)["battlefield"] if o.get("is_commander"))
+    runner.step(0, "act", {"because": "sacrificed to Fleshbag Marauder", "mutations": [{"op": "move", "obj": on_board(), "to": "graveyard"}]})
+    runner.step(0, "pass_priority")                                    # the state-based action, before anyone has priority
+    assert table.view(0)["seats"][0]["command"] and not table.view(0)["seats"][0]["graveyard"]
+    assert any("goes from Ann's graveyard to the command zone (rule 903.9a)" in line for e in table.events for line in e["public"])
+    pass_until(table, runner, "main1", seat=0)
+    runner.step(0, "act", {"because": "test set-up", "mutations": [{"op": "move", "obj": table.view(0)["seats"][0]["command"][0]["handle"], "to": "battlefield"}]})
+    runner.step(0, "act", {"because": "bounced", "mutations": [{"op": "move", "obj": on_board(), "to": "hand"}]})     # replaced, not moved and then fixed
+    assert table.view(0)["seats"][0]["command"] and "its owner puts it into the command zone instead of hand (rule 903.9b)" in table.events[-1]["public"][-1]
+    runner.step(0, "act", {"because": "test set-up", "mutations": [{"op": "move", "obj": table.view(0)["seats"][0]["command"][0]["handle"], "to": "battlefield"}]})
+    runner.step(0, "act", {"because": "airbent by my own Appa, to recast for {2}", "mutations": [{"op": "move", "obj": on_board(), "to": "exile", "stay": True}]})
+    runner.step(0, "pass_priority")
+    assert not table.view(0)["seats"][0]["command"] and table.view(0)["seats"][0]["exile"][0].get("is_commander")   # its owner's choice
+    assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()
+    old = Table(seats(), seed=5, first=0, mechanics=7)                 # a journal from before replays as it was played
+    before = ScriptedRunner(old)
+    for seat in range(3):
+        before.step(seat, "keep")
+    pass_until(old, before, "main1")
+    before.step(0, "act", {"because": "x", "mutations": [{"op": "move", "obj": old.view(0)["seats"][0]["command"][0]["handle"], "to": "graveyard"}]})
+    before.step(0, "pass_priority")
+    assert old.view(0)["seats"][0]["graveyard"] and not old.view(0)["seats"][0]["command"]

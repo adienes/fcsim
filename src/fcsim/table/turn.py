@@ -296,6 +296,18 @@ def _state_based_deaths(game: Game) -> None:
             game.announcements.append(f"{gone.name} is a commander, and goes from the graveyard to the command zone (rule 903.9a).")
 
 
+def _commanders_home(game: Game) -> None:
+    """Rule 903.9a, as a state-based action: a commander in a graveyard or in exile goes to the command zone, unless
+    its owner said, when it was put there, that it stays. The table sent a commander home only from the deaths it
+    applied itself; one sacrificed to Fleshbag Marauder stayed in its owner's graveyard, and the pilot, sure it could
+    not be recast, never cast its commander again in five rounds with six to nine mana."""
+    for obj in [o for o in game.objects.values() if o.is_commander and o.zone in ("graveyard", "exile") and not o.stays and not o.face_down]:
+        came_from = obj.zone
+        mutations.move(game, obj, "command")
+        game.announcements.append(f"{obj.name} is a commander, and goes from {game.seats[obj.owner].name}'s {came_from} to the command zone "
+                                  "(rule 903.9a).")
+
+
 def about(game: Game, fact: dict | None) -> dict:
     """What a script's "it", "that_player" and "that_many" stand for, from the fact that set the trigger off."""
     it = game.objects.get((fact or {}).get("id"))
@@ -330,6 +342,8 @@ def grant_priority(game: Game, seat: int) -> None:
         return
     if game.mechanics >= 4:
         _state_based_deaths(game)
+    if game.mechanics >= 8:
+        _commanders_home(game)
     collect_triggers(game)
     owed = {t["seat"] for t in game.pending_triggers}
     for candidate in game.turn_order_from(game.turn.active):
@@ -355,7 +369,9 @@ def _give_priority(game: Game, seat: int) -> None:
     if _gate(game, {"do": "give", "seat": seat}):
         return
     if game.mechanics >= 4:
-        _state_based_deaths(game)  # rule 704.3: whenever a player would receive priority, not only after a resolution
+        _state_based_deaths(game)
+    if game.mechanics >= 8:
+        _commanders_home(game)  # rule 704.3: whenever a player would receive priority, not only after a resolution
     collect_triggers(game)
     if game.pending_triggers:  # something triggered since priority was last granted: it goes on the stack first
         return grant_priority(game, seat)

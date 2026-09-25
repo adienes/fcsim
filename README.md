@@ -210,6 +210,12 @@ A project is a deck's identity across revisions of its list. What its pilots lea
 with its evidence, stays tentative until a different game bears it out, and is flagged rather than taught once none of the
 cards it leans on is in the list. Only the primer reaches a pilot: about 600 words, and more where every line earns its place.
 
+`decks/_generic/primer.md` is how to play Commander well whatever the deck: every pilot reads it before its own deck's
+primer. The lesson learner marks a lesson `general` when it would hold for any deck (mulligans, threats, when to use an
+answer, what to keep home); such lessons go to `decks/_generic/lessons.jsonl` instead of the deck's own, are validated by
+any deck's games, and have the guide rewritten, so no deck has to learn them again. Every pilot is also told what the other
+decks do, from the Gameplan section of each one's primer, as players say before a game.
+
 A deck that loses has not shown that it is weak. `fcsim pilot` reads from the journal what each seat kept, the land drops
 it missed, the turns it ended with mana untapped beside a card it could have cast, and the turns its attackers stayed
 home; the lesson learner starts from that, and the deck reviewer is told to tell the pilot from the deck and to propose no
@@ -250,14 +256,20 @@ else's turn, a quiet upkeep or draw step, a seat with no cards and nothing untap
 **Other players' chances to act** cost one tool-less question each, asked of every seat at once:
 whether to respond when something goes on the stack (one answer can cover the whole stack), and
 whether to act when attackers have been declared and again when blocks have. Only a yes is a
-wake. A player can set a private standing policy (`pass_always`, `pass_unless_targeted`), and can
-ask to be given priority in the end step before its own turn. Opening hands are decided the
+wake. These questions run at a lower effort, except for a seat that holds an instant it could
+cast: that seat is asked at its full effort, told what it could cast, and asked who wins if this
+resolves. A player can set a private standing policy (`pass_always`, `pass_unless_targeted`), and can
+ask to be given priority in the end step before its own turn; in another player's big turn (three
+spells or more) a seat holding an answer is asked anyway, twice a turn at most. On its own turn,
+before attacking, a pilot's briefing counts what each opponent could swing back with and what would
+be left to block. Opening hands are decided the
 same way, all seats together. Table talk works the same way too: a `say` addressed to named players
 gets their answers back in the same call, so a deal can be struck before the speaker acts.
 
 **What the table enforces itself.** Whatever depends on no card's text: turn order and priority,
 land and spell timing, which creatures may attack and block (tapped, defender, summoning
-sickness, flying), state-based losses, and the arithmetic of combat damage (first strike, trample,
+sickness, flying), state-based losses, a commander's return to the command zone however it left
+play (unless its owner says it stays), and the arithmetic of combat damage (first strike, trample,
 deathtouch, lifelink, indestructible, deaths), worked out from printed numbers, counters and the
 auditor's stamps and offered to the attacker as `combat_damage {as_proposed: true}`. A player gets
 past a refusal by naming, in `because`, the effect that allows the play, which the auditor then

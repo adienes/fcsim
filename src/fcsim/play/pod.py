@@ -9,6 +9,7 @@ triggers and correction wakes. Narrower watches, triage and disputes come later 
 from __future__ import annotations
 
 import difflib
+import hashlib
 import json
 import traceback
 import random
@@ -24,7 +25,7 @@ from ..audit.auditor import card_reference
 from ..cards import CardDatabase, read_decklist, resolve, validate_deck
 from ..mcp import McpServer
 from ..rules import RulesReference
-from ..table import Table, scripts, triggers
+from ..table import Table, mechanics, scripts, triggers
 from ..table.model import MECHANICS
 from ..table.ops import _named as ops_named
 from ..tools import SeatTools
@@ -57,7 +58,10 @@ the effect needs, then finish_resolution.
 are finished use until "cleanup", which passes through the rest of your turn. The table passes \
 for you through your own upkeep and draw steps when nothing is waiting there.
 - Put your triggered abilities on the stack (add_trigger) and carry out state-based actions, except \
-one: a player at 0 life, 10 poison or 21 commander damage is removed by the table itself. When an \
+two the table does itself: a player at 0 life, 10 poison or 21 commander damage is removed, and a \
+commander that goes to a graveyard or exile, or would go to a hand or library, goes to the command \
+zone, from where it can be cast again. If you want your own commander to stay where it went (to \
+reanimate it, or to recast it from exile for less), give "stay": true in the move that puts it there. When an \
 effect sets up something for later ("return it at the beginning of the next end step"), record it \
 with the `delay` mutation as you resolve it, and the table will bring it back to you at that step.
 
@@ -130,7 +134,7 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
              resume: str | Path | None = None, audit_every: str = "turn", triage_runners: list[Runner] | None = None,
              refresh_before_blocks: bool = True, judge_runner: Runner | None = None, hook_library: str | Path | None = None,
              shuffle_seats: bool = False, rewind_to: int | None = None, rewind_because: str = "",
-             echo=lambda line: print(line, flush=True)) -> dict:
+             generic_guide: str | Path | None = None, echo=lambda line: print(line, flush=True)) -> dict:
     """Play up to `cycles` turns per seat. `runners[i]` pilots seat i; share one Budget across all
     runners and the auditor to cap the whole game.
 
@@ -147,6 +151,8 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
     abandoned line stays in the journal and nobody counts it), and whatever audit was owed there is made.
     `hook_library` is a JSON file of what auditors have written for each card in earlier games: a card
     in it has its triggers and holds from the moment it arrives, and the file learns from this game.
+    `generic_guide` is a file every pilot reads before its own deck's primer: how to play Commander well, whatever
+    the deck (decks/_generic/primer.md); the game keeps the text it began with.
     With `shuffle_seats` the decks are seated in an order drawn from the seed, so that who sits to whose
     left changes from game to game as well as who goes first; `runners[i]` still pilots `deck_paths[i]`."""
     from ..workshop.project import deck_argument  # the workshop reads games, so it is imported here and not at the top
@@ -157,10 +163,13 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
         primers = [(p.read_text(encoding="utf-8") if (p := earlier.path / "decks" / f"seat-{index}.primer.md").is_file() else "")
                    for index in range(len(deck_paths))]  # a game keeps the guidance it began with, whatever the project has learned since
         projects = [None] * len(deck_paths)
+        frozen = earlier.path / "decks" / "generic.primer.md"
+        generic = frozen.read_text(encoding="utf-8") if frozen.is_file() else ""
     else:
         given = [deck_argument(path) for path in deck_paths]
         deck_paths, projects = [path for path, _ in given], [project for _, project in given]
         primers = [project.primer() if project else "" for project in projects]
+        generic = Path(generic_guide).read_text(encoding="utf-8").strip() if generic_guide and Path(generic_guide).is_file() else ""
     decks = [resolve(read_decklist(path), database, online=True) for path in deck_paths]
     for path, deck in zip(deck_paths, decks, strict=True):
         if deck.unknown or not deck.commanders:
@@ -172,7 +181,8 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
                      earlier.read("config.json")["seats"], decks, runners, auditor_runner, database, cycles, rules, echo,
                      earlier=earlier.read("report.json") if (earlier.path / "report.json").is_file() else {"wakes": []},
                      audit_every=audit_every, triage_runners=triage_runners, refresh_before_blocks=refresh_before_blocks,
-                     judge_runner=judge_runner, hook_library=hook_library, primers=primers, rewind_to=rewind_to, rewind_because=rewind_because)
+                     judge_runner=judge_runner, hook_library=hook_library, primers=primers, rewind_to=rewind_to, rewind_because=rewind_because,
+                     generic=generic)
     seed = seed if seed is not None else secrets.randbelow(2 ** 31)
     if shuffle_seats:
         order = random.Random(f"seating-{seed}").sample(range(count), count)
@@ -189,6 +199,8 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
         directory.write(f"decks/seat-{index}.txt", read_decklist(path).to_mtgo())
         if primers[index]:
             directory.write(f"decks/seat-{index}.primer.md", primers[index])  # exactly what this pilot was told, frozen with the game
+    if generic:
+        directory.write("decks/generic.primer.md", generic)  # what every pilot was told about playing well, frozen with the game
     directory.pin_cards({card.name for deck in decks for card in [*deck.commanders, *(c for c, _ in deck.cards)]}, database)
     directory.pin_rules(rules)
     directory.write("config.json", {"mode": "pod", "decks": [str(p) for p in deck_paths], "seats": names, "cycles": cycles,
@@ -197,10 +209,11 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
                                     "auditor_model": auditor_runner.model,
                                     "auditor_backend": getattr(auditor_runner, "backend", "custom"),
                                     "projects": [project.hashes(database) if project else None for project in projects],
+                                    "generic_hash": hashlib.sha256(generic.encode()).hexdigest()[:16] if generic else None,
                                     "deck_issues": [[i.to_dict() for i in validate_deck(d, database)] for d in decks]})
     return _play(directory, table, names, decks, runners, auditor_runner, database, cycles, rules, echo,
                  audit_every=audit_every, triage_runners=triage_runners, refresh_before_blocks=refresh_before_blocks,
-                 judge_runner=judge_runner, hook_library=hook_library, primers=primers)
+                 judge_runner=judge_runner, hook_library=hook_library, primers=primers, generic=generic)
 
 
 class _Pod:
@@ -212,7 +225,7 @@ class _Pod:
                  database: CardDatabase, cycles: int, rules: RulesReference | None, echo, *, earlier: dict | None = None,
                  audit_every: str = "turn", triage_runners: list | None = None, refresh_before_blocks: bool = True, judge_runner=None,
                  hook_library: str | Path | None = None, ask_about_triggers: bool = True, primers: list[str] | None = None,
-                 rewind_to: int | None = None, rewind_because: str = "") -> None:
+                 rewind_to: int | None = None, rewind_because: str = "", generic: str = "") -> None:
         self.directory, self.table, self.names, self.decks, self.runners, self.auditor_runner, self.database, self.cycles, self.rules = \
             directory, table, names, decks, runners, auditor_runner, database, cycles, rules
         self.echo, self.earlier, self.audit_every, self.triage_runners, self.refresh_before_blocks, self.judge_runner, self.hook_library, self.ask_about_triggers = \
@@ -229,11 +242,15 @@ class _Pod:
         self.auditor = Auditor(self.auditor_runner, self.database, context=self.context)
         self.judge = Judge(self.judge_runner or self.auditor_runner, self.database, rules=self.rules, context=self.context)
         self.primers = primers or [""] * len(names)
+        self.generic = generic
         self.systems = [SYSTEM.format(name=name, count=self.count)
+                        + (f"\n\nHOW TO PLAY COMMANDER WELL (what the pilots at this table have learned, whatever the deck. It is advice, not "
+                           f"orders)\n{generic}" if generic else "")
                         + (f"\n\nHOW THIS DECK LIKES TO BE PLAYED (guidance accepted from its earlier games. It is advice, not orders: check the "
                            f"board and the cards as they are, and play to win)\n{primer}" if primer else "")
+                        + self.rule_zero(index)
                         + "\n\nYOUR DECK (count, name, cost, type, text)\n" + _deck_reference(deck, self.database)
-                        for name, deck, primer in zip(self.names, self.decks, self.primers, strict=True)]
+                        for index, (name, deck, primer) in enumerate(zip(self.names, self.decks, self.primers, strict=True))]
         self.current: dict = {}
         # Each seat's place in the log, so a wake can say what happened since its last one. After a
         # resume the players start from their notes and the board, not from the whole history again.
@@ -265,6 +282,8 @@ class _Pod:
                     except ValueError:
                         pass
         self.cleared = -1  # how long the journal was when the turn so far was last audited because a player stood to lose
+        self.nudged: dict[tuple[int, int], int] = {}  # (table turn, seat): times it was asked despite its policy, in someone's big turn
+        self.overridden: set[int] = set()             # seats about to be asked only because of that
         self.greeted: set[int] = set()  # permanents whose controller has had its chance to see to them on someone else's turn
         self.windows: dict = {}  # (table turn, step) -> the seats that said they would act in that empty-stack window
         self.stamped: list = [None]  # what the battlefield looked like when power and toughness were last worked out
@@ -378,6 +397,7 @@ class _Pod:
                           *([f"- {a['name']}: cast {{\"card\": \"{a['card']}\", \"payment\": "
                              + json.dumps({"tap": a["tap"], **({"pool": a["pool"]} if a.get("pool") else {})}) + "}"
                              for a in self.table.affordable(seat)] or ["- nothing"]),
+                          *_before_attacking(self.table, seat),
                           *(["", "YOUR TRIGGERS WAITING TO GO ON THE STACK", *waiting] if waiting else []),
                           *(["", "QUESTIONS FOR YOU", *asked] if asked else []),
                           *(["", "THE JUDGE'S RULINGS IN THIS GAME (they bind everyone, the auditor included)",
@@ -392,15 +412,50 @@ class _Pod:
                  or e.get("private")][-40:]  # passes are noise, unless the table did something by itself as one was made
         return "Since your last wake:\n" + "\n".join(lines) if lines else "Nothing has happened since your last wake."
 
-    def ask_all(self, prompts: dict[int, str], schema: dict, *, quick: bool = False) -> list:
+    def ask_all(self, prompts: dict[int, str], schema: dict, *, quick: bool = False, thorough: frozenset[int] | set[int] = frozenset()) -> list:
         """One question, no tools, to several seats at the same time: (seat, reply) for each. Every such
         question in a game comes through here. The caller builds the prompts, in this thread: the card
-        database is not for several threads at once. `quick` uses the lower-effort runners, if there are any."""
+        database is not for several threads at once. `quick` uses the lower-effort runners, if there are any,
+        except for the seats in `thorough`, whose answer matters enough to be thought through."""
         if not prompts:
             return []
-        asked = (self.triage_runners or self.runners) if quick else self.runners
+
+        def runner(seat: int):
+            return (self.triage_runners or self.runners)[seat] if quick and seat not in thorough else self.runners[seat]
         with ThreadPoolExecutor(max_workers=len(prompts)) as pool:
-            return list(pool.map(lambda seat: (seat, asked[seat].ask(self.systems[seat], prompts[seat], schema=schema)), prompts))
+            return list(pool.map(lambda seat: (seat, runner(seat).ask(self.systems[seat], prompts[seat], schema=schema)), prompts))
+
+    def rule_zero(self, seat: int) -> str:
+        """What the other players said their decks do before the game, as players do: each deck's own summary of its plan
+        (the Gameplan section of its primer), or only its commander where it has none. A pilot who knows that Obeka takes
+        extra upkeeps can see Obeka's big turn coming."""
+        said = []
+        for other, (name, deck, primer) in enumerate(zip(self.names, self.decks, self.primers, strict=True)):
+            if other == seat:
+                continue
+            plan = re.search(r"^## Gameplan[^\n]*\n(.+?)(?=^## |\Z)", primer or "", re.S | re.M)
+            commanders = " and ".join(c.name for c in deck.commanders)
+            said.append(f"- {name} ({commanders}): " + (" ".join(plan[1].split()) if plan else "said nothing about its deck beyond its commander."))
+        return "\n\nWHAT THE OTHER PLAYERS SAID THEIR DECKS DO (before the game, as players do; their cards are theirs to know)\n" + "\n".join(said) if said else ""
+
+    def big_turn(self, seat: int) -> bool:
+        """Whether to ask a seat whose standing policy says not to: another player has cast three or more spells this turn,
+        and this seat holds an answer it could cast. At most twice in a turn. A policy set at the end of one's own turn
+        cannot foresee a combo turn, and the answer held for "a real threat" goes unused through it."""
+        game = self.table.game
+        if game.turn.active == seat or game.turn.casts.get(game.turn.active, 0) < 3 or self.nudged.get((game.turn.number, seat), 0) >= 2:
+            return False
+        if not self.instants(seat):
+            return False
+        self.nudged[(game.turn.number, seat)] = self.nudged.get((game.turn.number, seat), 0) + 1
+        self.overridden.add(seat)
+        return True
+
+    def instants(self, seat: int) -> list[str]:
+        """The cards in hand this seat could cast right now at instant speed, by the table's count of its mana."""
+        lookup = self.table.card_lookup or (lambda _: None)
+        return [a["name"] for a in self.table.affordable(seat)
+                if "Instant" in (lookup(a["name"]) or {}).get("types", []) or "Flash" in (lookup(a["name"]) or {}).get("keywords", [])]
 
     def triage(self, seats: list[int]) -> dict[int, bool]:
         """Ask several seats at once, each with one question and no tools, whether they want to
@@ -409,6 +464,21 @@ class _Pod:
         triggers is one question and not one per trigger."""
         game = self.table.game
         top = game.stack[-1]
+        # A seat that holds an answer it could cast is asked to think it through, not at the triage runner's low effort.
+        # Miirym's pilot, holding Chaos Warp, said no ten times in a row during Obeka's 122-action turn, "holding it for a
+        # real threat", while Obeka's extra upkeeps stole the Dragons that killed Miirym three turns later.
+        held = {seat: self.instants(seat) for seat in seats}
+
+        def weigh(seat: int) -> str:
+            if not held[seat]:
+                return ""
+            active = game.turn.active
+            despite = (" The table asks you despite your standing policy, because this is a big turn and you hold an answer."
+                       if seat in self.overridden else "")
+            return (f"\nYou could cast now: {', '.join(held[seat])}.{despite} It is {self.names[active]}'s turn, and they have cast "
+                    f"{game.turn.casts.get(active, 0)} spell(s) in it so far. Before you pass, ask who is winning if this resolves and the "
+                    "rest of this turn goes the way it is going. An answer saved \"for a real threat\" is wasted if the real threat is "
+                    "this turn.")
 
         def question(seat: int) -> str:
             items = [f"  {n}. {self.names[item.controller]}'s {item.source_name}" + (f": {item.text}" if item.text else "")
@@ -422,11 +492,12 @@ class _Pod:
                     "until something new is added; true means you want to be asked again before each lower item resolves. "
                     "If you would respond to nothing at all before your next turn (you are tapped out, or hold nothing you "
                     "could use), also set `policy` to \"pass_always\", or to \"pass_unless_targeted\" to be asked only "
-                    "about things that target you or what you control.")
+                    "about things that target you or what you control." + weigh(seat))
         prompts = {seat: f"{self.when()} {question(seat)}\n\n"
                          f"{self.news(seat)}\n\n{self.briefing(seat)}" for seat in seats}
 
-        replies = self.ask_all(prompts, _TRIAGE, quick=True)
+        self.overridden -= set(seats)
+        replies = self.ask_all(prompts, _TRIAGE, quick=True, thorough={seat for seat in seats if held[seat]})
         answers = {}
         for seat, reply in replies:
             data = reply.data or {}
@@ -437,7 +508,7 @@ class _Pod:
                     self.table.act(seat, "set_response_policy", {"policy": data["policy"]})
             record = {"turn": game.turn.number, "seat": seat, "respond": answers[seat], "why": data.get("why", ""),
                       "about": top.source_name, "stack": len(game.stack), "ask_again": bool(data.get("ask_again", True)),
-                      "policy": data.get("policy"), "seconds": round(reply.seconds, 1)}
+                      "policy": data.get("policy"), "seconds": round(reply.seconds, 1), **({"holding": held[seat]} if held[seat] else {})}
             self.report["triage"].append(record)
             self.directory.append(f"transcript-seat-{seat}.jsonl", {"kind": "triage", **record})
         self.echo(f"turn {game.turn.number} {game.turn.step}: response to {top.source_name}: "
@@ -914,7 +985,8 @@ class _Pod:
                     self.decisions.clear()
                     self.decisions.update(stack=signature, respond=set())
                 waiting = [s for s in game.turn_order_from(seat) if s not in game.turn.passed and s != me]
-                asked = [s for s in waiting if s not in self.decisions["respond"] and top not in self.waived[s] and _wants_asking(self.table, s)]
+                asked = [s for s in waiting if s not in self.decisions["respond"] and top not in self.waived[s]
+                         and (_wants_asking(self.table, s) or self.big_turn(s))]
                 if asked:
                     self.decisions["respond"] |= {s for s, responds in self.triage(asked).items() if responds}
                 if seat not in self.decisions["respond"]:
@@ -997,6 +1069,36 @@ class _Pod:
 def _play(*args, **kwargs) -> dict:
     """Schedule seats and audits until the game ends or `cycles` more rounds have been played."""
     return _Pod(*args, **kwargs).run()
+
+
+def _before_attacking(table: Table, seat: int) -> list[str]:
+    """On a seat's own turn, before it declares attackers: what the others could swing back with, and what it would have
+    left to block. The table can count this much from printed values, counters and the auditor's numbers, and a pilot
+    left to count it did not: one attacked with everything two turns running and went from 40 life to out in two rounds."""
+    game, lookup = table.game, table.card_lookup
+    if game.turn.active != seat or game.turn.step not in ("main1", "begin_combat", "declare_attackers") or game.turn.attackers:
+        return []
+
+    def creatures(index: int) -> list:
+        return [game.objects[i] for i in game.battlefield
+                if game.objects[i].controller == index and "creature" in game.objects[i].type_line.lower() and not game.objects[i].phased_out]
+    lines = ["", "BEFORE YOU ATTACK (the table's count, from printed values, counters and the auditor's numbers; what cards do to combat is "
+                 "not counted). Each opponent untaps before it can attack you:"]
+    for other in game.seats:
+        if other.index == seat or other.status != "alive":
+            continue
+        known = [mechanics.stats(game, obj, lookup) for obj in creatures(other.index)]
+        power, flying = sum(k["power"] for k in known if k), sum(k["power"] for k in known if k and "flying" in k["keywords"])
+        unsure = sum(1 for k in known if k is None)
+        lines.append(f"- {other.name}: {other.life} life; {len(known)} creature(s) with {power} power" + (f", {flying} of it flying" if flying else "")
+                     + (f", and {unsure} whose power the table does not know" if unsure else ""))
+    mine = [(obj, mechanics.stats(game, obj, lookup)) for obj in creatures(seat)]
+    stays = [obj.name for obj, k in mine if k and "vigilance" in k["keywords"]]
+    air = [obj.name for obj, k in mine if k and k["keywords"] & {"flying", "reach"}]
+    lines.append(f"- You: {game.seats[seat].life} life; {len(mine)} creature(s). Whatever attacks now without vigilance stays tapped through "
+                 "every other player's turn and cannot block" + (f"; vigilance: {', '.join(stays)}" if stays else "")
+                 + (f"; can block fliers: {', '.join(air)}" if air else "; nothing of yours can block a flier") + ".")
+    return lines
 
 
 def _must_lose(table: Table) -> list[tuple[int, str]]:

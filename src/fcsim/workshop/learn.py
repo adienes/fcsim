@@ -15,7 +15,7 @@ from pathlib import Path
 from ..cards import CardDatabase, read_decklist, resolve
 from ..play.gamedir import GameDirectory
 from ..play.goldfish import _deck_reference
-from .project import PRIMER_WORDS, DeckProject
+from .project import PRIMER_WORDS, DeckProject, GenericGuide
 from .review import CHECK_SYSTEM, _game_material, _list_numbers, _seat_of
 
 KINDS = ["opening_hand", "sequencing", "commander_timing", "mana", "combat", "threat_assessment", "interaction", "politics", "how_a_card_works"]
@@ -57,6 +57,15 @@ lesson you would write is one of those, give its id in `same_as` and restate it 
 games add to it: a lesson seen again in a different game is how it comes to be trusted, and one \
 written twice in other words is only clutter.
 
+Mark a lesson `general` when it would hold for any deck at any Commander table and depends on no \
+card of this list: about mulligans, spending mana, when to attack and what to keep home, whom to \
+treat as the threat, when to use an answer, what to say at the table. General lessons go to the \
+guide every pilot reads, whatever it plays, so that no deck has to learn them again; name no card of \
+this list in their claim (the evidence may). GENERAL LESSONS ALREADY RECORDED lists them with ids \
+(G001 ...): if yours restates one, give that id in `same_as`. THE GENERAL GUIDE AS IT STANDS is what \
+the pilots were already told: a lesson it already teaches is worth recording only when these games \
+bore it out again or show it being ignored.
+
 Facts. The sections headed MEASURED, THIS SEAT TURN BY TURN, HOW THIS SEAT WAS PILOTED, WHAT HAPPENED TO EACH CARD and THE LIST \
 IN NUMBERS are computed from the log and the card data. Never state anything they contradict, and \
 do not repeat a claim from a round account or a pilot's note that they contradict. Your lessons are \
@@ -70,10 +79,11 @@ LESSONS_SCHEMA = {"type": "object", "additionalProperties": False, "required": [
                        "mana": {"type": "string", "description": "Land drops missed and turns ended with a castable card and the mana for it: a mistake, or not, and why."},
                        "attacks": {"type": "string", "description": "Turns its attackers stayed home: a mistake, or not, and why."}}}},
     "lessons": {"type": "array", "items": {
-        "type": "object", "additionalProperties": False, "required": ["claim", "kind", "cards", "evidence"],
+        "type": "object", "additionalProperties": False, "required": ["claim", "kind", "cards", "evidence", "general"],
         "properties": {"claim": {"type": "string", "description": "The lesson, as an instruction to the next pilot, in one or two sentences."},
                        "kind": {"type": "string", "enum": KINDS}, "cards": {"type": "array", "items": {"type": "string"}},
                        "evidence": {"type": "string", "description": "Which game and round, and what happened."},
+                       "general": {"type": "boolean", "description": "True if it holds for any deck at any table and names no card of this list."},
                        "same_as": {"type": "string", "description": "The id of the lesson already recorded that this one restates (L004), if it does."}}}}}}
 
 LESSON_CHECK = """
@@ -88,6 +98,20 @@ LESSON_CHECK_SCHEMA = {"type": "object", "additionalProperties": False, "require
     "type": "object", "additionalProperties": False, "required": ["lesson", "claim", "record", "stands"],
     "properties": {"lesson": {"type": "integer"}, "claim": {"type": "string"}, "record": {"type": "string"}, "stands": {"type": "boolean"},
                    "corrected": {"type": "string", "description": "The lesson's whole claim with the fact put right, if it stands."}}}}}}
+
+GENERIC_WORDS = 500
+GENERIC_SYSTEM = """\
+You write the guide every pilot reads at the start of every session of every Commander game at this \
+table, whatever deck it plays. It comes before the deck's own primer, which knows the deck's cards; \
+this guide knows the game: opening hands, spending mana, attacking and what to keep home, reading the \
+table and choosing the threat, when to use an answer, what to say. It names no card of any one deck, \
+except inside a short account of what happened at this table, which is what makes advice stick. About \
+{words} words, and more only where every line earns its place.
+
+Keep what THE GUIDE AS IT STANDS says unless a lesson recorded since contradicts it. Add what the \
+validated lessons teach, in full; a tentative one (seen in one game) only briefly, marked as seen \
+once, or not at all if it is weak. Say nothing twice. Write for a strong player: concrete, no \
+platitudes, in headed sections of short bullets. Reply with the guide in Markdown and nothing else."""
 
 PRIMER_SYSTEM = """\
 You write the primer a pilot reads before every game with one Commander deck. It is short, because \
@@ -108,6 +132,7 @@ with the primer alone, in Markdown."""
 
 def learn(project_path: str | Path, game_dirs: list[str | Path], runner, database: CardDatabase, *, echo=print) -> dict:
     project = DeckProject(project_path)
+    generic = GenericGuide(project.path.parent)
     deck = resolve(read_decklist(project.list_path), database, online=True)
     games = []
     for game_dir in game_dirs:
@@ -120,6 +145,9 @@ def learn(project_path: str | Path, game_dirs: list[str | Path], runner, databas
         f"THE DECK: {' + '.join(card.name for card in deck.commanders)}",
         "THE LIST IN NUMBERS\n" + _list_numbers(deck), "THE LIST (count, name, cost, type, text)\n" + _deck_reference(deck, database),
         *(["THE PRIMER ITS PILOTS WERE GIVEN\n" + project.primer()] if project.primer() else []),
+        *(["THE GENERAL GUIDE AS IT STANDS\n" + generic.primer()] if generic.primer() else []),
+        *(["GENERAL LESSONS ALREADY RECORDED\n" + "\n".join(f"- {k['id']} [{k['status']}, from {len(k['games'])} game(s) of {len(k.get('decks', []))} deck(s), "
+                                                             f"{k['kind']}] {k['claim']}" for k in generic.lessons())] if generic.lessons() else []),
         *(["LESSONS ALREADY RECORDED\n" + "\n".join(f"- {k['id']} [{k['status']}, from {len(k['games'])} game(s), {k['kind']}] {k['claim']}" for k in project.lessons())]
           if project.lessons() else []),
         *("=" * 60 + "\n" + _game_material(path, seat) for path, seat in games)])
@@ -143,9 +171,15 @@ def learn(project_path: str | Path, game_dirs: list[str | Path], runner, databas
             lesson = {**lesson, "claim": str(mine[-1]["corrected"]).strip(),
                       "evidence": lesson["evidence"] + " (Put right by the fact check: " + "; ".join(p["record"] for p in mine) + ")"}
         kept.append(lesson)
-    counts = project.record(kept, games=[path.name for path, _ in games], database=database)
+    general = [lesson for lesson in kept if lesson.get("general")]
+    kept_here = [lesson for lesson in kept if not lesson.get("general")]
+    counts = project.record(kept_here, games=[path.name for path, _ in games], database=database)
+    shared = generic.record(general, games=[path.name for path, _ in games], deck_id=project.deck_id) if general else {"added": 0, "validated": 0}
+    if shared["added"] or shared["validated"]:
+        rewrite_generic(generic, runner, echo=echo, why=f"from {project.deck_id}'s games {', '.join(path.name[-5:] for path, _ in games)}")
     standing = project.lessons()
-    echo(f"{counts['added']} new, {counts['validated']} borne out again, {len(wrong)} dropped by the fact check; rewriting the primer ...")
+    echo(f"{counts['added']} new, {counts['validated']} borne out again, {len(wrong)} dropped by the fact check; "
+         f"{len(general)} general, for every deck ({shared['added']} new, {shared['validated']} borne out again); rewriting the primer ...")
     primer = runner.ask(PRIMER_SYSTEM.format(words=PRIMER_WORDS), "\n\n".join([
         f"THE DECK: {' + '.join(card.name for card in deck.commanders)}", "THE LIST (count, name, cost, type, text)\n" + _deck_reference(deck, database),
         "THE PRIMER AS IT STANDS\n" + (project.primer() or "(none yet)"),
@@ -164,7 +198,8 @@ def learn(project_path: str | Path, game_dirs: list[str | Path], runner, databas
     note = project.path / "reviews" / f"{date.today()}-lessons-{len(list((project.path / 'reviews').glob('*-lessons-*'))) + 1}.md"
     note.parent.mkdir(exist_ok=True)
     note.write_text("\n".join([f"# Lessons from {', '.join(path.name for path, _ in games)}", "",
-                               *(f"- **{k['kind']}** {k['claim']} _Evidence: {k['evidence']}_" for k in kept), "",
+                               *(f"- **{k['kind']}**{' (general: to the guide every pilot reads)' if k.get('general') else ''} {k['claim']} "
+                                 f"_Evidence: {k['evidence']}_" for k in kept), "",
                                "## How it was piloted, game by game", "",
                                *([f"- `{row.get('game', '')}` **Keep:** {row.get('keep', '')} **Mana:** {row.get('mana', '')} **Attacks:** {row.get('attacks', '')}"
                                   for row in piloting] or ["- not said"]), "",
@@ -172,4 +207,22 @@ def learn(project_path: str | Path, game_dirs: list[str | Path], runner, databas
                                                                        for p in problems] or ["- nothing"])]) + "\n", encoding="utf-8")
     project.log(f"studied {len(games)} game(s): {counts['added']} new lesson(s), {counts['validated']} validated, {len(wrong)} dropped by the fact "
                 f"check; primer rewritten ({len(primer.split())} words). See `{note.relative_to(project.path)}`.")
-    return {"project": str(project.path), **counts, "dropped": len(wrong), "primer_words": len(primer.split()), "note": str(note)}
+    return {"project": str(project.path), **counts, "general_added": shared["added"], "general_validated": shared["validated"],
+            "dropped": len(wrong), "primer_words": len(primer.split()), "note": str(note)}
+
+
+def rewrite_generic(generic: GenericGuide, runner, *, echo=print, why: str = "") -> str:
+    """The guide every pilot reads, rewritten from what it says now and the general lessons on record."""
+    echo("rewriting the general guide every pilot reads ...")
+    lessons = generic.lessons()
+    guide = runner.ask(GENERIC_SYSTEM.format(words=GENERIC_WORDS), "\n\n".join([
+        "THE GUIDE AS IT STANDS\n" + (generic.primer() or "(none yet)"),
+        "GENERAL LESSONS RECORDED\n" + ("\n".join(f"- [{k['status']}, {len(k['games'])} game(s) of {len(k.get('decks', []))} deck(s), {k['kind']}] {k['claim']} "
+                                                   f"(evidence: {' | '.join(k['evidence'])[:400]})" for k in lessons) or "(none)"),
+        "Write the guide."])).text.strip()
+    if not guide:
+        return generic.primer()
+    generic.path.mkdir(parents=True, exist_ok=True)
+    (generic.path / "primer.md").write_text(guide + "\n", encoding="utf-8")
+    generic.log(f"guide rewritten {why} ({len(guide.split())} words; {sum(k['status'] == 'validated' for k in lessons)} validated lesson(s) of {len(lessons)}).")
+    return guide

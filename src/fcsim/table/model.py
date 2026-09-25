@@ -22,7 +22,8 @@ SEAT_ZONES = ("library", "hand", "graveyard", "exile", "command")
 # combat phase comes after the phase it was made in, not after the step. A pool is left alone while its owner's effect keeps mana.
 # In a game with an auditor, a player who has lost by a state-based action is removed by the driver, not by another player.
 # 7: mana "kept" stays only while a permanent of its owner's speaks of unspent mana, and goes with the first step that ends after none does.
-MECHANICS = 7
+# 8: a commander goes to the command zone however it left play (rule 903.9), unless its owner says it stays.
+MECHANICS = 8
 
 
 class TableError(ValueError):
@@ -94,6 +95,7 @@ class Obj:
     annotations: list[dict] = field(default_factory=list)
     entered_turn: int | None = None
     computed: dict | None = None                      # current power and toughness as the auditor last worked them out
+    stays: bool = False                               # a commander its owner chose to leave in this zone (rule 903.9a is a "may")
     public: bool = False                              # everyone knows its face
     known_by: set[int] = field(default_factory=set)   # seats that know its face while it is not public
 

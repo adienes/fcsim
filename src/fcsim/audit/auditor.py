@@ -60,7 +60,8 @@ been put on the stack, and state-based actions nobody applied.
 Commander rules that are often misremembered. A commander that dies or is exiled does go to \
 the graveyard or to exile: its owner may then put it into the command zone as a state-based \
 action (rule 903.9a), so it has died, and abilities that trigger on it dying do trigger. Only a \
-move to its owner's hand or library is replaced (903.9b). A commander costs {2} more for each \
+move to its owner's hand or library is replaced (903.9b). The table makes both moves itself, and \
+a commander stays out of the command zone only where its owner said so when it was put there. A commander costs {2} more for each \
 earlier time it was cast from the command zone (903.8). A player dealt 21 combat damage by the \
 same commander over the game loses (903.10a). Players start at 40 life.
 

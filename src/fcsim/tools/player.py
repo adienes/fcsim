@@ -21,7 +21,8 @@ A mutation is one object in a list that is applied all at once or not at all. Ob
 with `obj` (one) or `objs` (several), or by place with `from`: {"seat": n, "zone": "library", "position": "top" | \
 "bottom", "count": k} or {"seat": n, "zone": "hand", "position": "random", "count": k}. Reaching into another \
 player's hand or library needs a `because` naming the effect. The mutations:
-move {obj|objs|from, to: zone, position?: "top"|"bottom" (library), controller?, enters?, face_down?, reveal?} - \
+move {obj|objs|from, to: zone, position?: "top"|"bottom" (library), controller?, enters?, face_down?, reveal?, \
+stay? (your own commander only: leave it there instead of the command zone)} - \
 zones are library, hand, graveyard, exile, command, battlefield, stack. Cards always go to their owner's zones; a \
 token that leaves the battlefield is gone. The card gets a new handle.
 tap / untap {objs} · counters {obj | seat, kind, delta | set} · life {seat, delta | set} · damage {obj, amount}

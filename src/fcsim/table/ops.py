@@ -77,14 +77,21 @@ def apply_op(game: Game, dice: Dice, actor: int, op: dict, told: Told, *, by_tab
                 if op.get("reveal"):
                     obj.public = True
                     before = obj.name
-                name = obj.name
-                moved = mutations.move(game, obj, op.get("to", ""), position=op.get("position", "top"),
+                name, to = obj.name, op.get("to", "")
+                kept_out = bool(op.get("stay")) and actor == obj.owner  # to reanimate it, or to recast it from exile for less
+                replaced = obj.is_commander and to in ("hand", "library") and game.mechanics >= 8 and not kept_out
+                to = "command" if replaced else to
+                moved = mutations.move(game, obj, to, position=op.get("position", "top"),
                                        controller=op.get("controller"), enters=op.get("enters"),
                                        face_down=bool(op.get("face_down")),
                                        known_by=[actor] if hidden_trip and obj.zone == "library" else op.get("known_by"))
+                if moved is not None and moved.is_commander and kept_out:
+                    moved.stays = True
                 seen = moved is not None and moved.public
                 told.public.append(f"{me} moves {name if seen else before} from {origin} to "
                                    f"{_where(game, moved) if moved else 'nowhere (a token ceases to exist)'}{because}.")
+                if replaced:
+                    told.public.append(f"{name} is a commander: its owner puts it into the command zone instead of {op.get('to')} (rule 903.9b).")
                 if moved is not None and not seen and before != name:
                     told.secretly((knew | moved.known_by) - {None}, f"That card is {name}.")
                 if moved is not None and moved.face_known_to(actor):

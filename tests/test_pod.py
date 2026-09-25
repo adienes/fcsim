@@ -1257,3 +1257,129 @@ def test_an_opponent_drawn_at_random_is_a_deck_project_and_every_project_that_pl
     monkeypatch.setattr(cli, "make_runner", lambda *a, **k: None)
     assert cli.main(["deck", "learn", "all", *map(str, games)]) == 0
     assert taught == [(str(Path("decks") / "pir-imaginative-rascal"), [str(g) for g in games])]      # from the games it sat in; a project that is gone teaches nobody
+
+
+def test_a_seat_holding_an_answer_it_could_cast_is_asked_to_think_it_through(database, tmp_path):
+    """Miirym's pilot, holding Chaos Warp, said no ten times at low effort during Obeka's 122-action turn."""
+    from fcsim.cards import read_decklist, resolve
+    from fcsim.play.gamedir import GameDirectory
+    from fcsim.play.pod import _lookup, _Pod
+    from fcsim.table import ScriptedRunner, Table
+
+    paths = decks(tmp_path)
+    paths[1].write_text("95 Forest\n4 Counterspell\n\n1 Pir, Imaginative Rascal\n", encoding="utf-8")
+    lists = [resolve(read_decklist(path), database) for path in paths]
+    names = ["Talrand", "Pir", "Thrasios"]
+    directory = GameDirectory(tmp_path / "games", "pod_answer", 4)
+    table = Table([{"name": n, "commanders": [c.name for c in d.commanders], "library": [c.name for c in d.library()]} for n, d in zip(names, lists, strict=True)],
+                  seed=4, first=0, gated="turn", on_event=directory.journal, card_lookup=_lookup(database))
+    budget = Budget(max_calls=20)
+    full, quick = [ScriptedSeat(budget) for _ in names], [ScriptedSeat(budget) for _ in names]
+    pod = _Pod(directory, table, names, lists, full, FakeRunner([OK] * 5, budget), database, 1, None, lambda *_: None, triage_runners=quick)
+    runner = ScriptedRunner(table)
+    for seat in range(3):
+        runner.step(seat, "keep")
+    while not (table.game.turn.step == "main1" and table.expected()[0] == (0, "priority")):
+        runner.step(table.expected()[0][0], "pass_priority")
+    counter = next(o for o in table.game.objects.values() if o.name == "Counterspell" and o.zone == "library")
+    islands = [o for o in table.game.objects.values() if o.name == "Island" and o.owner == 0 and o.zone == "library"][:2]
+    table.patch([{"op": "move", "obj": counter.id, "to": "hand"}, *({"op": "move", "obj": o.id, "to": "battlefield", "controller": 1} for o in islands)],
+                "test set-up: a Counterspell and two Islands for Pir")
+    assert next(o for o in table.game.objects.values() if o.name == "Counterspell" and o.zone == "hand").owner == 1
+    runner.step(0, "add_trigger", {"text": "Something that wins the game if it resolves."})
+    assert pod.instants(1) == ["Counterspell"] and pod.instants(2) == []
+    answers = pod.triage([1, 2])
+    assert answers == {1: False, 2: False}
+    asked_full = [p for p in full[1].prompts if "is on top of the stack" in p]
+    assert asked_full and "You could cast now: Counterspell. It is Talrand's turn" in asked_full[0] and not quick[1].prompts
+    assert quick[2].prompts and not full[2].prompts and "You could cast now" not in quick[2].prompts[0]
+    assert pod.report["triage"][0]["holding"] == ["Counterspell"] and "holding" not in pod.report["triage"][1]
+    assert not pod.big_turn(1)                                                     # one spell is no big turn
+    table.game.turn.casts[0] = 3                                                   # the third spell of the turn
+    assert [pod.big_turn(1), pod.big_turn(1), pod.big_turn(1)] == [True, True, False] and not pod.big_turn(2)   # twice a turn; only a seat holding an answer
+    assert "despite your standing policy" not in asked_full[0]                     # the first question was not the override's
+    full[1].prompts.clear()
+    pod.triage([1])
+    assert "The table asks you despite your standing policy, because this is a big turn" in full[1].prompts[-1] and "they have cast 3 spell(s)" in full[1].prompts[-1]
+
+
+def test_every_pilot_reads_the_generic_guide_and_what_the_other_players_said_their_decks_do(database, tmp_path):
+    from fcsim.cards import read_decklist, resolve
+    from fcsim.play.gamedir import GameDirectory
+    from fcsim.play.pod import _lookup, _Pod
+    from fcsim.table import Table
+
+    lists = [resolve(read_decklist(path), database) for path in decks(tmp_path)]
+    names = ["Talrand", "Pir", "Thrasios"]
+    directory = GameDirectory(tmp_path / "games", "pod_rule-zero", 4)
+    table = Table([{"name": n, "commanders": [c.name for c in d.commanders], "library": [c.name for c in d.library()]} for n, d in zip(names, lists, strict=True)],
+                  seed=4, gated="turn", on_event=directory.journal, card_lookup=_lookup(database))
+    budget = Budget(max_calls=5)
+    primers = ["# Talrand\n\n## Gameplan\nCast instants and sorceries to make\nDrakes, then fly over.\n\n## Opening hands\nKeep counters.", "", ""]
+    pod = _Pod(directory, table, names, lists, [ScriptedSeat(budget) for _ in names], FakeRunner([], budget), database, 1, None, lambda *_: None,
+               primers=primers, generic="## Attacking\nCount the crack-back.")
+    for seat in (1, 2):
+        told = pod.systems[seat]
+        assert told.index("HOW TO PLAY COMMANDER WELL") < told.index("WHAT THE OTHER PLAYERS SAID") < told.index("YOUR DECK")
+        assert "- Talrand (Talrand, Sky Summoner): Cast instants and sorceries to make Drakes, then fly over." in told and "Keep counters." not in told
+    assert "Pir (Pir, Imaginative Rascal): said nothing about its deck beyond its commander." in pod.systems[0]
+    assert "- Talrand (" not in pod.systems[0] and "HOW THIS DECK LIKES TO BE PLAYED" in pod.systems[0]      # its own plan is in its own primer
+
+    guide = tmp_path / "generic.md"
+    guide.write_text("## Opening hand\nUse the free mulligan.\n", encoding="utf-8")
+    report = play_pod(decks(tmp_path), [ScriptedSeat(budget) for _ in names], FakeRunner([OK] * 5, Budget(max_calls=40)), database, cycles=1, seed=4,
+                      out_root=tmp_path / "games", echo=lambda *_: None, generic_guide=guide)
+    game = Path(report["directory"])
+    assert (game / "decks" / "generic.primer.md").read_text() == "## Opening hand\nUse the free mulligan." and json.loads((game / "config.json").read_text())["generic_hash"]
+
+
+def test_a_general_lesson_goes_to_the_guide_every_pilot_reads_and_another_deck_can_bear_it_out(combat_game, database, tmp_path):
+    from fcsim.workshop.learn import learn
+    from fcsim.workshop.project import DeckProject, GenericGuide
+
+    game = combat_game[0]["directory"]
+    projects = []
+    for name, (land, commander) in {"talrand": ("Island", "Talrand, Sky Summoner"), "pir": ("Forest", "Pir, Imaginative Rascal")}.items():
+        source = tmp_path / f"{name}.txt"
+        source.write_text(f"99 {land}\n\n1 {commander}\n", encoding="utf-8")
+        projects.append(DeckProject.init(source, database, root=tmp_path / "decks", name=name))
+    guide = GenericGuide(tmp_path / "decks")
+    guide.path.mkdir(parents=True)
+    (guide.path / "primer.md").write_text("## Attacking\nAttack the leader.\n", encoding="utf-8")
+
+    class Teacher(FakeRunner):
+        def ask(self, system, prompt, *, schema=None, **_):
+            self.budget.begin()
+            self.asked.append({"system": system, "prompt": prompt, "schema": schema})
+            if schema is None:   # a primer or the guide: prose
+                text = "## Keeping blockers\nCount the crack-back before an all-in attack." if "whatever deck it plays" in system else "## Gameplan\nDrakes."
+                return Reply(data=None, text=text, cost_usd=0.01, seconds=0.1, model="fake")
+            return super().ask(system, prompt, schema=schema)
+
+    crack = {"claim": "Before attacking with everything, count what the others can swing back with.", "kind": "combat", "cards": [],
+             "evidence": "Round 5: attacked with all, lost 20 before the next turn.", "general": True}
+    own = {"claim": "Cast Talrand on four lands.", "kind": "commander_timing", "cards": ["Talrand, Sky Summoner"], "evidence": "Round 4.", "general": False}
+    first = Teacher([{"piloting": [], "lessons": [crack, own]}, {"problems": []}])
+    result = learn(projects[0].path, [game], first, database, echo=lambda *_: None)
+    assert (result["added"], result["general_added"]) == (1, 1)
+    assert [k["claim"] for k in projects[0].lessons()] == ["Cast Talrand on four lands."]                     # the deck keeps its own
+    assert [(k["id"], k["status"], k["decks"]) for k in guide.lessons()] == [("G001", "tentative", ["talrand"])]
+    assert guide.primer() == "## Keeping blockers\nCount the crack-back before an all-in attack." and "rewritten from talrand" in (guide.path / "CHANGELOG.md").read_text()
+    assert "THE GENERAL GUIDE AS IT STANDS\n## Attacking\nAttack the leader." in first.asked[0]["prompt"]
+
+    again = {**crack, "claim": "Keep a blocker home when the table can swing back.", "same_as": "G001"}
+    second = Teacher([{"piloting": [], "lessons": [again]}, {"problems": []}])
+    result = learn(projects[1].path, [game], second, database, echo=lambda *_: None)
+    assert "GENERAL LESSONS ALREADY RECORDED\n- G001 [tentative, from 1 game(s) of 1 deck(s)" in second.asked[0]["prompt"]
+    assert result["general_validated"] == 0                                                                  # the same game is not a second witness
+    GenericGuide(tmp_path / "decks").record([again], games=["another-game"], deck_id="pir")
+    assert [(k["status"], k["decks"]) for k in guide.lessons()] == [("validated", ["talrand", "pir"])]         # another game, from another deck
+
+
+def test_before_attacking_a_pilot_is_told_what_the_others_could_swing_back_with(combat_game):
+    report, seats, _ = combat_game
+    own = [p for p in seats[0].prompts if "BEFORE YOU ATTACK" in p]
+    assert own, "Talrand attacks on its own turns, and is told the crack-back first"
+    told = own[-1].split("BEFORE YOU ATTACK")[1].split("\n\n")[0]
+    assert "- Pir: " in told and "- Thrasios: " in told and "creature(s) with" in told and "Whatever attacks now without vigilance" in told
+    assert not any("BEFORE YOU ATTACK" in p for p in seats[2].prompts if "is on top of the stack" in p)       # never in answer to someone else's spell

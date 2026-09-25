@@ -495,7 +495,7 @@ def _pod(args: argparse.Namespace) -> int:
                           triage_runners=[make_runner(args.backend, model=args.triage_model or args.model, effort=args.triage_effort,
                                                       budget=budget) for _ in args.decks],
                           hook_library=default_data_dir() / "hooks.json", shuffle_seats=not args.keep_seating,
-                          rewind_to=rewind_to, rewind_because=args.because)
+                          rewind_to=rewind_to, rewind_because=args.because, generic_guide=os.path.join("decks", "_generic", "primer.md"))
         wait = seconds_until_reset(str(report["stopped"] or "")) if args.wait_for_limit else None
         if wait is None:
             break

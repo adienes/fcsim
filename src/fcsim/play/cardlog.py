@@ -52,7 +52,13 @@ def card_record(game_dir: str | Path) -> dict:
 
     table = Table.replay(config["table"], directory.events(), card_lookup=directory.card_lookup(), before=look)
     look(table)
-    last_round = max((s.turns_taken for s in table.game.seats), default=0)
+    # As the rubric counts: a capped game stops as a seat begins the round past the cap, and that turn, with nothing played in it,
+    # is no round taken.
+    game = table.game
+    unplayed = game.control.kind != "over" and not any(e["turn"] == game.turn.number and e["seat"] == game.turn.active
+                                                       and e["tool"] not in ("pass_priority", "set_response_policy", "write_notes")
+                                                       for e in directory.events()[-400:])
+    last_round = max((s.turns_taken - (1 if unplayed and s.index == game.turn.active else 0) for s in game.seats), default=0)
     seats = [{"name": name, "cards": []} for name in names]
     for row in cards.values():
         if row["_since"] is not None:  # still in hand when the game stopped

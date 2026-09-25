@@ -85,33 +85,77 @@ class DeckProject:
         same lesson borne out again, and becomes validated; a new one is tentative. Returns counts."""
         deck = resolve(read_decklist(self.list_path), database)
         known, names = self.lessons(), {c.name for c, _ in deck.cards} | {c.name for c in deck.commanders}
-        added = confirmed = 0
-        for lesson in lessons:
-            claim = " ".join(str(lesson.get("claim", "")).split())
-            if not claim:
-                continue
-            # Whoever wrote the lesson was shown the ones on record and says which it restates. Likeness of wording is only the
-            # fallback: the same lesson learned from another game comes back in other words, and nothing was ever borne out.
-            named = next((k for k in known if k["id"] == str(lesson.get("same_as") or "").strip()), None)
-            match = named or max(known, key=lambda k: difflib.SequenceMatcher(None, k["claim"].lower(), claim.lower()).ratio(), default=None)
-            if match is not None and (named is not None or difflib.SequenceMatcher(None, match["claim"].lower(), claim.lower()).ratio() > 0.6):
-                fresh = [g for g in games if g not in match["games"]]
-                if fresh:  # the same games reviewed again are not a second witness
-                    match["games"] += fresh
-                    match["evidence"].append(str(lesson.get("evidence", "")))
-                    if match["status"] == "tentative":
-                        match["status"], confirmed = "validated", confirmed + 1
-                continue
-            known.append({"id": f"L{len(known) + 1:03d}", "claim": claim, "kind": lesson.get("kind", "play"), "status": "tentative",
-                          "cards": [c for c in lesson.get("cards", []) if isinstance(c, str)], "evidence": [str(lesson.get("evidence", ""))],
-                          "games": list(games), "recorded": str(date.today())})
-            added += 1
+        added, confirmed = merge_lessons(known, lessons, games=games, prefix="L")
         for lesson in known:  # a lesson about a card the list no longer runs is kept, and not taught
             lesson["stale"] = bool(lesson["cards"]) and not any(card in names for card in lesson["cards"])
         (self.path / "lessons.jsonl").write_text("".join(json.dumps(k, ensure_ascii=False) + "\n" for k in known), encoding="utf-8")
         return {"added": added, "validated": confirmed, "total": len(known)}
 
     def log(self, line: str) -> None:
+        with (self.path / "CHANGELOG.md").open("a", encoding="utf-8") as out:
+            out.write(f"- {date.today()}: {line}\n")
+
+
+def merge_lessons(known: list[dict], lessons: list[dict], *, games: list[str], prefix: str, deck_id: str | None = None) -> tuple[int, int]:
+    """Merge what a review observed into the lessons on record, in place: (added, validated). A lesson the writer says it
+    restates (`same_as`), or failing that one much like it in wording, is the same lesson; from a game it was not already
+    learned from it is borne out again and becomes validated. `deck_id` records which deck taught it, for lessons shared
+    by every deck."""
+    added = confirmed = 0
+    for lesson in lessons:
+        claim = " ".join(str(lesson.get("claim", "")).split())
+        if not claim:
+            continue
+        # Whoever wrote the lesson was shown the ones on record and says which it restates. Likeness of wording is only the
+        # fallback: the same lesson learned from another game comes back in other words, and nothing was ever borne out.
+        named = next((k for k in known if k["id"] == str(lesson.get("same_as") or "").strip()), None)
+        match = named or max(known, key=lambda k: difflib.SequenceMatcher(None, k["claim"].lower(), claim.lower()).ratio(), default=None)
+        if match is not None and (named is not None or difflib.SequenceMatcher(None, match["claim"].lower(), claim.lower()).ratio() > 0.6):
+            fresh = [g for g in games if g not in match["games"]]
+            if fresh:  # the same games reviewed again are not a second witness
+                match["games"] += fresh
+                match["evidence"].append(str(lesson.get("evidence", "")))
+                if deck_id and deck_id not in match.setdefault("decks", []):
+                    match["decks"].append(deck_id)
+                if match["status"] == "tentative":
+                    match["status"], confirmed = "validated", confirmed + 1
+            continue
+        known.append({"id": f"{prefix}{len(known) + 1:03d}", "claim": claim, "kind": lesson.get("kind", "play"), "status": "tentative",
+                      "cards": [c for c in lesson.get("cards", []) if isinstance(c, str)], "evidence": [str(lesson.get("evidence", ""))],
+                      "games": list(games), "recorded": str(date.today()), **({"decks": [deck_id]} if deck_id else {})})
+        added += 1
+    return added, confirmed
+
+
+class GenericGuide:
+    """decks/_generic/: how to play Commander well, whatever the deck. Every pilot reads it before its own deck's primer,
+    so what one deck's games teach about mulligans, threats, interaction or attacking is not learned again deck by deck.
+
+        primer.md      the guide itself; begun by hand from what the first games showed, then rewritten as lessons come in
+        lessons.jsonl  every general lesson, with the deck and game it came from; validated when another game bears it out
+        CHANGELOG.md   when the guide was rewritten, and from what
+    """
+
+    def __init__(self, root: str | Path = "decks"):
+        self.path = Path(root) / "_generic"
+
+    def primer(self) -> str:
+        path = self.path / "primer.md"
+        return path.read_text(encoding="utf-8").strip() if path.is_file() else ""
+
+    def lessons(self) -> list[dict]:
+        path = self.path / "lessons.jsonl"
+        return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()] if path.is_file() else []
+
+    def record(self, lessons: list[dict], *, games: list[str], deck_id: str) -> dict:
+        known = self.lessons()
+        added, confirmed = merge_lessons(known, lessons, games=games, prefix="G", deck_id=deck_id)
+        self.path.mkdir(parents=True, exist_ok=True)
+        (self.path / "lessons.jsonl").write_text("".join(json.dumps(k, ensure_ascii=False) + "\n" for k in known), encoding="utf-8")
+        return {"added": added, "validated": confirmed, "total": len(known)}
+
+    def log(self, line: str) -> None:
+        self.path.mkdir(parents=True, exist_ok=True)
         with (self.path / "CHANGELOG.md").open("a", encoding="utf-8") as out:
             out.write(f"- {date.today()}: {line}\n")
 
