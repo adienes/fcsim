@@ -775,23 +775,28 @@ class _Pod:
             return
         self.echo(f"         auditing {actions} actions ...")
         verdict, reply = self.auditor.ask(prompt)
+        if defer and self.background is not None:
+            verdict = {**verdict, "waited_for": self.undescribed()}  # what kept it from the background, for tuning that
         self.apply_verdict(server, verdict, reply, snapshot=snapshot, unit=unit, end=end, turn=turn, losing=losing)
 
     def can_defer(self) -> bool:
         """Whether this turn's audit can run while the next one is played: every permanent that arrived this turn is one the
         auditor has nothing to write down for, so no trigger of the next turn waits on its description."""
-        game = self.table.game
-        if self.audit_every != "turn" or self.background is None:
-            return False
+        return self.audit_every == "turn" and self.background is not None and not self.undescribed()
+
+    def undescribed(self) -> list[str]:
+        """The permanents that arrived this turn that the auditor has yet to describe: what keeps its audit from the background."""
+        game, found = self.table.game, []
         for obj in (game.objects[i] for i in game.battlefield):
             if obj.entered_turn != game.turn.number:
                 continue
             if obj.face_down or (obj.token is not None and str(obj.token.get("text") or "").strip()):
-                return False
+                found.append(obj.name if obj.public else "a face-down permanent")
+                continue
             card = self.database.find(obj.name) if obj.token is None else None
             if obj.token is None and (card is None or not _needs_nothing_written(card, self.known_hooks)):
-                return False
-        return True
+                found.append(obj.name)
+        return found
 
     def settle_audit(self, server: McpServer, *, wait: bool) -> bool:
         """Apply a deferred audit's verdict if it has come, or with `wait` once it comes. Only where the table can stop: at

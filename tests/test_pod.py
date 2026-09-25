@@ -1459,6 +1459,7 @@ def test_a_turns_audit_runs_while_the_next_is_played_and_its_verdict_is_applied_
                 if e["tool"] == "cast" and "Talrand, Sky Summoner" in " ".join(e["public"]))
     covering = [c for c in checks if c.get("events") and c["events"][0] <= cast["n"] < c["events"][1]]
     assert covering and all(c.get("kind") != "deferred" and not c.get("late") for c in covering)
+    assert any("Talrand, Sky Summoner" in (c.get("waited_for") or []) for c in covering)   # and says what it waited for
 
 
 def test_a_background_audit_whose_verdict_never_came_is_still_owed_on_resume(database, tmp_path):
