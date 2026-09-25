@@ -8,6 +8,7 @@ that did not happen is worse than none: it would be taught to every later pilot.
 
 from __future__ import annotations
 
+import difflib
 import json
 from datetime import date
 from pathlib import Path
@@ -99,7 +100,7 @@ LESSON_CHECK_SCHEMA = {"type": "object", "additionalProperties": False, "require
     "properties": {"lesson": {"type": "integer"}, "claim": {"type": "string"}, "record": {"type": "string"}, "stands": {"type": "boolean"},
                    "corrected": {"type": "string", "description": "The lesson's whole claim with the fact put right, if it stands."}}}}}}
 
-GENERIC_WORDS = 500
+GENERIC_WORDS = 600  # a guide, not a cutoff, as for a deck's primer
 GENERIC_SYSTEM = """\
 You write the guide every pilot reads at the start of every session of every Commander game at this \
 table, whatever deck it plays. It comes before the deck's own primer, which knows the deck's cards; \
@@ -130,7 +131,9 @@ Keep what is still right in the old primer. Do not mention games, seats, auditor
 with the primer alone, in Markdown."""
 
 
-def learn(project_path: str | Path, game_dirs: list[str | Path], runner, database: CardDatabase, *, echo=print) -> dict:
+def learn(project_path: str | Path, game_dirs: list[str | Path], runner, database: CardDatabase, *, echo=print, rewrite_guide: bool = True) -> dict:
+    """`rewrite_guide` False leaves the general guide to the caller: `deck learn all` rewrites it once, after every deck,
+    where it was rewritten once a deck, five times in one run."""
     project = DeckProject(project_path)
     generic = GenericGuide(project.path.parent)
     deck = resolve(read_decklist(project.list_path), database, online=True)
@@ -168,14 +171,17 @@ def learn(project_path: str | Path, game_dirs: list[str | Path], runner, databas
             wrong.append(lesson)
             continue
         if mine:  # a count off by one, a wrong round: the lesson stands, said with the fact put right
-            lesson = {**lesson, "claim": str(mine[-1]["corrected"]).strip(),
+            # The claim is replaced only by a correction of the claim. A problem the check found in the evidence came back with
+            # the evidence corrected, and six lessons had their advice replaced by an account of a game that way.
+            of_claim = [p for p in mine if difflib.SequenceMatcher(None, str(p["corrected"]).lower(), lesson["claim"].lower()).ratio() >= 0.5]
+            lesson = {**lesson, "claim": str(of_claim[-1]["corrected"]).strip() if of_claim else lesson["claim"],
                       "evidence": lesson["evidence"] + " (Put right by the fact check: " + "; ".join(p["record"] for p in mine) + ")"}
         kept.append(lesson)
     general = [lesson for lesson in kept if lesson.get("general")]
     kept_here = [lesson for lesson in kept if not lesson.get("general")]
     counts = project.record(kept_here, games=[path.name for path, _ in games], database=database)
     shared = generic.record(general, games=[path.name for path, _ in games], deck_id=project.deck_id) if general else {"added": 0, "validated": 0}
-    if shared["added"] or shared["validated"]:
+    if (shared["added"] or shared["validated"]) and rewrite_guide:
         rewrite_generic(generic, runner, echo=echo, why=f"from {project.deck_id}'s games {', '.join(path.name[-5:] for path, _ in games)}")
     standing = project.lessons()
     echo(f"{counts['added']} new, {counts['validated']} borne out again, {len(wrong)} dropped by the fact check; "
@@ -220,6 +226,11 @@ def rewrite_generic(generic: GenericGuide, runner, *, echo=print, why: str = "")
         "GENERAL LESSONS RECORDED\n" + ("\n".join(f"- [{k['status']}, {len(k['games'])} game(s) of {len(k.get('decks', []))} deck(s), {k['kind']}] {k['claim']} "
                                                    f"(evidence: {' | '.join(k['evidence'])[:400]})" for k in lessons) or "(none)"),
         "Write the guide."])).text.strip()
+    if len(guide.split()) > GENERIC_WORDS * 1.5:
+        echo(f"the guide came back at {len(guide.split())} words against a guide of {GENERIC_WORDS}; asking once more ...")
+        guide = runner.ask(GENERIC_SYSTEM.format(words=GENERIC_WORDS), f"THE GUIDE YOU WROTE\n{guide}\n\nIt is {len(guide.split())} words against a "
+                           f"guide of {GENERIC_WORDS}. Keep every lesson not marked as seen once, in full, and every line that earns its place; "
+                           "shorten or drop what was seen once, and say nothing twice. Write the guide.").text.strip() or guide
     if not guide:
         return generic.primer()
     generic.path.mkdir(parents=True, exist_ok=True)

@@ -314,9 +314,17 @@ def _deck(args: argparse.Namespace) -> int:
                         played.setdefault(os.path.join(args.root, project["deck_id"]), []).append(game_dir)
         if not played:
             raise ValueError(f"No deck project under {args.root} played in these games.")
+        changed = False
         for project, games in played.items():
             runner = make_runner(args.backend, model=args.model, effort=args.effort, budget=_budget(args))
-            print(json.dumps(learn_lessons(project, games, runner, CardDatabase()), indent=2), flush=True)
+            result = learn_lessons(project, games, runner, CardDatabase(), rewrite_guide=False)
+            changed |= bool(result.get("general_added") or result.get("general_validated"))
+            print(json.dumps(result, indent=2), flush=True)
+        if changed:  # the guide every pilot reads, once, from everything these games taught
+            from .workshop.learn import rewrite_generic
+            from .workshop.project import GenericGuide
+            rewrite_generic(GenericGuide(args.root), make_runner(args.backend, model=args.model, effort=args.effort, budget=_budget(args)),
+                            why=f"after studying {len(args.game_dirs)} game(s) for {len(played)} deck(s)")
         return 0
     if args.action == "learn":
         runner = make_runner(args.backend, model=args.model, effort=args.effort, budget=_budget(args))

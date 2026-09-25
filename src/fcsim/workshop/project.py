@@ -120,7 +120,8 @@ def merge_lessons(known: list[dict], lessons: list[dict], *, games: list[str], p
                 if match["status"] == "tentative":
                     match["status"], confirmed = "validated", confirmed + 1
             continue
-        known.append({"id": f"{prefix}{len(known) + 1:03d}", "claim": claim, "kind": lesson.get("kind", "play"), "status": "tentative",
+        number = max((int(k["id"][len(prefix):]) for k in known if re.fullmatch(rf"{prefix}\d+", k["id"])), default=0) + 1  # never an id in use
+        known.append({"id": f"{prefix}{number:03d}", "claim": claim, "kind": lesson.get("kind", "play"), "status": "tentative",
                       "cards": [c for c in lesson.get("cards", []) if isinstance(c, str)], "evidence": [str(lesson.get("evidence", ""))],
                       "games": list(games), "recorded": str(date.today()), **({"decks": [deck_id]} if deck_id else {})})
         added += 1

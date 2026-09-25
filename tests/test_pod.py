@@ -961,6 +961,12 @@ def test_a_deck_project_teaches_its_pilot_what_earlier_games_learned(combat_game
     assert (fixed["added"], fixed["dropped"]) == (1, 1) and "lessons, numbered" in fixer.asked[1]["system"]
     assert [k["claim"] for k in project.lessons() if k["kind"] == "opening_hand"] == ["This list has 99 Islands, so keep any hand."]
     assert "Put right by the fact check: THE LIST has 99 Islands." in project.lessons()[-1]["evidence"][0]
+    in_evidence = {"claim": "Cast Talrand before the second counter.", "kind": "sequencing", "cards": [], "evidence": "Round 3: it took 9 from three attackers."}
+    checker = Writes([{"lessons": [in_evidence]}, {"problems": [
+        {"lesson": 1, "claim": "took 9 from three attackers", "record": "It took 11.", "stands": True, "corrected": "Round 3: it took 11 from three attackers."}]}])
+    learn(project.path, [game], checker, database, echo=lambda *_: None)
+    assert any(k["claim"] == "Cast Talrand before the second counter." for k in project.lessons())      # the evidence was put right, not the advice
+    assert not any(k["claim"].startswith("Round 3:") for k in project.lessons())
 
     class Rambles(Writes):   # a primer half again over its guide is asked for once more, with the count; one a third over is kept as it is
         def ask(self, system, prompt, *, schema=None, **_):
@@ -968,7 +974,7 @@ def test_a_deck_project_teaches_its_pilot_what_earlier_games_learned(combat_game
                 self.asked.append({"system": system, "prompt": prompt, "schema": None})
                 return Reply(data=None, text="## Gameplan\n" + "word " * 1000, cost_usd=0.01, seconds=0.1, model="fake")
             return super().ask(system, prompt, schema=schema)
-    long = Rambles([{"lessons": [lesson]}, {"problems": []}])
+    long = Rambles([{"lessons": [dict(lesson, claim="Hold Talrand until a counterspell is in hand.")]}, {"problems": []}])
     assert learn(project.path, [game], long, database, echo=lambda *_: None)["primer_words"] < 20 and "It is 1002 words against a guide of 600" in long.asked[-1]["prompt"]
     assert "Cast Talrand on four lands" in project.primer()
 
@@ -976,7 +982,7 @@ def test_a_deck_project_teaches_its_pilot_what_earlier_games_learned(combat_game
     reworded = {"claim": "Get the commander down early, as soon as the fourth land is there.", "kind": "commander_timing", "cards": ["Talrand, Sky Summoner"],
                 "evidence": "another game", "same_as": "L001"}
     assert "LESSONS ALREADY RECORDED" in again.asked[0]["prompt"] and "- L001 [tentative" in again.asked[0]["prompt"]
-    assert project.record([reworded], games=["another-game"], database=database) == {"added": 0, "validated": 1, "total": 2}
+    assert project.record([reworded], games=["another-game"], database=database) == {"added": 0, "validated": 1, "total": 4}
     assert project.lessons()[0]["status"] == "validated" and project.lessons()[0]["games"] == [Path(game).name, "another-game"]
 
     # the next game's pilot is told, and the game keeps exactly what it was told
@@ -1254,10 +1260,19 @@ def test_an_opponent_drawn_at_random_is_a_deck_project_and_every_project_that_pl
         games.append(tmp_path / f"game-{index}")
         games[-1].mkdir()
         (games[-1] / "config.json").write_text(json.dumps({"projects": sat}), encoding="utf-8")
-    monkeypatch.setattr(cli, "learn_lessons", lambda project, game_dirs, runner, db: taught.append((project, list(game_dirs))) or {"added": 1})
+    monkeypatch.setattr(cli, "learn_lessons", lambda project, game_dirs, runner, db, **_: taught.append((project, list(game_dirs))) or {"added": 1})
     monkeypatch.setattr(cli, "make_runner", lambda *a, **k: None)
     assert cli.main(["deck", "learn", "all", *map(str, games)]) == 0
     assert taught == [(str(Path("decks") / "pir-imaginative-rascal"), [str(g) for g in games])]      # from the games it sat in; a project that is gone teaches nobody
+    from fcsim.workshop import learn as learning
+    rewrites = []
+    monkeypatch.setattr(learning, "rewrite_generic", lambda guide, runner, **kw: rewrites.append(kw.get("why")))
+    monkeypatch.setattr(cli, "learn_lessons", lambda project, game_dirs, runner, db, **kw: taught.append(kw) or {"added": 1, "general_added": 1})
+    (tmp_path / "decks" / "zuko").mkdir(parents=True)
+    (tmp_path / "decks" / "zuko" / "deck.toml").write_text('id = "zuko"\n', encoding="utf-8")
+    (games[0] / "config.json").write_text(json.dumps({"projects": [{"deck_id": "pir-imaginative-rascal"}, {"deck_id": "zuko"}]}), encoding="utf-8")
+    assert cli.main(["deck", "learn", "all", *map(str, games)]) == 0
+    assert taught[-1] == {"rewrite_guide": False} and len(rewrites) == 1 and "for 2 deck(s)" in rewrites[0]      # once, after every deck
 
 
 def test_a_seat_holding_an_answer_it_could_cast_is_asked_to_think_it_through(database, tmp_path):
