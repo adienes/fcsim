@@ -414,10 +414,18 @@ class Auditor:
 
     def audit(self, table: Table, snapshot: tuple[str, list[str], int], until_event: int | None = None, *, note: str = "") -> tuple[dict, Reply]:
         """`note` says what the driver is about to do once the audit is over, so that it is not reported as left undone."""
+        return self.ask(self.prompt(table, snapshot, until_event, note=note))
+
+    def prompt(self, table: Table, snapshot: tuple[str, list[str], int], until_event: int | None = None, *, note: str = "") -> str:
+        """Everything the audit reads, as the table stands now. Built on the caller's thread: the card database is not for
+        several threads at once, and the table goes on changing while a deferred audit is asked."""
         before, names, since = snapshot
-        prompt = materials(table, before, since, self.database, names, until_event)
-        reply = self.runner.ask(SYSTEM, (f"ABOUT THIS GAME\n{self.context}\n\n" if self.context else "") + (f"WHY YOU ARE ASKED NOW\n{note}\n\n" if note else "")
-                                + prompt, schema=VERDICT_SCHEMA)
+        return ((f"ABOUT THIS GAME\n{self.context}\n\n" if self.context else "") + (f"WHY YOU ARE ASKED NOW\n{note}\n\n" if note else "")
+                + materials(table, before, since, self.database, names, until_event))
+
+    def ask(self, prompt: str) -> tuple[dict, Reply]:
+        """The audit's model call, on any thread."""
+        reply = self.runner.ask(SYSTEM, prompt, schema=VERDICT_SCHEMA)
         verdict = reply.data
         serious = [f for f in verdict.get("findings", []) if f.get("kind") in SERIOUS]
         verdict["verdict"] = "findings" if serious else "ok"  # the findings decide, whatever the label says

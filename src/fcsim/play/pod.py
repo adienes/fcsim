@@ -140,7 +140,7 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
              resume: str | Path | None = None, audit_every: str = "turn", triage_runners: list[Runner] | None = None,
              refresh_before_blocks: bool = True, judge_runner: Runner | None = None, hook_library: str | Path | None = None,
              shuffle_seats: bool = False, rewind_to: int | None = None, rewind_because: str = "",
-             generic_guide: str | Path | None = None, echo=lambda line: print(line, flush=True)) -> dict:
+             generic_guide: str | Path | None = None, background_audits: bool = True, echo=lambda line: print(line, flush=True)) -> dict:
     """Play up to `cycles` turns per seat. `runners[i]` pilots seat i; share one Budget across all
     runners and the auditor to cap the whole game.
 
@@ -157,6 +157,8 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
     abandoned line stays in the journal and nobody counts it), and whatever audit was owed there is made.
     `hook_library` is a JSON file of what auditors have written for each card in earlier games: a card
     in it has its triggers and holds from the moment it arrives, and the file learns from this game.
+    With `background_audits` a turn's audit is asked while the next turn is played, when nothing that arrived needs
+    describing first, and its verdict is applied at the next point where a player would have priority.
     `generic_guide` is a file every pilot reads before its own deck's primer: how to play Commander well, whatever
     the deck (decks/_generic/primer.md); the game keeps the text it began with.
     With `shuffle_seats` the decks are seated in an order drawn from the seed, so that who sits to whose
@@ -188,7 +190,7 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
                      earlier=earlier.read("report.json") if (earlier.path / "report.json").is_file() else {"wakes": []},
                      audit_every=audit_every, triage_runners=triage_runners, refresh_before_blocks=refresh_before_blocks,
                      judge_runner=judge_runner, hook_library=hook_library, primers=primers, rewind_to=rewind_to, rewind_because=rewind_because,
-                     generic=generic)
+                     generic=generic, background_audits=background_audits)
     seed = seed if seed is not None else secrets.randbelow(2 ** 31)
     if shuffle_seats:
         order = random.Random(f"seating-{seed}").sample(range(count), count)
@@ -219,7 +221,7 @@ def play_pod(deck_paths: list[str | Path], runners: list[Runner], auditor_runner
                                     "deck_issues": [[i.to_dict() for i in validate_deck(d, database)] for d in decks]})
     return _play(directory, table, names, decks, runners, auditor_runner, database, cycles, rules, echo,
                  audit_every=audit_every, triage_runners=triage_runners, refresh_before_blocks=refresh_before_blocks,
-                 judge_runner=judge_runner, hook_library=hook_library, primers=primers, generic=generic)
+                 judge_runner=judge_runner, hook_library=hook_library, primers=primers, generic=generic, background_audits=background_audits)
 
 
 class _Pod:
@@ -231,7 +233,8 @@ class _Pod:
                  database: CardDatabase, cycles: int, rules: RulesReference | None, echo, *, earlier: dict | None = None,
                  audit_every: str = "turn", triage_runners: list | None = None, refresh_before_blocks: bool = True, judge_runner=None,
                  hook_library: str | Path | None = None, ask_about_triggers: bool = True, primers: list[str] | None = None,
-                 rewind_to: int | None = None, rewind_because: str = "", generic: str = "") -> None:
+                 rewind_to: int | None = None, rewind_because: str = "", generic: str = "", background_audits: bool = True) -> None:
+        self.background_audits = background_audits
         self.directory, self.table, self.names, self.decks, self.runners, self.auditor_runner, self.database, self.cycles, self.rules = \
             directory, table, names, decks, runners, auditor_runner, database, cycles, rules
         self.echo, self.earlier, self.audit_every, self.triage_runners, self.refresh_before_blocks, self.judge_runner, self.hook_library, self.ask_about_triggers = \
@@ -290,6 +293,8 @@ class _Pod:
         self.cleared = -1  # how long the journal was when the turn so far was last audited because a player stood to lose
         self.nudged: dict[tuple[int, int], int] = {}  # (table turn, seat): times it was asked despite its policy, in someone's big turn
         self.overridden: set[int] = set()             # seats about to be asked only because of that
+        self.pending: dict | None = None               # an audit being asked while the next turn is played
+        self.background = None                         # the thread that asks it, while the game runs
         self.greeted: set[int] = set()  # permanents whose controller has had its chance to see to them on someone else's turn
         self.windows: dict = {}  # (table turn, step) -> the seats that said they would act in that empty-stack window
         self.stamped: list = [None]  # what the battlefield looked like when power and toughness were last worked out
@@ -712,12 +717,19 @@ class _Pod:
         events, gone = self.table.events, self.table.undone(self.table.events)
         since = max((e["n"] + 1 for e in events if e["tool"] == "release" and e["n"] not in gone),
                     default=next((e["n"] for e in events if e["turn"] >= 1), None))  # no audit yet: from the first turn's first event
+        # A turn audited in the background was released before its verdict came. One whose verdict never came is owed too.
+        checks = [json.loads(line) for line in (self.directory.path / "audits.jsonl").read_text(encoding="utf-8").splitlines() if line] \
+            if (self.directory.path / "audits.jsonl").is_file() else []
+        done = {c["events"][0] for c in checks if "kind" not in c and c.get("events")}
+        unanswered = [c["events"][0] for c in checks if c.get("kind") == "deferred" and c["events"][0] not in done]
+        if unanswered and since is not None:
+            since = min(since, *unanswered)
         if since is None or not any(e["seat"] is not None and e["n"] not in gone for e in events[since:]):
             return None
         past = Table.replay(self.table.config, events[:since], card_lookup=self.table.card_lookup)
         return self.auditor.snapshot(past)
 
-    def audit(self, server: McpServer, snapshot: tuple, *, losing: list[tuple[int, str]] | None = None) -> None:
+    def audit(self, server: McpServer, snapshot: tuple, *, losing: list[tuple[int, str]] | None = None, defer: bool = False) -> None:
         """`losing` are the seats the driver will remove once this audit is over, which is why it was called. The first
         game played with that audit had two findings that a player "has lost the game and is still listed as alive", and a
         correction opened for each that nobody could make: the auditor was looking at what the driver was about to do."""
@@ -750,16 +762,72 @@ class _Pod:
         if all(needs_no_audit(e) for e in unit):
             return
         actions = sum(1 for e in unit if e["seat"] is not None and e["tool"] not in ("pass_priority", "say", "write_notes", "set_response_policy"))
-        self.echo(f"         auditing {actions} actions ...")
         note = ("The table is about to remove " + "; ".join(f"{self.names[seat]} ({reason})" for seat, reason in losing) + " from the game as a state-based "
                 "action. Nothing brings a player back, so the turn so far is checked first: say whether what led to it was played correctly. Do not "
                 "report that they are still in the game; that is what happens next.") if losing else ""
-        verdict, reply = self.auditor.audit(self.table, snapshot, note=note)
+        prompt, end, turn = self.auditor.prompt(self.table, snapshot, note=note), len(self.table.events), self.table.game.turn.number
+        if defer and self.can_defer():
+            # Between turns, and nothing arrived this turn that the next may need described first: the next turn starts at
+            # once, and the verdict is applied when it comes. An audit was a fifth of a game, every second of it waited for.
+            self.pending = {"future": self.background.submit(self.auditor.ask, prompt), "snapshot": snapshot, "unit": unit, "end": end, "turn": turn}
+            self.directory.append("audits.jsonl", {"kind": "deferred", "turn": turn, "events": [snapshot[2], end]})
+            self.echo(f"         auditing {actions} actions while play goes on ...")
+            return
+        self.echo(f"         auditing {actions} actions ...")
+        verdict, reply = self.auditor.ask(prompt)
+        self.apply_verdict(server, verdict, reply, snapshot=snapshot, unit=unit, end=end, turn=turn, losing=losing)
+
+    def can_defer(self) -> bool:
+        """Whether this turn's audit can run while the next one is played: every permanent that arrived this turn is one the
+        auditor has nothing to write down for, so no trigger of the next turn waits on its description."""
+        game = self.table.game
+        if self.audit_every != "turn" or self.background is None:
+            return False
+        for obj in (game.objects[i] for i in game.battlefield):
+            if obj.entered_turn != game.turn.number:
+                continue
+            if obj.face_down or (obj.token is not None and str(obj.token.get("text") or "").strip()):
+                return False
+            card = self.database.find(obj.name) if obj.token is None else None
+            if obj.token is None and (card is None or not _needs_nothing_written(card, self.known_hooks)):
+                return False
+        return True
+
+    def settle_audit(self, server: McpServer, *, wait: bool) -> bool:
+        """Apply a deferred audit's verdict if it has come, or with `wait` once it comes. Only where the table can stop: at
+        a checkpoint, where a player would have priority (the table is stopped there for it), or at the end of the game,
+        where nothing can be corrected. Returns whether it was applied."""
+        pending = self.pending
+        if pending is None or (not wait and not pending["future"].done()):
+            return False
+        control = self.table.game.control.kind
+        if control not in ("audit", "priority", "over"):
+            if not wait:
+                return False
+            try:
+                pending["future"].result()  # waited for, but applied only where it can be: the next checkpoint, or on resume
+            except Exception:  # noqa: BLE001 - the marker stays in audits.jsonl, so a resume still owes it
+                pass
+            return False
+        self.pending = None
+        verdict, reply = pending["future"].result()  # a failed audit is raised here, where a failed audit always was
+        stopped = control == "priority"
+        if stopped:
+            self.table.checkpoint()
+        self.apply_verdict(server, verdict, reply, snapshot=pending["snapshot"], unit=pending["unit"], end=pending["end"], turn=pending["turn"],
+                           late=True)
+        if stopped and self.table.awaiting_audit:
+            self.table.release()
+        return True
+
+    def apply_verdict(self, server: McpServer, verdict: dict, reply, *, snapshot: tuple, unit: list[dict], end: int, turn: int,
+                      losing: list[tuple[int, str]] | None = None, late: bool = False) -> None:
+        """What an audit found, put into effect: hooks, stamps, missed triggers, answered disputes and corrections."""
         if losing:  # whatever the note said: a finding that the player about to go has not gone yet is no finding
             leaving = {seat for seat, _ in losing}
             verdict["findings"] = [f for f in verdict.get("findings", []) if not (f.get("kind") == "sba" and f.get("seat") in leaving)]
             verdict["verdict"] = "findings" if any(f.get("kind") in SERIOUS for f in verdict["findings"]) else "ok"
-        record = {"turn": self.table.game.turn.number, "events": [snapshot[2], len(self.table.events)], **verdict, "seconds": round(reply.seconds, 1)}
+        record = {"turn": turn, "events": [snapshot[2], end], **verdict, "seconds": round(reply.seconds, 1), **({"late": True} if late else {})}
         self.report["audits"].append(record)
         self.directory.append("audits.jsonl", record)
         if verdict.get("hooks"):
@@ -822,6 +890,8 @@ class _Pod:
                 seat = seat if seat is not None else (actors[-1] if actors else None)
                 if seat is not None:
                     at_fault.setdefault(seat, []).append(f"{finding['summary']} Basis: {finding['basis']} What should happen: {finding['fix']}")
+        if self.table.game.control.kind != "audit":
+            return  # the game is over: nothing can be put right, and the findings stand in the record
         for answer in verdict.get("disputes") or []:
             raised = self.table.events[answer["event"]] if 0 <= answer.get("event", -1) < len(self.table.events) else None
             if raised is not None and raised["tool"] == "dispute":
@@ -1020,6 +1090,7 @@ class _Pod:
 
     def run(self) -> dict:
         started = time.monotonic()
+        self.background = ThreadPoolExecutor(max_workers=1) if self.audit_every == "turn" and self.background_audits else None
         with McpServer(self.tools_for) as server:
             try:
                 self.opening_hands(server)
@@ -1027,6 +1098,7 @@ class _Pod:
                 while True:
                     why = self.settle()
                     if why in ("over", "stuck"):
+                        self.settle_audit(server, wait=True)
                         if self.table.game.control.kind == "over":
                             self.last_audit(snapshot)
                         break
@@ -1039,12 +1111,15 @@ class _Pod:
                             # table's own bug dealt twice; the audit a turn later had the damage undone, and no tool could bring
                             # the player back. So the turn so far is audited before anybody goes, while it can still be put right.
                             self.table.checkpoint()
-                        self.audit(server, snapshot, losing=_must_lose(self.table) if why == "loss" else None)
+                        self.settle_audit(server, wait=True)  # the turn before is judged first, and put right where it must be
+                        self.audit(server, snapshot, losing=_must_lose(self.table) if why == "loss" else None, defer=why == "audit")
                         self.table.release()
                         snapshot = self.auditor.snapshot(self.table)
                         self.cleared = len(self.table.events)  # if the loss still stands with nothing new to read, it is applied
                         self.directory.write("state.json", self.table.game.to_dict())
                         continue
+                    if self.settle_audit(server, wait=False):
+                        continue  # a deferred verdict came and was put into effect; the table may be waiting on someone else now
                     seat, kind = self.table.expected()[0]
                     before = len(self.table.events)
                     self.wake(server, seat, kind)
@@ -1061,6 +1136,8 @@ class _Pod:
                 self.report["stopped"] = f"internal error: {error!r}"
                 self.directory.write("error.txt", traceback.format_exc())
                 self.echo(f"INTERNAL ERROR, the game is stopped and can be resumed: {error!r}")
+        if self.background is not None:
+            self.background.shutdown(wait=True)  # an audit still out is waited for; not applied, it stays owed (see `owed`)
         game = self.table.game
         self.directory.flush_log()
         self.report["standings"] = [{"seat": s.index, "name": s.name, "status": s.status, "life": s.life, "hand": len(s.hand),

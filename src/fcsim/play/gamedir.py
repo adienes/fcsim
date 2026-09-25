@@ -77,6 +77,8 @@ class GameDirectory:
         if _plain_pass(event) and (not passes or passes[-1]["turn"] == event["turn"]):
             self._passes = [*passes, event]
             return
+        if not event["public"] and not event["lints"]:
+            return  # the table's own silent bookkeeping (a checkpoint, a release) does not break a run of passes
         self.flush_log()
         if _plain_pass(event):
             self._passes = [event]
@@ -94,6 +96,8 @@ class GameDirectory:
             passes = self._passes
             if _plain_pass(event) and (not passes or passes[-1]["turn"] == event["turn"]):
                 self._passes = [*passes, event]
+                continue
+            if not event["public"] and not event["lints"]:
                 continue
             self.flush_log()
             if _plain_pass(event):

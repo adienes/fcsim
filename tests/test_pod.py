@@ -161,7 +161,7 @@ def test_a_pod_game_schedules_seats_audits_and_acts_on_findings(database, tmp_pa
     wrong = {"kind": "illegal", "seat": 0, "summary": "Talrand paid no life", "basis": "test", "fix": "set life to 39", "confidence": "high"}
     verdicts = [{"verdict": "findings", "findings": [trigger], "hooks": []}, {"verdict": "findings", "findings": [wrong], "hooks": []}] + [OK] * 60
     report = play_pod(decks(tmp_path), seats, FakeRunner(verdicts, budget), database, cycles=2, seed=4,
-                      out_root=tmp_path / "games", echo=lambda *_: None)
+                      out_root=tmp_path / "games", echo=lambda *_: None, background_audits=False)
     assert report["stopped"] is None and report["seats"] == ["Talrand", "Pir", "Thrasios"] and report["turns_played"] == 7
     assert report["wall_seconds"] >= 0 and "minutes on the clock" in (Path(report["directory"]) / "report.md").read_text()
     kinds = {(w["seat"], w["kind"]) for w in report["wakes"]}
@@ -482,7 +482,7 @@ def test_a_player_can_contest_a_finding_and_a_judge_rules(database, tmp_path, de
     auditor = FakeRunner([{"verdict": "findings", "findings": [wrong], "hooks": []}] + [OK] * 60, budget)
     judge = FakeRunner([{"decision": decision, "explanation": "Nothing in the record cost life.", "fix": "",
                          "ruling": "A land drop costs no life."}], budget)
-    report = play_pod(decks(tmp_path), seats, auditor, database, cycles=2, seed=4, out_root=tmp_path / "games", echo=lambda *_: None,
+    report = play_pod(decks(tmp_path), seats, auditor, database, cycles=2, seed=4, out_root=tmp_path / "games", echo=lambda *_: None, background_audits=False,
                       judge_runner=judge, rules=RulesReference(Path(__file__).resolve().parents[1] / "rules"))
     assert report["stopped"] is None and report["standings"][0]["life"] == life
     ruling = report["rulings"][0]
@@ -1432,3 +1432,44 @@ def test_a_pilots_session_that_fails_on_the_apis_side_is_tried_again_or_woken_ag
     assert len(failed) == 1 and failed[0]["forced"] is None                                     # not passed for: woken again
     assert failed[0]["events"][1] > failed[0]["events"][0]                                      # it had acted before the failure
     assert any(w["events"][0] >= failed[0]["events"][1] for w in report["wakes"])              # and the game went on
+
+
+def test_a_turns_audit_runs_while_the_next_is_played_and_its_verdict_is_applied_when_it_comes(database, tmp_path):
+    """An audit was a fifth of a game, every second of it waited for."""
+    budget = Budget(max_calls=300)
+    trigger = {"kind": "trigger", "seat": 2, "summary": "Thrasios's imaginary trigger", "basis": "test", "fix": "put it on the stack", "confidence": "high"}
+    seats = [ScriptedSeat(budget, fidgets=True), ScriptedSeat(budget, fidgets=True), ScriptedSeat(budget, fidgets=True)]
+    report = play_pod(decks(tmp_path), seats, FakeRunner([{"verdict": "findings", "findings": [trigger], "hooks": []}] + [OK] * 60, budget), database,
+                      cycles=2, seed=4, out_root=tmp_path / "games", echo=lambda *_: None)
+    directory = Path(report["directory"])
+    checks = [json.loads(line) for line in (directory / "audits.jsonl").read_text().splitlines()]
+    deferred = [c for c in checks if c.get("kind") == "deferred"]
+    late = [c for c in checks if c.get("late")]
+    assert report["stopped"] is None and report["journal"] == "replays to the same game"
+    assert deferred and {c["events"][0] for c in late} <= {c["events"][0] for c in deferred}     # each late verdict was a deferred audit
+    assert "A trigger is waiting for Thrasios: Thrasios's imaginary trigger" in (directory / "log.md").read_text()
+
+    # A turn in which a permanent arrived that the auditor has never described is audited before the next begins.
+    commanders = [ScriptedSeat(budget, cast_commander=True), ScriptedSeat(budget), ScriptedSeat(budget)]
+    report = play_pod(decks(tmp_path), commanders, FakeRunner([OK] * 80, Budget(max_calls=400)), database, cycles=4, seed=4,
+                      out_root=tmp_path / "games-2", echo=lambda *_: None)                 # four lands for its commander by its fourth turn
+    directory = Path(report["directory"])
+    checks = [json.loads(line) for line in (directory / "audits.jsonl").read_text().splitlines()]
+    cast = next(e for e in json.loads("[" + ",".join((directory / "events.jsonl").read_text().splitlines()) + "]")
+                if e["tool"] == "cast" and "Talrand, Sky Summoner" in " ".join(e["public"]))
+    covering = [c for c in checks if c.get("events") and c["events"][0] <= cast["n"] < c["events"][1]]
+    assert covering and all(c.get("kind") != "deferred" and not c.get("late") for c in covering)
+
+
+def test_a_background_audit_whose_verdict_never_came_is_still_owed_on_resume(database, tmp_path):
+    budget = Budget(max_calls=300)
+    report = play_pod(decks(tmp_path), [ScriptedSeat(budget, fidgets=True) for _ in range(3)], FakeRunner([OK] * 40, budget), database, cycles=1, seed=4,
+                      out_root=tmp_path / "games", echo=lambda *_: None, background_audits=False)
+    directory = Path(report["directory"])
+    events = [json.loads(line) for line in (directory / "events.jsonl").read_text().splitlines()]
+    acted = next(e["n"] for e in events if e["tool"] == "act")                         # something in the first turns to audit
+    with (directory / "audits.jsonl").open("a", encoding="utf-8") as out:
+        out.write(json.dumps({"kind": "deferred", "turn": events[acted]["turn"], "events": [acted, acted + 3]}) + "\n")
+    auditor = FakeRunner([OK] * 40, budget)
+    play_pod([], [ScriptedSeat(budget, fidgets=True) for _ in range(3)], auditor, database, cycles=1, resume=directory, echo=lambda *_: None)
+    assert f"event {acted} " in auditor.asked[0]["prompt"]                            # the resume audits from where the verdict was owed
