@@ -8,6 +8,7 @@ outcome, so replaying the log rebuilds the same game.
 from __future__ import annotations
 
 import copy
+import re
 from collections.abc import Callable
 
 from . import mana, mechanics, mutations, ops, scripts, triggers, turn
@@ -29,6 +30,7 @@ _ALLOWED = {
     "declare_attackers": ("turn_action",), "declare_blockers": ("turn_action",), "combat_damage": ("turn_action",),
     "contest": ("correction",),
 }
+_UNSCRIPTABLE = re.compile(r"\b(target|targets|enchanted|equipped|chosen|choose|chooses)\b", re.I)
 _DISPUTES = 3  # contests and disputes a seat may lose before it may raise no more
 _READ_ONLY = frozenset({"get_view", "get_log", "get_notes"})
 # What a seat may still do once its wake has ended: nothing here touches the game.
@@ -468,6 +470,12 @@ class Table:
             # has to be woken to resolve it. Anything else it needs is resolved by hand, as ever.
             if args.get("targets"):
                 raise TableError("bad_script", "A trigger with targets is resolved by hand: leave `script` out.")
+            named = _UNSCRIPTABLE.search(text.split(" (because ")[0])
+            if named and not self._replaying:
+                # The vocabulary has no word for a target, the enchanted or equipped one, or a choice, and a script for such an
+                # ability can only guess: three of one game's five findings were such guesses resolved by the table.
+                raise TableError("bad_script", f"This ability speaks of \"{named[0]}\", which a script cannot name. Leave `script` out and "
+                                                "resolve the trigger by hand, choosing its targets.")
             if (wrong := scripts.problem(script)) is not None:
                 raise TableError("bad_script", f"That is not a script the table can run ({wrong}). Leave `script` out and resolve the trigger by hand.")
         item = StackItem(id=game.new_id(), kind="triggered", controller=seat, source=source.id if source else None,

@@ -221,9 +221,15 @@ def _queue_step_triggers(game: Game, step: str) -> None:
     if game.mechanics >= 1 and step == "main1" and rad > 0 and active.status == "alive":
         # Rule 728.1: an ability with no source, so no permanent's hook can carry it. In the fourth pod a
         # player remembered it late and put it on the stack by hand.
-        game.pending_triggers.append({"id": game.new_id(), "seat": active.index, "source": None,
-                                      "text": f"Rad counters (rule 728.1): mill {rad} card(s), one for each of your rad counters; for each nonland "
-                                              "card milled this way, lose 1 life and remove one rad counter."})
+        text = (f"Rad counters (rule 728.1): mill {rad} card(s), one for each of your rad counters; for each nonland card milled this way, "
+                "lose 1 life and remove one rad counter.")
+        if game.mechanics >= 9 and all(game.objects[i].type_line for i in active.library):
+            # Nobody chooses anything in it, and once The Wise Mothman is out it comes up on nearly every turn: in the 72nd game 19 of
+            # 30 wakes for triggers had rad counters in them, 18 minutes of the pilots' 50. The table knows which cards are lands.
+            _stack_script(game, {"controller": active.index, "source": None, "text": text, "script": [{"op": "rad"}]},
+                          "their first main phase began")
+        else:
+            game.pending_triggers.append({"id": game.new_id(), "seat": active.index, "source": None, "text": text})
     due = [e for e in game.ledger if e.get("kind") == "delayed" and e.get("step") == step and e.get("whose", "any") in ("any", game.turn.active)]
     for entry in due:  # once: a delayed trigger is used up by the step it waited for
         game.ledger.remove(entry)

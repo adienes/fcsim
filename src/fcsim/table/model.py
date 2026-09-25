@@ -23,7 +23,8 @@ SEAT_ZONES = ("library", "hand", "graveyard", "exile", "command")
 # In a game with an auditor, a player who has lost by a state-based action is removed by the driver, not by another player.
 # 7: mana "kept" stays only while a permanent of its owner's speaks of unspent mana, and goes with the first step that ends after none does.
 # 8: a commander goes to the command zone however it left play (rule 903.9), unless its owner says it stays.
-MECHANICS = 8
+# 9: the table resolves rad counters itself when it knows every card in that library, lands from the rest.
+MECHANICS = 9
 
 
 class TableError(ValueError):

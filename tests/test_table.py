@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import copy
 import json
 import random
 
 import pytest
 
-from fcsim.table import ScriptedRunner, Table, mutations
+from fcsim.table import ScriptedRunner, Table, mutations, ops
 from fcsim.table.model import MECHANICS
 from fcsim.table.script import ScriptError
 
@@ -1571,3 +1572,76 @@ def test_a_spell_that_keeps_unspent_mana_until_end_of_turn_says_so_for_what_is_a
     assert table.view(0)["seats"][0]["mana_pool"] == "{R}{R}"
     assert table.act(0, "act", {"because": "x", "mutations": [{"op": "mana", "keep": "for ever"}]})["error"]["code"] == "bad_mana"
     assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()
+
+
+def test_a_pilots_script_is_refused_for_an_ability_that_speaks_of_what_a_script_cannot_name():
+    """Three of one game's five findings were pilots' scripts for abilities with targets or an enchanted player."""
+    table, runner = started()
+    pass_until(table, runner, "main1")
+    table.queue_trigger(0, "Whenever one or more nonland cards are milled, put a +1/+1 counter on each of up to X target creatures.")
+    runner.step(0, "pass_priority")
+    pending = table.view(0)["waiting_triggers"][0]["handle"]
+    refused = table.act(0, "add_trigger", {"pending": pending, "script": [{"op": "counters", "on": "self", "kind": "+1/+1", "delta": 1}]})
+    assert refused["error"]["code"] == "bad_script" and '"target"' in refused["error"]["message"]
+    runner.step(0, "add_trigger", {"pending": pending})                                  # by hand, as ever
+    table.queue_trigger(0, "At the beginning of each end step, enchanted player mills X cards.")
+    for seat in (0, 1, 2):
+        if table.expected()[0] == (seat, "priority"):
+            runner.step(seat, "pass_priority")
+    waiting = [t for t in table.view(0)["waiting_triggers"] if "enchanted player" in t["text"]]
+    assert waiting, table.view(0)["waiting_triggers"]
+    assert table.act(0, "add_trigger", {"pending": waiting[0]["handle"], "script": [{"op": "mill", "who": "each_player", "count": 1}]})["error"]["code"] == "bad_script"
+    table.queue_trigger(0, "When this enters, you gain 1 life.")
+    assert Table.replay(table.config, table.events).game.to_dict() == table.game.to_dict()
+
+
+def test_a_mutation_key_the_table_would_ignore_is_refused_and_nothing_is_applied():
+    """Zuko wrote firebending mana with annotate's `expires`; the pool took it for this step's, and five red emptied before blocks."""
+    table, runner = started()
+    pass_until(table, runner, "main1")
+    refused = table.act(0, "act", {"because": "firebending 5", "mutations": [{"op": "life", "seat": 1, "delta": -1},
+                                                                             {"mana": {"add": "RRRRR", "expires": "end_combat"}}]})
+    assert refused["error"]["code"] == "unknown_field" and "`expires`" in refused["error"]["message"] and "until" in refused["error"]["message"]
+    assert "mana_pool" not in table.view(0)["seats"][0] and table.view(0)["seats"][1]["life"] == 40   # the whole batch, not just the bad op
+    runner.step(0, "act", {"because": "firebending 5", "mutations": [{"mana": {"add": "RRRRR", "until": "end_of_combat"}, "because": "Zuko"}]})
+    assert table.view(0)["seats"][0]["mana_pool"] == "{R}{R}{R}{R}{R}"
+    told = ops.apply_batch(copy.deepcopy(table.game), table.dice, 0, [{"op": "life", "seat": 1, "delta": -1, "expires": "eot"}], replaying=True)
+    assert told.public                                                                                   # a journal that holds one still replays
+
+
+def test_the_table_resolves_rad_counters_itself_when_it_knows_which_cards_are_lands():
+    """In the 72nd game 19 of 30 wakes for triggers had rad counters in them, a choice-free mill and count."""
+    lookup = lambda name: {"type_line": "Basic Land — Island"} if name == "Island" else {"type_line": "Sorcery"}
+    table = Table(seats(), seed=5, first=0, card_lookup=lookup)
+    runner = ScriptedRunner(table)
+    for seat in range(3):
+        runner.step(seat, "keep")
+    pass_until(table, runner, "main1")
+    runner.step(0, "act", {"because": "test", "mutations": [{"op": "counters", "seat": 1, "kind": "rad", "delta": 3}]})
+    pass_until(table, runner, "end", seat=0)
+    for _ in range(60):  # on to Bob's first main phase: nobody is asked about the trigger, which goes on the stack by itself
+        seat, kind = table.expected()[0]
+        assert kind != "triggers"
+        if table.game.turn.active == 1 and table.game.turn.step == "main1" and not table.game.stack:
+            break
+        runner.step(seat, {"priority": "pass_priority", "discard": "finish_step"}.get(kind, kind))
+    said = next(a for e in table.events for a in e["public"] if "resolves by script: Bob mills" in a)
+    milled = said.split("Bob mills ")[1].split(".")[0].split(", ")
+    nonland = sum(name != "Island" for name in milled)
+    bob = table.game.seats[1]
+    assert len(milled) == 3 and 0 < nonland < 3 and sorted(table.game.objects[i].name for i in bob.graveyard) == sorted(milled)
+    assert bob.life == 40 - nonland and bob.counters.get("rad", 0) == 3 - nonland
+    assert Table.replay(table.config, table.events, card_lookup=lookup).game.to_dict() == table.game.to_dict()
+    old = Table(seats(), seed=5, first=0, card_lookup=lookup, mechanics=8)
+    runner = ScriptedRunner(old)
+    for seat in range(3):
+        runner.step(seat, "keep")
+    pass_until(old, runner, "main1")
+    runner.step(0, "act", {"because": "test", "mutations": [{"op": "counters", "seat": 1, "kind": "rad", "delta": 3}]})
+    pass_until(old, runner, "end", seat=0)
+    for _ in range(60):
+        seat, kind = old.expected()[0]
+        if kind == "triggers":
+            break
+        runner.step(seat, {"priority": "pass_priority", "discard": "finish_step"}.get(kind, kind))
+    assert old.expected() == [(1, "triggers")]                                                   # a game begun before still asks its player

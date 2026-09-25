@@ -313,13 +313,54 @@ _OPS = frozenset({"annotate", "attach", "clear_annotations", "commander_damage",
                   "skip_step", "tap", "untap"})
 
 
+# What each mutation reads, besides `op` and `because`. A key outside it was being dropped without a word: in the 72nd game Zuko
+# wrote firebending mana as {"mana": {"add": "RRRRR", "expires": "end_combat"}} (annotate's key), the pool took it for this step's
+# mana, and five red emptied before blockers were declared.
+_SELECTED = ("obj", "objs", "from")
+_FIELDS = {
+    "move": (*_SELECTED, "to", "position", "controller", "enters", "face_down", "reveal", "known_by", "stay"),
+    "tap": _SELECTED, "untap": _SELECTED, "clear_annotations": _SELECTED,
+    "counters": (*_SELECTED, "seat", "kind", "delta", "set"),
+    "life": ("seat", "delta", "set"),
+    "create_token": ("token", "count", "controller", "enters", "copy_of"),
+    "attach": (*_SELECTED, "host"),
+    "mana": ("add", "remove", "until", "keep", "colors", "seat"),
+    "delay": ("step", "text", "whose"),
+    "annotate": (*_SELECTED, "text", "expires"),
+    "set_controller": (*_SELECTED, "controller"),
+    "face": (*_SELECTED, "face_down", "transformed"),
+    "phase": (*_SELECTED, "out"),
+    "damage": (*_SELECTED, "amount"),
+    "draw": ("seat", "count"), "mill": ("seat", "count"), "discard_random": ("seat", "count"), "shuffle": ("seat",),
+    "look": (*_SELECTED, "seat", "viewers"), "reveal": (*_SELECTED, "seat", "viewers"),
+    "roll": ("sides", "count"), "flip_coin": ("count",),
+    "designate": ("key", "seat"),
+    "commander_damage": ("seat", "commander", "amount", "set"),
+    "eliminate": ("seat", "reason"),
+    "extra_turn": ("seat",), "extra_combat": (), "end_turn": (), "skip_step": ("step",),
+    "remove_from_stack": ("item",),
+    "request_choice": ("seats", "prompt", "options"),
+}
+
+
+def _unread(op: dict) -> None:
+    fields = _FIELDS.get(op.get("op"))
+    stray = [key for key in op if fields is not None and key not in fields and key not in ("op", "because")]
+    if stray:
+        raise TableError("unknown_field", f"`{op['op']}` has no {', '.join(f'`{k}`' for k in stray)}, and the table would have "
+                                          f"ignored {'it' if len(stray) == 1 else 'them'}. It takes: "
+                                          + (", ".join(fields) or "nothing") + ", and `because`. Nothing was applied.")
+
+
 def _shaped(op: dict) -> dict:
     """Accept the mutation's name as a key, which agents write again and again, where it has only one
     possible meaning: {"tap": {...}}, {"mill": {}, "seat": 0, "count": 1}, {"move": true, "from": ..., "to": ...}.
     The fourth pod lost 22 calls to it. A key that is also a field of the mutation (a "counters" map
     under `enters`, say) is not at the top level, so nothing is mistaken."""
     if "op" in op:
-        return op
+        # {"op": "move", "move": {"obj": ...}, ...}: said twice, and meant once. What is at the top level stands.
+        inner = op.get(op["op"])
+        return {**inner, **{k: v for k, v in op.items() if k != op["op"]}} if isinstance(inner, dict) else op
     named = [key for key in op if key in _OPS]
     if len(named) != 1:
         return op
@@ -334,6 +375,8 @@ def apply_batch(game: Game, dice: Dice, actor: int, batch: list[dict], *, by_tab
         raise TableError("bad_batch", "Give a non-empty list of mutations, each like {\"op\": \"tap\", \"objs\": [...]}.")
     told = Told()
     batch = [_shaped(op) for op in batch]
+    for op in batch if not (by_table or replaying) else ():
+        _unread(op)
     for index, op in enumerate(batch):
         if op.get("op") == "request_choice" and index != len(batch) - 1:
             raise TableError("bad_batch", "`request_choice` must be the last mutation in its batch: nothing "

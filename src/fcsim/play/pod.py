@@ -593,7 +593,8 @@ class _Pod:
         listed = "\n".join(f"- [{t['handle']}] {t['text']}" for t in mine)
         question = (f"{self.when()} The table is waiting for your triggered abilities:\n{listed}\nFor each, answer with its handle in `pending` and "
                     "one `action`. \"decline\": it does not really apply, or it is a \"may\" you do not want (say why in `because`). "
-                    "\"script\": it applies, it has no target and leaves nothing to choose, and these operations say ALL it does; give them in "
+                    "\"script\": it applies, it has no target, names no enchanted or equipped permanent or player, leaves nothing to choose, and these "
+                    "operations say ALL it does (the table refuses a script for an ability whose text says otherwise); give them in "
                     "`script` and the table puts it on the stack and resolves it for you: counters {on, kind, delta}; life {who, delta}; "
                     "draw {who, count}; mill {who, count}; create_token {token: {name, types, power, toughness, text}, count}; move {what, "
                     "to}; tap {what}; untap {what}; delay {step, text, script}. `what` is \"self\" (the permanent the ability is on); `on` is "

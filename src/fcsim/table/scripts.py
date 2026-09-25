@@ -14,6 +14,8 @@ its subject gone does nothing, which is what the rules say of most such effects.
 
 from __future__ import annotations
 
+import re
+
 from .model import Game, TableError
 
 OBJECTS = ("self", "it", "each_creature_you_control", "each_other_creature_you_control")
@@ -131,5 +133,21 @@ def run(game: Game, script: list[dict], controller: int, bound: dict, apply) -> 
             whose = controller if step.get("whose") == "mine" else "any"
             game.ledger.append({"kind": "delayed", "step": step["step"], "whose": whose, "controller": controller, "text": step["text"],
                                 "source": None, "script": step["script"], "bound": dict(bound)})
+        elif op == "rad":  # rule 728.1, which only the table puts on the stack (`problem` refuses it from anyone else)
+            player = game.seats[controller]
+            kinds = [k for k, n in player.counters.items() if k.lower().startswith("rad") and n > 0]
+            if player.status != "alive" or not kinds:
+                continue
+            seen = len(game.facts)
+            apply({"op": "mill", "seat": controller, "count": sum(player.counters[k] for k in kinds)})
+            nonland = sum(1 for f in game.facts[seen:] if f.get("event") == "moved" and f.get("from") == "library"
+                          and not re.search(r"\bland\b", f.get("type_line") or "", re.I))
+            if nonland:
+                apply({"op": "life", "seat": controller, "delta": -nonland})
+            for kind in kinds:
+                taken = min(nonland, player.counters[kind])
+                if taken:
+                    apply({"op": "counters", "seat": controller, "kind": kind, "delta": -taken})
+                nonland -= taken
         else:  # pragma: no cover - `problem` refuses anything else before a script is ever stored
             raise TableError("bad_script", f"Unknown scripted operation {op!r}.")
